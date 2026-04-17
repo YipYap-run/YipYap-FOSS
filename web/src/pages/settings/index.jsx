@@ -6,6 +6,8 @@ import { route } from 'preact-router';
 import { MFATab } from './mfa.jsx';
 import { AccountTab } from './account.jsx';
 import { IntegrationsTab } from './integrations';
+import { MonitorStatesTab } from './monitor-states.jsx';
+import { ImportTab } from './import.jsx';
 
 const SETTING_TABS = [
   { key: 'account', label: 'Account' },
@@ -13,6 +15,7 @@ const SETTING_TABS = [
   { key: 'escalation', label: 'Escalation' },
   { key: 'integrations', label: 'Integrations' },
   { key: 'teams', label: 'Teams' },
+  { key: 'monitor-states', label: 'Monitor States' },
   { key: 'maintenance', label: 'Maintenance' },
   { key: 'status-page', label: 'Status Pages' },
   { key: 'api-keys', label: 'API Keys' },
@@ -20,6 +23,7 @@ const SETTING_TABS = [
   { key: 'members', label: 'Members' },
   { key: 'billing', label: 'Billing' },
   { key: 'security', label: 'Security' },
+  { key: 'import', label: 'Import' },
   { key: 'data', label: 'Data' },
   { key: 'org', label: 'Organization' },
 ];
@@ -48,6 +52,7 @@ export function SettingsPage({ tab: initialTab }) {
         {tab === 'escalation' && <EscalationTab />}
         {tab === 'integrations' && <IntegrationsTab />}
         {tab === 'teams' && <TeamsTab />}
+        {tab === 'monitor-states' && <MonitorStatesTab />}
         {tab === 'maintenance' && <MaintenanceTab />}
         {tab === 'status-page' && <StatusPageTab />}
         {tab === 'api-keys' && <APIKeysTab />}
@@ -55,6 +60,7 @@ export function SettingsPage({ tab: initialTab }) {
         {tab === 'members' && <MembersTab />}
         {tab === 'billing' && <BillingTab />}
         {tab === 'security' && <MFATab />}
+        {tab === 'import' && <ImportTab />}
         {tab === 'data' && <DataTab />}
         {tab === 'org' && <OrgTab />}
       </div>
@@ -340,18 +346,28 @@ function ChannelsTab() {
             </div>
           );
         })}
-        {channels.length === 0 && <p class="text-muted">No channels configured</p>}
+        {channels.length === 0 && (
+          <div style="text-align: center; padding: 2rem; color: var(--color-text-muted);">
+            <p style="margin-bottom: 1rem;">No notification channels configured yet.</p>
+            <p style="margin-bottom: 1rem; font-size: 0.875rem;">
+              Set up a channel to start receiving alerts when your monitors detect issues.
+            </p>
+            <button class="btn btn-primary" onClick={openCreate}>
+              Create Your First Channel
+            </button>
+          </div>
+        )}
       </div>
 
       <Modal open={showModal} onClose={() => { setShowModal(false); resetForm(); }} title={editId ? 'Edit Channel' : 'Add Channel'}>
         <form onSubmit={e => { e.preventDefault(); save(); }}>
           <div class={'form-group' + (errors.name ? ' has-error' : '')}>
-            <label>Name</label>
+            <label class="required">Name</label>
             <input type="text" value={name} onInput={e => setName(e.target.value)} placeholder="e.g. Ops Slack" />
             {errors.name && <div class="field-error">{errors.name}</div>}
           </div>
           <div class="form-group">
-            <label>Type</label>
+            <label class="required">Type</label>
             <select value={type} onChange={e => handleTypeChange(e.target.value)}>
               {Object.entries(CHANNEL_TYPES)
                 .filter(([k]) => appMeta.value?.edition !== 'foss' || !['twilio_sms', 'twilio_voice'].includes(k))
@@ -574,18 +590,18 @@ function EscalationTab() {
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Policy' : 'Add Policy'}>
         <form onSubmit={e => { e.preventDefault(); save(); }}>
           <div class="form-group">
-            <label>Name</label>
+            <label class="required">Name</label>
             <input type="text" value={form.name} onInput={e => setForm({ ...form, name: e.target.value })} required />
           </div>
           <div class="form-group">
-            <label>Description</label>
+            <label>Description <span class="form-optional">(optional)</span></label>
             <textarea value={form.description} onInput={e => setForm({ ...form, description: e.target.value })} />
           </div>
           <div class="form-group form-check">
             <label>
               <input type="checkbox" checked={form.loop}
                 onChange={e => setForm({ ...form, loop: e.target.checked })} />
-              Loop back to step 1 after last step
+              After the last step, restart from step 1
             </label>
           </div>
           {form.loop && (
@@ -1039,21 +1055,27 @@ function MonitorConfig({ monitor, orgMonitors, onUpdate, onRemove }) {
       {monitor.show_uptime_bar && (
         <div class="form-group">
           <label>Uptime Periods</label>
-          <div style="display: flex; gap: 12px;">
-            {['24h','7d','30d','90d'].map(p => (
-              <label key={p}>
-                <input type="checkbox"
-                  checked={(monitor.uptime_periods || '').includes(p)}
-                  onChange={e => {
-                    let periods = (monitor.uptime_periods || '').split(',').filter(Boolean);
-                    if (e.target.checked) periods.push(p);
-                    else periods = periods.filter(x => x !== p);
-                    onUpdate({ uptime_periods: periods.join(',') });
-                  }} />
-                {p}
-              </label>
-            ))}
-          </div>
+          {(() => {
+            const plan = currentOrg.value?.plan || 'free';
+            const allPeriods = ['24h', '7d', '30d', '90d'];
+            const allowedPeriods = plan === 'free' ? ['24h'] : allPeriods;
+            return (
+              <select multiple
+                value={(monitor.uptime_periods || '').split(',').filter(Boolean)}
+                style="min-height: 80px;"
+                onChange={e => {
+                  const selected = Array.from(e.target.selectedOptions, o => o.value);
+                  onUpdate({ uptime_periods: selected.join(',') });
+                }}>
+                {allowedPeriods.map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            );
+          })()}
+          {(currentOrg.value?.plan || 'free') === 'free' && (
+            <p class="form-help">Free plan supports 24h only. <a href="/settings/billing">Upgrade</a> for more periods.</p>
+          )}
         </div>
       )}
       <button class="btn btn-xs btn-danger" onClick={onRemove}>Remove Monitor</button>
@@ -1145,6 +1167,12 @@ function StatusPageTab() {
   }
 
   async function saveLayout() {
+    // Validate that at least one monitor exists in any group (or ungrouped)
+    const hasMonitors = monitors.some(m => m.monitor_id);
+    if (!hasMonitors) {
+      toast('Add at least one monitor to a group before saving.', 'error');
+      return;
+    }
     try {
       await put(`/status-pages/${layoutPageId}/layout`, { groups, monitors });
       toast('Layout saved');
@@ -2160,6 +2188,14 @@ function OrgTab() {
   const org = currentOrg.value;
   const [form, setForm] = useState({ name: org?.name || '', slug: org?.slug || '', oncall_display: org?.oncall_display || 'email' });
   const [saving, setSaving] = useState(false);
+  const [orgSettings, setOrgSettings] = useState({});
+  const [settingsLoading, setSettingsLoading] = useState(true);
+
+  useEffect(() => {
+    get('/org/settings').then(data => {
+      setOrgSettings(data || {});
+    }).catch(() => {}).finally(() => setSettingsLoading(false));
+  }, []);
 
   async function save(e) {
     e.preventDefault();
@@ -2169,6 +2205,15 @@ function OrgTab() {
       currentOrg.value = { ...currentOrg.value, ...form };
     } catch (_) {}
     setSaving(false);
+  }
+
+  async function toggleSetting(key) {
+    const current = orgSettings[key] === 'true';
+    const newVal = current ? 'false' : 'true';
+    try {
+      const updated = await put('/org/settings', { ...orgSettings, [key]: newVal });
+      setOrgSettings(updated || { ...orgSettings, [key]: newVal });
+    } catch (_) {}
   }
 
   return (
@@ -2195,6 +2240,29 @@ function OrgTab() {
             {saving ? 'Saving...' : 'Save'}
           </button>
         </form>
+      </Card>
+
+      <h3 style="margin-top: 24px">Alert & Monitor Settings</h3>
+      <Card>
+        {settingsLoading ? (
+          <p class="text-muted">Loading settings...</p>
+        ) : (
+          <>
+            <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0">
+                <input type="checkbox" checked={orgSettings.mute_new_monitors === 'true'} onChange={() => toggleSetting('mute_new_monitors')} />
+                Auto-mute new monitors
+              </label>
+              <span class="text-muted" style="font-size: 0.8rem">New monitors start muted. Unmute them when ready to receive alerts.</span>
+            </div>
+            <div class="form-group" style="display: flex; align-items: center; gap: 12px">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0">
+                <input type="checkbox" checked={orgSettings.incident_auto_resolve === 'true'} onChange={() => toggleSetting('incident_auto_resolve')} />
+                Auto-resolve incidents when all linked alerts recover
+              </label>
+            </div>
+          </>
+        )}
       </Card>
     </div>
   );

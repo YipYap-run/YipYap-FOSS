@@ -112,6 +112,14 @@ func (h *MonitorHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Batch-fetch labels for all monitors.
+	for _, m := range monitors {
+		labels, err := h.store.Monitors().GetLabels(r.Context(), m.ID)
+		if err == nil && len(labels) > 0 {
+			m.Labels = labels
+		}
+	}
+
 	result := make([]monitorWithStatus, len(monitors))
 	for i, m := range monitors {
 		result[i] = monitorWithStatus{Monitor: m, Status: "unknown", Endpoint: monitorEndpoint(m)}
@@ -157,6 +165,12 @@ func (h *MonitorHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if m.OrgID != claims.OrgID {
 		errorResponse(w, http.StatusNotFound, "monitor not found")
 		return
+	}
+
+	// Enrich with labels.
+	labels, err := h.store.Monitors().GetLabels(r.Context(), m.ID)
+	if err == nil && len(labels) > 0 {
+		m.Labels = labels
 	}
 
 	resp := monitorDetailResponse{
@@ -235,9 +249,19 @@ func (h *MonitorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		m.HeartbeatToken = hex.EncodeToString(b)
 	}
 
+	// Check if org has mute_new_monitors enabled.
+	if sp, ok := h.store.(store.OrgSettingsProvider); ok {
+		if val, err := sp.OrgSettings().Get(r.Context(), claims.OrgID, "mute_new_monitors"); err == nil && val == "true" {
+			m.Muted = true
+		}
+	}
+
 	if err := h.store.Monitors().Create(r.Context(), &m); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to create monitor")
 		return
+	}
+	if len(m.Labels) > 0 {
+		_ = h.store.Monitors().SetLabels(r.Context(), m.ID, m.Labels)
 	}
 	h.notifyChange(MonitorCreated, m.ID)
 	jsonResponse(w, http.StatusCreated, &m)
@@ -299,14 +323,23 @@ func (h *MonitorHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.IntegrationKey != "" {
 		m.IntegrationKey = req.IntegrationKey
 	}
+	// group_id is always set (empty string clears it).
+	m.GroupID = req.GroupID
 	if len(req.Regions) > 0 {
 		m.Regions = req.Regions
 	}
+	// Description is always set (empty string clears it).
+	m.Description = req.Description
+	m.AutoResolve = req.AutoResolve
 	m.UpdatedAt = time.Now().UTC().Truncate(time.Second)
 
 	if err := h.store.Monitors().Update(r.Context(), m); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to update monitor")
 		return
+	}
+	if req.Labels != nil {
+		_ = h.store.Monitors().SetLabels(r.Context(), m.ID, req.Labels)
+		m.Labels = req.Labels
 	}
 	h.notifyChange(MonitorUpdated, m.ID)
 	jsonResponse(w, http.StatusOK, m)
@@ -364,6 +397,44 @@ func (h *MonitorHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	m.UpdatedAt = time.Now().UTC().Truncate(time.Second)
 	if err := h.store.Monitors().Update(r.Context(), m); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to resume monitor")
+		return
+	}
+	h.notifyChange(MonitorUpdated, m.ID)
+	jsonResponse(w, http.StatusOK, m)
+}
+
+func (h *MonitorHandler) Mute(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	claims := middleware.GetClaims(r.Context())
+
+	m, err := h.store.Monitors().GetByID(r.Context(), id)
+	if err != nil || m.OrgID != claims.OrgID {
+		errorResponse(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	m.Muted = true
+	m.UpdatedAt = time.Now().UTC().Truncate(time.Second)
+	if err := h.store.Monitors().Update(r.Context(), m); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "failed to mute monitor")
+		return
+	}
+	h.notifyChange(MonitorUpdated, m.ID)
+	jsonResponse(w, http.StatusOK, m)
+}
+
+func (h *MonitorHandler) Unmute(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	claims := middleware.GetClaims(r.Context())
+
+	m, err := h.store.Monitors().GetByID(r.Context(), id)
+	if err != nil || m.OrgID != claims.OrgID {
+		errorResponse(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	m.Muted = false
+	m.UpdatedAt = time.Now().UTC().Truncate(time.Second)
+	if err := h.store.Monitors().Update(r.Context(), m); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "failed to unmute monitor")
 		return
 	}
 	h.notifyChange(MonitorUpdated, m.ID)

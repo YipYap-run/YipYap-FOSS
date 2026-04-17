@@ -26,20 +26,23 @@ func (s *monitorStore) Create(ctx context.Context, m *domain.Monitor) error {
 	if m.IntegrationKey != "" {
 		integrationKey = sql.NullString{String: m.IntegrationKey, Valid: true}
 	}
-	var runbookURL, serviceID sql.NullString
+	var runbookURL, serviceID, groupID sql.NullString
 	if m.RunbookURL != "" {
 		runbookURL = sql.NullString{String: m.RunbookURL, Valid: true}
 	}
 	if m.ServiceID != "" {
 		serviceID = sql.NullString{String: m.ServiceID, Valid: true}
 	}
+	if m.GroupID != "" {
+		groupID = sql.NullString{String: m.GroupID, Valid: true}
+	}
 	_, err := s.q.ExecContext(ctx,
-		`INSERT INTO monitors (id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, enabled, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO monitors (id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, group_id, description, auto_resolve, muted, enabled, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.OrgID, m.Name, string(m.Type),
 		string(m.Config), m.IntervalSeconds, m.TimeoutSeconds,
 		m.LatencyWarningMS, m.LatencyCriticalMS, downSev, degSev,
-		string(regions), m.EscalationPolicyID, m.HeartbeatToken, integrationKey, runbookURL, serviceID, boolToInt(m.Enabled),
+		string(regions), m.EscalationPolicyID, m.HeartbeatToken, integrationKey, runbookURL, serviceID, groupID, m.Description, boolToInt(m.AutoResolve), boolToInt(m.Muted), boolToInt(m.Enabled),
 		m.CreatedAt.UTC().Format(timeFormat),
 		m.UpdatedAt.UTC().Format(timeFormat),
 	)
@@ -48,23 +51,23 @@ func (s *monitorStore) Create(ctx context.Context, m *domain.Monitor) error {
 
 func (s *monitorStore) GetByID(ctx context.Context, id string) (*domain.Monitor, error) {
 	return s.scanMonitor(ctx,
-		`SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, enabled, created_at, updated_at
+		`SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, group_id, description, auto_resolve, muted, enabled, created_at, updated_at
 		 FROM monitors WHERE id = ?`, id)
 }
 
 func (s *monitorStore) GetByIntegrationKey(ctx context.Context, key string) (*domain.Monitor, error) {
 	return s.scanMonitor(ctx,
-		`SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, enabled, created_at, updated_at
+		`SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, group_id, description, auto_resolve, muted, enabled, created_at, updated_at
 		 FROM monitors WHERE integration_key = ?`, key)
 }
 
 func (s *monitorStore) scanMonitor(ctx context.Context, query string, args ...any) (*domain.Monitor, error) {
 	var m domain.Monitor
 	var monType, config, regions, createdAt, updatedAt, downSev, degSev string
-	var enabled int
-	var heartbeatToken, integrationKey, runbookURL, serviceID sql.NullString
+	var enabled, autoResolve, muted int
+	var heartbeatToken, integrationKey, runbookURL, serviceID, groupID sql.NullString
 	err := s.q.QueryRowContext(ctx, query, args...).
-		Scan(&m.ID, &m.OrgID, &m.Name, &monType, &config, &m.IntervalSeconds, &m.TimeoutSeconds, &m.LatencyWarningMS, &m.LatencyCriticalMS, &downSev, &degSev, &regions, &m.EscalationPolicyID, &heartbeatToken, &integrationKey, &runbookURL, &serviceID, &enabled, &createdAt, &updatedAt)
+		Scan(&m.ID, &m.OrgID, &m.Name, &monType, &config, &m.IntervalSeconds, &m.TimeoutSeconds, &m.LatencyWarningMS, &m.LatencyCriticalMS, &downSev, &degSev, &regions, &m.EscalationPolicyID, &heartbeatToken, &integrationKey, &runbookURL, &serviceID, &groupID, &m.Description, &autoResolve, &muted, &enabled, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("monitor not found")
@@ -80,6 +83,9 @@ func (s *monitorStore) scanMonitor(ctx context.Context, query string, args ...an
 	m.IntegrationKey = integrationKey.String
 	m.RunbookURL = runbookURL.String
 	m.ServiceID = serviceID.String
+	m.GroupID = groupID.String
+	m.AutoResolve = autoResolve != 0
+	m.Muted = muted != 0
 	m.Enabled = enabled != 0
 	m.CreatedAt = mustParseTime(createdAt)
 	m.UpdatedAt = mustParseTime(updatedAt)
@@ -92,7 +98,7 @@ func (s *monitorStore) ListByOrg(ctx context.Context, orgID string, filter store
 		limit = 50
 	}
 
-	query := `SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, enabled, created_at, updated_at
+	query := `SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, group_id, description, auto_resolve, muted, enabled, created_at, updated_at
 		 FROM monitors WHERE org_id = ?`
 	args := []any{orgID}
 
@@ -117,9 +123,9 @@ func (s *monitorStore) ListByOrg(ctx context.Context, orgID string, filter store
 	for rows.Next() {
 		var m domain.Monitor
 		var monType, config, regions, createdAt, updatedAt, downSev, degSev string
-		var enabled int
-		var heartbeatToken, integrationKey, runbookURL, serviceID sql.NullString
-		if err := rows.Scan(&m.ID, &m.OrgID, &m.Name, &monType, &config, &m.IntervalSeconds, &m.TimeoutSeconds, &m.LatencyWarningMS, &m.LatencyCriticalMS, &downSev, &degSev, &regions, &m.EscalationPolicyID, &heartbeatToken, &integrationKey, &runbookURL, &serviceID, &enabled, &createdAt, &updatedAt); err != nil {
+		var enabled, autoResolve, muted int
+		var heartbeatToken, integrationKey, runbookURL, serviceID, groupID sql.NullString
+		if err := rows.Scan(&m.ID, &m.OrgID, &m.Name, &monType, &config, &m.IntervalSeconds, &m.TimeoutSeconds, &m.LatencyWarningMS, &m.LatencyCriticalMS, &downSev, &degSev, &regions, &m.EscalationPolicyID, &heartbeatToken, &integrationKey, &runbookURL, &serviceID, &groupID, &m.Description, &autoResolve, &muted, &enabled, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		m.Type = domain.MonitorType(monType)
@@ -131,6 +137,9 @@ func (s *monitorStore) ListByOrg(ctx context.Context, orgID string, filter store
 		m.IntegrationKey = integrationKey.String
 		m.RunbookURL = runbookURL.String
 		m.ServiceID = serviceID.String
+		m.GroupID = groupID.String
+		m.AutoResolve = autoResolve != 0
+		m.Muted = muted != 0
 		m.Enabled = enabled != 0
 		m.CreatedAt = mustParseTime(createdAt)
 		m.UpdatedAt = mustParseTime(updatedAt)
@@ -153,19 +162,22 @@ func (s *monitorStore) Update(ctx context.Context, m *domain.Monitor) error {
 	if m.IntegrationKey != "" {
 		integrationKey = sql.NullString{String: m.IntegrationKey, Valid: true}
 	}
-	var runbookURL, serviceID sql.NullString
+	var runbookURL, serviceID, groupID sql.NullString
 	if m.RunbookURL != "" {
 		runbookURL = sql.NullString{String: m.RunbookURL, Valid: true}
 	}
 	if m.ServiceID != "" {
 		serviceID = sql.NullString{String: m.ServiceID, Valid: true}
 	}
+	if m.GroupID != "" {
+		groupID = sql.NullString{String: m.GroupID, Valid: true}
+	}
 	res, err := s.q.ExecContext(ctx,
-		`UPDATE monitors SET name = ?, type = ?, config = ?, interval_seconds = ?, timeout_seconds = ?, latency_warning_ms = ?, latency_critical_ms = ?, down_severity = ?, degraded_severity = ?, regions = ?, escalation_policy_id = ?, integration_key = ?, runbook_url = ?, service_id = ?, enabled = ?, updated_at = ?
+		`UPDATE monitors SET name = ?, type = ?, config = ?, interval_seconds = ?, timeout_seconds = ?, latency_warning_ms = ?, latency_critical_ms = ?, down_severity = ?, degraded_severity = ?, regions = ?, escalation_policy_id = ?, integration_key = ?, runbook_url = ?, service_id = ?, group_id = ?, description = ?, auto_resolve = ?, muted = ?, enabled = ?, updated_at = ?
 		 WHERE id = ?`,
 		m.Name, string(m.Type), string(m.Config), m.IntervalSeconds, m.TimeoutSeconds,
 		m.LatencyWarningMS, m.LatencyCriticalMS, downSev, degSev,
-		string(regions), m.EscalationPolicyID, integrationKey, runbookURL, serviceID, boolToInt(m.Enabled),
+		string(regions), m.EscalationPolicyID, integrationKey, runbookURL, serviceID, groupID, m.Description, boolToInt(m.AutoResolve), boolToInt(m.Muted), boolToInt(m.Enabled),
 		m.UpdatedAt.UTC().Format(timeFormat), m.ID)
 	if err != nil {
 		return err
@@ -208,7 +220,7 @@ func (s *monitorStore) GetNamesByIDs(ctx context.Context, orgID string, ids []st
 
 func (s *monitorStore) ListAllEnabled(ctx context.Context) ([]*domain.Monitor, error) {
 	rows, err := s.q.QueryContext(ctx,
-		`SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, enabled, created_at, updated_at
+		`SELECT id, org_id, name, type, config, interval_seconds, timeout_seconds, latency_warning_ms, latency_critical_ms, down_severity, degraded_severity, regions, escalation_policy_id, heartbeat_token, integration_key, runbook_url, service_id, group_id, description, auto_resolve, muted, enabled, created_at, updated_at
 		 FROM monitors WHERE enabled = 1 ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -219,9 +231,9 @@ func (s *monitorStore) ListAllEnabled(ctx context.Context) ([]*domain.Monitor, e
 	for rows.Next() {
 		var m domain.Monitor
 		var monType, config, regions, createdAt, updatedAt, downSev, degSev string
-		var enabled int
-		var heartbeatToken, integrationKey, runbookURL, serviceID sql.NullString
-		if err := rows.Scan(&m.ID, &m.OrgID, &m.Name, &monType, &config, &m.IntervalSeconds, &m.TimeoutSeconds, &m.LatencyWarningMS, &m.LatencyCriticalMS, &downSev, &degSev, &regions, &m.EscalationPolicyID, &heartbeatToken, &integrationKey, &runbookURL, &serviceID, &enabled, &createdAt, &updatedAt); err != nil {
+		var enabled, autoResolve, muted int
+		var heartbeatToken, integrationKey, runbookURL, serviceID, groupID sql.NullString
+		if err := rows.Scan(&m.ID, &m.OrgID, &m.Name, &monType, &config, &m.IntervalSeconds, &m.TimeoutSeconds, &m.LatencyWarningMS, &m.LatencyCriticalMS, &downSev, &degSev, &regions, &m.EscalationPolicyID, &heartbeatToken, &integrationKey, &runbookURL, &serviceID, &groupID, &m.Description, &autoResolve, &muted, &enabled, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		m.Type = domain.MonitorType(monType)
@@ -233,6 +245,9 @@ func (s *monitorStore) ListAllEnabled(ctx context.Context) ([]*domain.Monitor, e
 		m.IntegrationKey = integrationKey.String
 		m.RunbookURL = runbookURL.String
 		m.ServiceID = serviceID.String
+		m.GroupID = groupID.String
+		m.AutoResolve = autoResolve != 0
+		m.Muted = muted != 0
 		m.Enabled = true
 		m.CreatedAt = mustParseTime(createdAt)
 		m.UpdatedAt = mustParseTime(updatedAt)

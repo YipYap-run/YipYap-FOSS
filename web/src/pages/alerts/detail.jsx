@@ -86,14 +86,41 @@ export function AlertDetailPage({ id }) {
 
   return (
     <div class="alert-detail">
+      <PageHeader
+        title=""
+        actions={
+          <div style="display: flex; gap: 8px; align-items: center;">
+            {isActive && alert.status === 'firing' && (
+              <button class="btn btn-sm btn-warning" onClick={handleAck} disabled={actionLoading}>
+                Acknowledge
+              </button>
+            )}
+            {isActive && (
+              <button class="btn btn-sm btn-success" onClick={handleResolve} disabled={actionLoading}>
+                Resolve
+              </button>
+            )}
+            <a href="/alerts" class="btn btn-sm">Back</a>
+          </div>
+        }
+      />
+
       {/* Hero section */}
       <div class={`alert-hero severity-${alert.severity}`}>
         <SeverityIcon severity={alert.severity} />
         <div style="flex: 1; min-width: 0">
-          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px; flex-wrap: wrap">
             <h2 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 700; margin: 0">
               {alert.monitor_name || `Monitor ${alert.monitor_id}`}
             </h2>
+            <span style={{
+              display: 'inline-block', padding: '2px 10px', borderRadius: '4px',
+              fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.5px', color: '#fff',
+              background: alert.severity === 'critical' ? '#ef4444' : alert.severity === 'warning' ? '#f59e0b' : '#3b82f6',
+            }}>
+              {alert.severity === 'critical' ? 'SEV1' : alert.severity === 'warning' ? 'SEV2' : 'SEV3'}
+              {' '}&mdash; {alert.severity}
+            </span>
             <AlertStatusPill status={alert.status} />
           </div>
           <p style="font-size: 0.8125rem; opacity: 0.8; margin: 0">
@@ -108,6 +135,23 @@ export function AlertDetailPage({ id }) {
             : <span class="btn btn-sm" style="flex-shrink: 0">Runbook</span>
         )}
       </div>
+
+      {/* Create / View Incident - prominent position below header */}
+      {appMeta.value?.edition !== 'foss' && (
+        <div style="margin-bottom: 1rem;">
+          {alert.incident_id ? (
+            <a href={`/incidents/${alert.incident_id}`} class="btn btn-outline">
+              View Incident
+            </a>
+          ) : (
+            isActive && currentUser.value?.role !== 'viewer' && (
+              <button class="btn btn-primary" onClick={handleCreateIncident} disabled={actionLoading}>
+                Create Incident
+              </button>
+            )
+          )}
+        </div>
+      )}
 
       <div class="alert-detail-body">
 
@@ -189,33 +233,6 @@ export function AlertDetailPage({ id }) {
         )}
       </div>
 
-      {/* Sticky action bar - mobile first */}
-      {(isActive || (appMeta.value?.edition !== 'foss' && alert.incident_id)) && (
-        <div class="alert-actions-bar">
-          {isActive && alert.status === 'firing' && (
-            <button class="btn btn-warning btn-action" onClick={handleAck} disabled={actionLoading}>
-              Acknowledge
-            </button>
-          )}
-          {isActive && (
-            <button class="btn btn-success btn-action" onClick={handleResolve} disabled={actionLoading}>
-              Resolve
-            </button>
-          )}
-          {/* Incident integration (SaaS only) */}
-          {appMeta.value?.edition !== 'foss' && alert.incident_id && (
-            <a href={`/incidents/${alert.incident_id}`} class="btn btn-outline">
-              View Incident
-            </a>
-          )}
-          {appMeta.value?.edition !== 'foss' && !alert.incident_id && alert.status === 'acknowledged' &&
-           currentUser.value?.role !== 'viewer' && (
-            <button class="btn btn-outline" onClick={handleCreateIncident} disabled={actionLoading}>
-              Create Incident
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 }

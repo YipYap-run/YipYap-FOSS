@@ -3,6 +3,7 @@ package checker
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
@@ -10,12 +11,14 @@ import (
 
 // Result holds the outcome of a single monitor check.
 type Result struct {
-	Status     domain.CheckStatus
-	LatencyMS  int
-	StatusCode int
-	Error      string
-	Metadata   string
-	TLSExpiry  *time.Time
+	Status          domain.CheckStatus
+	LatencyMS       int
+	StatusCode      int
+	Error           string
+	Metadata        string
+	TLSExpiry       *time.Time
+	ResponseBody    string      // captured for match rule evaluation (HTTP only)
+	ResponseHeaders http.Header // captured for match rule evaluation (HTTP only)
 }
 
 // Checker performs a health check given a raw JSON configuration.

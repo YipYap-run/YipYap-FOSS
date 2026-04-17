@@ -202,10 +202,11 @@ export function MonitorDetailPage({ id }) {
   if (!monitor) return <ErrorMessage error="Monitor not found" />;
 
   const isPaused = !monitor.enabled;
+  const isPending = monitor.enabled && !monitor.status && checks.length === 0 && latency.length === 0;
 
   // Derive current status from the latest check or the enriched response.
   const latestCheck = checks.length > 0 ? checks[0] : null;
-  const currentStatus = isPaused ? 'paused' : (monitor.status || latestCheck?.status || 'unknown');
+  const currentStatus = isPaused ? 'paused' : isPending ? 'pending' : (monitor.status || latestCheck?.status || 'unknown');
   const statusSince = monitor.status_since ? new Date(monitor.status_since) : null;
   const statusDuration = statusSince ? Date.now() - statusSince.getTime() : null;
 
@@ -234,6 +235,12 @@ export function MonitorDetailPage({ id }) {
             }}>
               {isPaused ? 'Resume' : 'Pause'}
             </button>
+            <button class="btn btn-sm" title={monitor.muted ? 'Checks running, notifications suppressed' : 'Mute notifications'} onClick={async () => {
+              await post(`/monitors/${id}/${monitor.muted ? 'unmute' : 'mute'}`, {});
+              load();
+            }}>
+              {monitor.muted ? 'Unmute' : 'Mute'}
+            </button>
             <a href={`/monitors?edit=${id}`} class="btn btn-sm">Edit</a>
             <button class="btn btn-sm btn-danger" onClick={async () => {
               if (!confirm('Delete this monitor? This cannot be undone.')) return;
@@ -248,8 +255,26 @@ export function MonitorDetailPage({ id }) {
         }
       />
 
+      {monitor.description && (
+        <p class="monitor-description" style="white-space: pre-wrap; color: var(--color-text-secondary); margin: 0 0 16px 0; font-size: 0.95rem; line-height: 1.5;">
+          {monitor.description}
+        </p>
+      )}
+
       <div class="monitor-status-row">
         <StatusBadge status={currentStatus} size="lg" />
+        {monitor.muted && (
+          <span title="Checks running, notifications suppressed" style={{
+            display: 'inline-block', padding: '2px 8px', borderRadius: '4px',
+            fontSize: '0.7rem', fontWeight: 700, color: '#fff', background: '#f59e0b',
+          }}>MUTED</span>
+        )}
+        {isPaused && (
+          <span title="Checks stopped" style={{
+            display: 'inline-block', padding: '2px 8px', borderRadius: '4px',
+            fontSize: '0.7rem', fontWeight: 700, color: '#fff', background: '#64748b',
+          }}>PAUSED</span>
+        )}
         {statusSince && (
           <span class="monitor-status-since">
             {currentStatus === 'up' ? 'Up' : currentStatus === 'down' ? 'Down' : currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1)} for {formatDuration(statusDuration)}
@@ -269,7 +294,9 @@ export function MonitorDetailPage({ id }) {
       <div class="detail-grid">
         <Card>
           <h3>Uptime</h3>
-          {Object.keys(uptimeBars).length > 0 ? (
+          {isPending ? (
+            <p class="text-muted">Waiting for first check...</p>
+          ) : Object.keys(uptimeBars).length > 0 ? (
             Object.entries(uptimeBars).map(([period, data]) => (
               <UptimeBar key={period} checks={data} period={period} />
             ))
@@ -280,9 +307,15 @@ export function MonitorDetailPage({ id }) {
 
         <Card>
           <h3>Latency</h3>
-          <div ref={chartRef} class="latency-chart" />
-          {latency.length === 0 && <p class="text-muted">No latency data yet</p>}
-          {chartError && <p class="text-muted">Latency chart unavailable</p>}
+          {isPending ? (
+            <p class="text-muted">Waiting for first check...</p>
+          ) : (
+            <>
+              <div ref={chartRef} class="latency-chart" />
+              {latency.length === 0 && <p class="text-muted">No latency data yet</p>}
+              {chartError && <p class="text-muted">Latency chart unavailable</p>}
+            </>
+          )}
         </Card>
 
         <Card class="checks-explorer">

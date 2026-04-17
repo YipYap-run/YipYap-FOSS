@@ -12,21 +12,26 @@ export function OnCallPage() {
   const [overrideUser, setOverrideUser] = useState('');
   const [overrideUserSearch, setOverrideUserSearch] = useState('');
   const [overrideUsers, setOverrideUsers] = useState([]);
-  const [overrideStart, setOverrideStart] = useState('');
-  const [overrideEnd, setOverrideEnd] = useState('');
+  const [overrideStartDate, setOverrideStartDate] = useState('');
+  const [overrideStartTime, setOverrideStartTime] = useState('');
+  const [overrideEndDate, setOverrideEndDate] = useState('');
+  const [overrideEndTime, setOverrideEndTime] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
 
   // Schedule create/edit modal state
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [editId, setEditId] = useState(null);
   const [teams, setTeams] = useState([]);
+  const browserTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [schedForm, setSchedForm] = useState({
     team_id: '',
     rotation_interval: 'daily',
     rotation_interval_hours: 1,
     handoff_time: '09:00',
     effective_from: '',
-    timezone: 'UTC',
+    effective_from_date: '',
+    effective_from_time: '',
+    timezone: browserTZ || 'UTC',
   });
 
   async function load() {
@@ -64,14 +69,17 @@ export function OnCallPage() {
 
   function openScheduleModal(schedule = null) {
     if (schedule) {
+      const ef = schedule.effective_from ? schedule.effective_from.slice(0, 16) : '';
       setEditId(schedule.id);
       setSchedForm({
         team_id: schedule.team_id || '',
         rotation_interval: schedule.rotation_interval || 'daily',
         rotation_interval_hours: schedule.rotation_interval_hours || 1,
         handoff_time: schedule.handoff_time || '09:00',
-        effective_from: schedule.effective_from ? schedule.effective_from.slice(0, 16) : '',
-        timezone: schedule.timezone || 'UTC',
+        effective_from: ef,
+        effective_from_date: ef ? ef.slice(0, 10) : '',
+        effective_from_time: ef ? ef.slice(11, 16) : '',
+        timezone: schedule.timezone || browserTZ || 'UTC',
       });
     } else {
       setEditId(null);
@@ -81,7 +89,9 @@ export function OnCallPage() {
         rotation_interval_hours: 1,
         handoff_time: '09:00',
         effective_from: '',
-        timezone: 'UTC',
+        effective_from_date: '',
+        effective_from_time: '',
+        timezone: browserTZ || 'UTC',
       });
     }
     loadTeams();
@@ -90,11 +100,14 @@ export function OnCallPage() {
 
   async function saveSchedule() {
     try {
+      const effectiveISO = schedForm.effective_from_date && schedForm.effective_from_time
+        ? `${schedForm.effective_from_date}T${schedForm.effective_from_time}:00`
+        : schedForm.effective_from;
       const body = {
         team_id: schedForm.team_id,
         rotation_interval: schedForm.rotation_interval,
         handoff_time: schedForm.handoff_time,
-        effective_from: new Date(schedForm.effective_from).toISOString(),
+        effective_from: new Date(effectiveISO).toISOString(),
         timezone: schedForm.timezone,
       };
       if (schedForm.rotation_interval === 'custom_hours') {
@@ -123,17 +136,21 @@ export function OnCallPage() {
 
   async function createOverride(schedId) {
     try {
+      const startISO = `${overrideStartDate}T${overrideStartTime}:00`;
+      const endISO = `${overrideEndDate}T${overrideEndTime}:00`;
       await post(`/schedules/${schedId}/overrides`, {
         user_id: overrideUser,
-        start_time: new Date(overrideStart).toISOString(),
-        end_time: new Date(overrideEnd).toISOString(),
+        start_time: new Date(startISO).toISOString(),
+        end_time: new Date(endISO).toISOString(),
         reason: overrideReason,
       });
       setShowOverride(false);
       setOverrideUser('');
       setOverrideUserSearch('');
-      setOverrideStart('');
-      setOverrideEnd('');
+      setOverrideStartDate('');
+      setOverrideStartTime('');
+      setOverrideEndDate('');
+      setOverrideEndTime('');
       setOverrideReason('');
       loadDetail(schedId);
     } catch (_) {}
@@ -242,7 +259,7 @@ export function OnCallPage() {
       <Modal open={showOverride} onClose={() => setShowOverride(false)} title="Add Override">
         <form onSubmit={e => { e.preventDefault(); if (selected) createOverride(selected); }}>
           <div class="form-group" style="position: relative;">
-            <label>User</label>
+            <label class="required">User</label>
             <input type="text"
               value={overrideUserSearch}
               onInput={e => { setOverrideUserSearch(e.target.value); setOverrideUser(''); }}
@@ -274,15 +291,21 @@ export function OnCallPage() {
             })()}
           </div>
           <div class="form-group">
-            <label>Start</label>
-            <input type="datetime-local" value={overrideStart} onInput={e => setOverrideStart(e.target.value)} required />
+            <label class="required">Start</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="date" value={overrideStartDate} onInput={e => setOverrideStartDate(e.target.value)} required />
+              <input type="time" value={overrideStartTime} onInput={e => setOverrideStartTime(e.target.value)} required />
+            </div>
           </div>
           <div class="form-group">
-            <label>End</label>
-            <input type="datetime-local" value={overrideEnd} onInput={e => setOverrideEnd(e.target.value)} required />
+            <label class="required">End</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="date" value={overrideEndDate} onInput={e => setOverrideEndDate(e.target.value)} required />
+              <input type="time" value={overrideEndTime} onInput={e => setOverrideEndTime(e.target.value)} required />
+            </div>
           </div>
           <div class="form-group">
-            <label>Reason</label>
+            <label>Reason <span class="form-optional">(optional)</span></label>
             <textarea value={overrideReason} onInput={e => setOverrideReason(e.target.value)} placeholder="Why is this override needed?" rows={3} />
           </div>
           <button type="submit" class="btn btn-primary">Create Override</button>
@@ -291,15 +314,25 @@ export function OnCallPage() {
 
       <Modal open={showScheduleModal} onClose={() => setShowScheduleModal(false)} title={editId ? 'Edit Schedule' : 'New Schedule'}>
         <form onSubmit={e => { e.preventDefault(); saveSchedule(); }}>
+          {teams.length === 0 ? (
+            <div style="padding: 1rem; background: var(--color-warning-bg); border-radius: var(--radius-sm); margin-bottom: 1rem;">
+              <p style="margin: 0 0 8px; font-weight: 500;">No teams found</p>
+              <p style="margin: 0 0 8px; font-size: 0.875rem; color: var(--color-text-secondary);">
+                You need at least one team before creating an on-call schedule.
+              </p>
+              <a href="/settings/teams" class="btn btn-sm btn-primary">Create a Team</a>
+            </div>
+          ) : (
+            <div class="form-group">
+              <label class="required">Team</label>
+              <select value={schedForm.team_id} onInput={e => setSchedForm({ ...schedForm, team_id: e.target.value })} required>
+                <option value="">Select a team</option>
+                {teams.map(t => <option key={t.id} value={t.id}>{t.name || t.id}</option>)}
+              </select>
+            </div>
+          )}
           <div class="form-group">
-            <label>Team</label>
-            <select value={schedForm.team_id} onInput={e => setSchedForm({ ...schedForm, team_id: e.target.value })} required>
-              <option value="">Select a team</option>
-              {teams.map(t => <option key={t.id} value={t.id}>{t.name || t.id}</option>)}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Rotation Interval</label>
+            <label class="required">Rotation Interval</label>
             <select value={schedForm.rotation_interval} onInput={e => setSchedForm({ ...schedForm, rotation_interval: e.target.value })}>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
@@ -308,25 +341,34 @@ export function OnCallPage() {
           </div>
           {schedForm.rotation_interval === 'custom_hours' && (
             <div class="form-group">
-              <label>Rotation Interval Hours</label>
+              <label class="required">Rotation Interval Hours</label>
               <input type="number" min="1" value={schedForm.rotation_interval_hours}
                 onInput={e => setSchedForm({ ...schedForm, rotation_interval_hours: e.target.value })} required />
             </div>
           )}
           <div class="form-group">
-            <label>Handoff Time</label>
+            <label class="required">Handoff Time</label>
             <input type="time" value={schedForm.handoff_time}
               onInput={e => setSchedForm({ ...schedForm, handoff_time: e.target.value })} required />
           </div>
           <div class="form-group">
-            <label>Effective From</label>
-            <input type="datetime-local" value={schedForm.effective_from}
-              onInput={e => setSchedForm({ ...schedForm, effective_from: e.target.value })} required />
+            <label class="required">Effective From</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="date" value={schedForm.effective_from_date}
+                onInput={e => setSchedForm({ ...schedForm, effective_from_date: e.target.value })} required />
+              <input type="time" value={schedForm.effective_from_time}
+                onInput={e => setSchedForm({ ...schedForm, effective_from_time: e.target.value })} required />
+            </div>
           </div>
           <div class="form-group">
-            <label>Timezone</label>
-            <input type="text" value={schedForm.timezone} placeholder="e.g. America/New_York"
+            <label class="required">Timezone</label>
+            <input type="text" list="tz-list" value={schedForm.timezone} placeholder="Start typing a timezone..."
               onInput={e => setSchedForm({ ...schedForm, timezone: e.target.value })} required />
+            <datalist id="tz-list">
+              {Intl.supportedValuesOf('timeZone').map(tz => (
+                <option key={tz} value={tz} />
+              ))}
+            </datalist>
           </div>
           <button type="submit" class="btn btn-primary">{editId ? 'Update Schedule' : 'Create Schedule'}</button>
         </form>

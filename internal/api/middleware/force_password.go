@@ -22,7 +22,7 @@ func ForcePasswordChange(s store.Store) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Staff-readonly tokens (ops impersonation) have no real user record.
+			// Staff-readonly tokens have no real user record.
 			if claims.Role == "staff-readonly" {
 				next.ServeHTTP(w, r)
 				return

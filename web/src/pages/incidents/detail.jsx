@@ -55,6 +55,16 @@ export function IncidentDetailPage({ id }) {
   const [editUpdateBody, setEditUpdateBody] = useState('');
   const [editUpdateSaving, setEditUpdateSaving] = useState(false);
 
+  // Monitor link/unlink
+  const [showLinkMonitor, setShowLinkMonitor] = useState(false);
+  const [allMonitors, setAllMonitors] = useState([]);
+  const [selectedMonitorId, setSelectedMonitorId] = useState('');
+
+  // Status page link/unlink
+  const [showLinkStatusPage, setShowLinkStatusPage] = useState(false);
+  const [allStatusPages, setAllStatusPages] = useState([]);
+  const [selectedStatusPageId, setSelectedStatusPageId] = useState('');
+
   const role = currentUser.value?.role;
   const userEmail = currentUser.value?.email;
   const canEdit = role === 'member' || role === 'admin';
@@ -156,6 +166,61 @@ export function IncidentDetailPage({ id }) {
     }
   }
 
+  async function quickStatus(newStatus) {
+    try {
+      await post(`/incidents/${id}/updates`, {
+        body: `Status changed to ${newStatus}`,
+        public: true,
+        status: newStatus,
+      });
+      load();
+    } catch (err) {
+      alert(err.message || 'Failed to update status');
+    }
+  }
+
+  async function loadMonitors() {
+    try {
+      const data = await get('/monitors');
+      setAllMonitors(data.monitors || data || []);
+    } catch (_) {}
+  }
+
+  async function loadStatusPages() {
+    try {
+      const data = await get('/status-pages');
+      setAllStatusPages(data.status_pages || data || []);
+    } catch (_) {}
+  }
+
+  async function linkMonitor(monitorId) {
+    const currentIds = incident.monitor_ids || [];
+    await patch(`/incidents/${id}`, { monitor_ids: [...currentIds, monitorId] });
+    setShowLinkMonitor(false);
+    setSelectedMonitorId('');
+    load();
+  }
+
+  async function unlinkMonitor(monitorId) {
+    const currentIds = (incident.monitor_ids || []).filter(mid => mid !== monitorId);
+    await patch(`/incidents/${id}`, { monitor_ids: currentIds });
+    load();
+  }
+
+  async function linkStatusPage(pageId) {
+    const currentIds = incident.status_page_ids || [];
+    await patch(`/incidents/${id}`, { status_page_ids: [...currentIds, pageId] });
+    setShowLinkStatusPage(false);
+    setSelectedStatusPageId('');
+    load();
+  }
+
+  async function unlinkStatusPage(pageId) {
+    const currentIds = (incident.status_page_ids || []).filter(spid => spid !== pageId);
+    await patch(`/incidents/${id}`, { status_page_ids: currentIds });
+    load();
+  }
+
   if (loading) return <LoadingPage />;
   if (error) return <ErrorMessage error={error} onRetry={load} />;
   if (!incident) return <ErrorMessage error="Incident not found" />;
@@ -178,7 +243,7 @@ export function IncidentDetailPage({ id }) {
         actions={
           <div style="display: flex; gap: 8px; align-items: center;">
             {canEdit && !editingMeta && (
-              <button class="btn btn-sm" onClick={openMetaEdit}>Edit</button>
+              <button class="btn" onClick={openMetaEdit}>Edit</button>
             )}
             {canDelete && !editingMeta && (
               <button class="btn btn-sm btn-danger" onClick={deleteIncident}>Delete</button>
@@ -233,9 +298,65 @@ export function IncidentDetailPage({ id }) {
         </Card>
       )}
 
+      {/* Quick status transition buttons */}
+      {incident.status !== 'resolved' && canEdit && (
+        <div style="display: flex; gap: 8px; margin-bottom: 1rem;">
+          {incident.status === 'investigating' && (
+            <button class="btn btn-sm" onClick={() => quickStatus('identified')}>Mark Identified</button>
+          )}
+          {(incident.status === 'investigating' || incident.status === 'identified') && (
+            <button class="btn btn-sm" onClick={() => quickStatus('monitoring')}>Mark Monitoring</button>
+          )}
+          <button class="btn btn-sm btn-primary" onClick={() => quickStatus('resolved')}>Resolve Incident</button>
+        </div>
+      )}
+
       <div class="detail-grid" style="grid-template-columns: 2fr 1fr;">
-        {/* Timeline */}
+        {/* Main column: Post Update form ABOVE timeline */}
         <div>
+          {/* New update form - moved above timeline */}
+          {canEdit && (
+            <Card style="margin-bottom: 1.5rem;">
+              <h4 style="margin: 0 0 0.75rem; font-size: 0.9375rem;">Post Update</h4>
+              <form onSubmit={submitUpdate}>
+                <div class="form-group">
+                  <textarea
+                    rows="3"
+                    value={updateBody}
+                    onInput={e => setUpdateBody(e.target.value)}
+                    placeholder="Describe what's happening..."
+                    required
+                  />
+                </div>
+                <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                  <div class="form-group" style="margin: 0; min-width: 180px;">
+                    <label style="margin-bottom: 4px; display: block;">Change Status (optional)</label>
+                    <select value={updateStatus} onChange={e => setUpdateStatus(e.target.value)}>
+                      <option value="">No change</option>
+                      <option value="investigating">Investigating</option>
+                      <option value="identified">Identified</option>
+                      <option value="monitoring">Monitoring</option>
+                      <option value="resolved">Resolved</option>
+                      <option value="maintenance">Maintenance</option>
+                    </select>
+                  </div>
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding-top: 1.25rem;">
+                    <input
+                      type="checkbox"
+                      checked={updatePublic}
+                      onChange={e => setUpdatePublic(e.target.checked)}
+                    />
+                    Publish to status page
+                  </label>
+                </div>
+                <button type="submit" class="btn btn-primary" disabled={submitting}>
+                  {submitting ? 'Posting...' : 'Post Update'}
+                </button>
+              </form>
+            </Card>
+          )}
+
+          {/* Timeline */}
           <h3 style="margin: 0 0 1rem; font-size: 1rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Timeline</h3>
 
           {updates.length === 0 ? (
@@ -324,48 +445,6 @@ export function IncidentDetailPage({ id }) {
               })}
             </div>
           )}
-
-          {/* New update form */}
-          {canEdit && (
-            <Card>
-              <h4 style="margin: 0 0 0.75rem; font-size: 0.9375rem;">Post Update</h4>
-              <form onSubmit={submitUpdate}>
-                <div class="form-group">
-                  <textarea
-                    rows="3"
-                    value={updateBody}
-                    onInput={e => setUpdateBody(e.target.value)}
-                    placeholder="Describe what's happening..."
-                    required
-                  />
-                </div>
-                <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-                  <div class="form-group" style="margin: 0; min-width: 180px;">
-                    <label style="margin-bottom: 4px; display: block;">Change Status (optional)</label>
-                    <select value={updateStatus} onChange={e => setUpdateStatus(e.target.value)}>
-                      <option value="">No change</option>
-                      <option value="investigating">Investigating</option>
-                      <option value="identified">Identified</option>
-                      <option value="monitoring">Monitoring</option>
-                      <option value="resolved">Resolved</option>
-                      <option value="maintenance">Maintenance</option>
-                    </select>
-                  </div>
-                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding-top: 1.25rem;">
-                    <input
-                      type="checkbox"
-                      checked={updatePublic}
-                      onChange={e => setUpdatePublic(e.target.checked)}
-                    />
-                    Publish to status page
-                  </label>
-                </div>
-                <button type="submit" class="btn btn-primary" disabled={submitting}>
-                  {submitting ? 'Posting...' : 'Post Update'}
-                </button>
-              </form>
-            </Card>
-          )}
         </div>
 
         {/* Sidebar */}
@@ -392,33 +471,81 @@ export function IncidentDetailPage({ id }) {
             </dl>
           </Card>
 
-          {/* Affected monitors */}
-          {incident.monitor_ids && incident.monitor_ids.length > 0 && (
-            <Card style="margin-bottom: 1rem;">
-              <h3 style="margin: 0 0 0.75rem; font-size: 0.9375rem;">Affected Monitors</h3>
+          {/* Affected monitors with link/unlink */}
+          <Card style="margin-bottom: 1rem;">
+            <h3 style="margin: 0 0 0.75rem; font-size: 0.9375rem;">Affected Monitors</h3>
+            {incident.monitor_ids && incident.monitor_ids.length > 0 ? (
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 {incident.monitor_ids.map(mid => (
-                  <a key={mid} href={`/monitors/${mid}`} style="font-size: 0.875rem; color: var(--color-primary);">
-                    {(incident.monitors && incident.monitors.find(m => m.id === mid)?.name) || `Monitor ${mid}`}
-                  </a>
+                  <div key={mid} style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <a href={`/monitors/${mid}`} style="font-size: 0.875rem; color: var(--color-primary);">
+                      {(incident.monitors && incident.monitors.find(m => m.id === mid)?.name) || `Monitor ${mid}`}
+                    </a>
+                    {canEdit && (
+                      <button class="btn btn-xs" onClick={() => unlinkMonitor(mid)}>Unlink</button>
+                    )}
+                  </div>
                 ))}
               </div>
-            </Card>
-          )}
+            ) : (
+              <p style="color: var(--color-text-muted); font-size: 0.875rem; margin: 0 0 8px;">No monitors linked.</p>
+            )}
+            {canEdit && !showLinkMonitor && (
+              <button class="btn btn-sm" style="margin-top: 8px;" onClick={() => { setShowLinkMonitor(true); loadMonitors(); }}>
+                + Link Monitor
+              </button>
+            )}
+            {canEdit && showLinkMonitor && (
+              <div style="margin-top: 8px; display: flex; gap: 6px; align-items: center;">
+                <select value={selectedMonitorId} onChange={e => setSelectedMonitorId(e.target.value)} style="flex: 1; font-size: 0.875rem;">
+                  <option value="">Select monitor...</option>
+                  {allMonitors.filter(m => !(incident.monitor_ids || []).includes(m.id)).map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <button class="btn btn-xs btn-primary" disabled={!selectedMonitorId} onClick={() => linkMonitor(selectedMonitorId)}>Link</button>
+                <button class="btn btn-xs" onClick={() => setShowLinkMonitor(false)}>Cancel</button>
+              </div>
+            )}
+          </Card>
 
-          {/* Status pages */}
-          {incident.status_page_ids && incident.status_page_ids.length > 0 && (
-            <Card style="margin-bottom: 1rem;">
-              <h3 style="margin: 0 0 0.75rem; font-size: 0.9375rem;">Status Pages</h3>
+          {/* Status pages with link/unlink */}
+          <Card style="margin-bottom: 1rem;">
+            <h3 style="margin: 0 0 0.75rem; font-size: 0.9375rem;">Status Pages</h3>
+            {incident.status_page_ids && incident.status_page_ids.length > 0 ? (
               <div style="display: flex; flex-direction: column; gap: 6px;">
                 {incident.status_page_ids.map(spid => (
-                  <span key={spid} style="font-size: 0.875rem; color: var(--color-text-muted);">
-                    {(incident.status_pages && incident.status_pages.find(sp => sp.id === spid)?.name) || spid}
-                  </span>
+                  <div key={spid} style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="font-size: 0.875rem; color: var(--color-text-muted);">
+                      {(incident.status_pages && incident.status_pages.find(sp => sp.id === spid)?.name) || spid}
+                    </span>
+                    {canEdit && (
+                      <button class="btn btn-xs" onClick={() => unlinkStatusPage(spid)}>Unlink</button>
+                    )}
+                  </div>
                 ))}
               </div>
-            </Card>
-          )}
+            ) : (
+              <p style="color: var(--color-text-muted); font-size: 0.875rem; margin: 0 0 8px;">No status pages linked.</p>
+            )}
+            {canEdit && !showLinkStatusPage && (
+              <button class="btn btn-sm" style="margin-top: 8px;" onClick={() => { setShowLinkStatusPage(true); loadStatusPages(); }}>
+                + Link Status Page
+              </button>
+            )}
+            {canEdit && showLinkStatusPage && (
+              <div style="margin-top: 8px; display: flex; gap: 6px; align-items: center;">
+                <select value={selectedStatusPageId} onChange={e => setSelectedStatusPageId(e.target.value)} style="flex: 1; font-size: 0.875rem;">
+                  <option value="">Select status page...</option>
+                  {allStatusPages.filter(sp => !(incident.status_page_ids || []).includes(sp.id)).map(sp => (
+                    <option key={sp.id} value={sp.id}>{sp.name}</option>
+                  ))}
+                </select>
+                <button class="btn btn-xs btn-primary" disabled={!selectedStatusPageId} onClick={() => linkStatusPage(selectedStatusPageId)}>Link</button>
+                <button class="btn btn-xs" onClick={() => setShowLinkStatusPage(false)}>Cancel</button>
+              </div>
+            )}
+          </Card>
 
           {/* Originating alert */}
           {incident.alert_id && (

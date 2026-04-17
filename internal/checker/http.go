@@ -101,11 +101,19 @@ func (c *HTTPChecker) Check(ctx context.Context, config json.RawMessage) (*Resul
 	defer func() { _ = resp.Body.Close() }()
 
 	result.StatusCode = resp.StatusCode
+	result.ResponseHeaders = resp.Header
 
 	// Read TLS certificate expiry.
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		expiry := resp.TLS.PeerCertificates[0].NotAfter
 		result.TLSExpiry = &expiry
+	}
+
+	// Always read the response body (up to 1MB) so it's available for match
+	// rule evaluation. The body is stored on the Result but NOT persisted to DB.
+	body, bodyErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if bodyErr == nil {
+		result.ResponseBody = string(body)
 	}
 
 	// Check status code.
@@ -117,13 +125,12 @@ func (c *HTTPChecker) Check(ctx context.Context, config json.RawMessage) (*Resul
 
 	// Check body match if configured.
 	if cfg.BodyMatch != "" {
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // limit to 1MB
-		if err != nil {
+		if bodyErr != nil {
 			result.Status = domain.StatusDown
-			result.Error = fmt.Sprintf("reading body: %v", err)
+			result.Error = fmt.Sprintf("reading body: %v", bodyErr)
 			return result, nil
 		}
-		if !strings.Contains(string(body), cfg.BodyMatch) {
+		if !strings.Contains(result.ResponseBody, cfg.BodyMatch) {
 			result.Status = domain.StatusDown
 			result.Error = fmt.Sprintf("body does not contain %q", cfg.BodyMatch)
 			return result, nil

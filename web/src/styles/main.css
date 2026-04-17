@@ -606,6 +606,19 @@ a:hover {
   width: auto;
 }
 
+label.required::after {
+  content: ' *';
+  color: var(--color-down);
+  font-weight: normal;
+}
+
+.form-optional {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-weight: normal;
+  margin-left: 4px;
+}
+
 .form-error {
   padding: 8px 12px;
   background: var(--color-down-bg);
@@ -2095,4 +2108,10 @@ a:hover {
   border-radius: var(--radius-sm);
   padding: 12px;
   margin-bottom: 8px;
+}
+
+/* Pending monitor pulse animation */
+@keyframes pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }

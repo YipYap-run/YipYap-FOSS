@@ -481,6 +481,25 @@ func (s *Scheduler) executeCheck(ctx context.Context, m *domain.Monitor) {
 		}
 	}
 
+	// Evaluate match rules: load from store and apply first-match-wins logic.
+	var matchedStateID string
+	if result.StatusCode > 0 {
+		if mrp, ok := s.store.(store.MonitorMatchRuleProvider); ok {
+			rules, err := mrp.MonitorMatchRules().ListByMonitor(ctx, m.ID)
+			if err == nil && len(rules) > 0 {
+				domainRules := make([]domain.MonitorMatchRule, len(rules))
+				for i, r := range rules {
+					domainRules[i] = *r
+				}
+				stateID, healthClass := EvaluateMatchRules(domainRules, result.StatusCode, result.ResponseBody, result.ResponseHeaders)
+				if stateID != "" {
+					matchedStateID = stateID
+					result.Status = HealthClassToStatus(healthClass)
+				}
+			}
+		}
+	}
+
 	// DNS change detection: if the check succeeded and there is no explicit
 	// Expected value, compare resolved records against the previous check.
 	if m.Type == domain.MonitorDNS && result.Status == domain.StatusUp && result.Metadata != "" {
@@ -489,15 +508,16 @@ func (s *Scheduler) executeCheck(ctx context.Context, m *domain.Monitor) {
 
 	now := time.Now().UTC()
 	check := &domain.MonitorCheck{
-		ID:         uuid.New().String(),
-		MonitorID:  m.ID,
-		Status:     result.Status,
-		LatencyMS:  result.LatencyMS,
-		StatusCode: result.StatusCode,
-		Error:      result.Error,
-		Metadata:   result.Metadata,
-		TLSExpiry:  result.TLSExpiry,
-		CheckedAt:  now,
+		ID:             uuid.New().String(),
+		MonitorID:      m.ID,
+		Status:         result.Status,
+		LatencyMS:      result.LatencyMS,
+		StatusCode:     result.StatusCode,
+		Error:          result.Error,
+		Metadata:       result.Metadata,
+		TLSExpiry:      result.TLSExpiry,
+		CheckedAt:      now,
+		MatchedStateID: matchedStateID,
 	}
 
 	s.bw.Enqueue(check)
