@@ -158,7 +158,7 @@ export function AlertListPage() {
 
   return (
     <div class="alerts-page">
-      <PageHeader title="Alerts" subtitle={`${alerts.length} ${tab} alerts`} />
+      <PageHeader title="Alerts" subtitle={`${alerts.length} ${(tabs.find(t => t.key === tab)?.label || tab).toLowerCase()} alerts`} />
 
       {/* Rollup summary */}
       <StatsCards alerts={alerts} allAlerts={allAlerts} />

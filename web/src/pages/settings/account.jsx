@@ -167,7 +167,7 @@ export function AccountTab() {
       <div class="card" style="margin-top: 16px">
         <div class="section-header"><h3 style="color: var(--color-down)">Delete Account</h3></div>
         <p style="font-size: 0.875rem; color: var(--color-text-muted); margin: 0 0 12px">
-          Your account will be disabled immediately and permanently deleted after 96 hours.
+          Your account will be disabled immediately and permanently deleted after 4 days (96 hours).
           During this period you can recover your account by logging in.
         </p>
         <form onSubmit={handleDeleteAccount}>

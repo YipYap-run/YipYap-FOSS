@@ -66,7 +66,7 @@ export function DashboardPage() {
         </Card>
         <Card class="stat-card stat-degraded">
           <div class="stat-value">{degradedCount}</div>
-          <div class="stat-label">Degraded</div>
+          <div class="stat-label">Monitors Degraded</div>
         </Card>
         <Card class="stat-card stat-alerts">
           <div class="stat-value">{alerts.length}</div>

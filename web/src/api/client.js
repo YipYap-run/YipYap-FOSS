@@ -1,6 +1,6 @@
 const API_BASE = '/api/v1';
 
-// In-memory token for the current session only — never persisted to localStorage.
+// In-memory token for the current session only - never persisted to localStorage.
 // The authoritative session is the HttpOnly yipyap_session cookie set by the
 // server. This variable exists only so callers can check "is there a token in
 // this session" without a round-trip, and to send the Authorization header as

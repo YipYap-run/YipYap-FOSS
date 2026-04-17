@@ -57,14 +57,14 @@ export function OnCallPage() {
         get(`/schedules/${id}/on-call`).catch(() => null),
       ]);
       setDetail({ ...s, on_call: oncall });
-    } catch (_) {}
+    } catch (err) { alert(err.message || 'Operation failed'); }
   }
 
   async function loadTeams() {
     try {
       const data = await get('/teams');
       setTeams(data.teams || data || []);
-    } catch (_) {}
+    } catch (err) { alert(err.message || 'Operation failed'); }
   }
 
   function openScheduleModal(schedule = null) {
@@ -121,7 +121,7 @@ export function OnCallPage() {
       setShowScheduleModal(false);
       load();
       if (editId) loadDetail(editId);
-    } catch (_) {}
+    } catch (err) { alert(err.message || 'Operation failed'); }
   }
 
   async function deleteSchedule(id) {
@@ -131,7 +131,7 @@ export function OnCallPage() {
       setDetail(null);
       setSelected(null);
       load();
-    } catch (_) {}
+    } catch (err) { alert(err.message || 'Operation failed'); }
   }
 
   async function createOverride(schedId) {
@@ -153,14 +153,14 @@ export function OnCallPage() {
       setOverrideEndTime('');
       setOverrideReason('');
       loadDetail(schedId);
-    } catch (_) {}
+    } catch (err) { alert(err.message || 'Operation failed'); }
   }
 
   async function deleteOverride(schedId, overrideId) {
     try {
       await del(`/schedules/${schedId}/overrides/${overrideId}`);
       loadDetail(schedId);
-    } catch (_) {}
+    } catch (err) { alert(err.message || 'Operation failed'); }
   }
 
   if (loading) return <LoadingPage />;

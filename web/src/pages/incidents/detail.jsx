@@ -67,8 +67,8 @@ export function IncidentDetailPage({ id }) {
 
   const role = currentUser.value?.role;
   const userEmail = currentUser.value?.email;
-  const canEdit = role === 'member' || role === 'admin';
-  const canDelete = role === 'admin';
+  const canEdit = role === 'owner' || role === 'admin' || role === 'member';
+  const canDelete = role === 'owner' || role === 'admin';
 
   async function load() {
     setLoading(true);

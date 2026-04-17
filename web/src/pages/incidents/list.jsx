@@ -58,7 +58,7 @@ export function IncidentListPage() {
   const [statusPages, setStatusPages] = useState([]);
 
   const role = currentUser.value?.role;
-  const canCreate = role === 'member' || role === 'admin';
+  const canCreate = role === 'owner' || role === 'admin' || role === 'member';
 
   async function load() {
     setLoading(true);

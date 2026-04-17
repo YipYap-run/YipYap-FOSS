@@ -179,7 +179,7 @@ export function IntegrationsTab() {
         </div>
         <p style="color: var(--color-text-secondary); font-size: 0.875rem; line-height: 1.6; margin-bottom: 12px">
           Only your organization's data is exported. Platform metrics are never shared.
-          Metrics start exporting from the moment you save -- historical data is not backfilled.
+          Metrics start exporting from the moment you save. Historical data is not backfilled.
           If your collector is unreachable, metrics from that period will be lost.
         </p>
         <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.8125rem">

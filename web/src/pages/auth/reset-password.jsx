@@ -41,7 +41,7 @@ export function ResetPasswordPage() {
             <h1 class="logo">YipYap</h1>
             <p>Invalid Reset Link</p>
           </div>
-          <p style="text-align:center;color:var(--text-secondary)">
+          <p style="text-align:center;color:var(--color-text-secondary)">
             This password reset link is invalid or has expired.
           </p>
           <a href="/login" class="btn btn-primary btn-full" style="margin-top:16px">Back to Sign In</a>
@@ -59,7 +59,7 @@ export function ResetPasswordPage() {
         </div>
         {done ? (
           <div>
-            <p style="text-align:center;color:var(--text-secondary)">
+            <p style="text-align:center;color:var(--color-text-secondary)">
               Your password has been reset.
             </p>
             <a href="/login" class="btn btn-primary btn-full" style="margin-top:16px">Sign In</a>

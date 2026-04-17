@@ -61,7 +61,7 @@ export async function logout() {
   try {
     await post('/auth/logout', {});
   } catch (_) {
-    // Best-effort — clear local state regardless.
+    // Best-effort - clear local state regardless.
   }
   setToken(null);
   currentUser.value = null;
@@ -73,9 +73,9 @@ export async function loadUser() {
   authLoading.value = true;
   await loadMeta();
   try {
-    // Try to refresh — the server will accept the HttpOnly cookie and issue a
+    // Try to refresh - the server will accept the HttpOnly cookie and issue a
     // fresh one. If this succeeds we know the session is valid.
-    // Refresh may fail for impersonation tokens — that's OK, use as-is.
+    // Refresh may fail for impersonation tokens - that's OK, use as-is.
     try {
       const res = await post('/auth/refresh', {});
       if (res.token) setToken(res.token);

@@ -15,7 +15,7 @@ export function connectWS() {
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   // The HttpOnly session cookie is sent automatically with the WebSocket
-  // upgrade request — no token in the URL needed (and no token to log).
+  // upgrade request - no token in the URL needed (and no token to log).
   const url = `${proto}//${location.host}/ws`;
 
   ws = new WebSocket(url);
