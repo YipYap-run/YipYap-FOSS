@@ -1,7 +1,18 @@
 /** Shared UI primitives. */
 import { useState, useCallback } from 'preact/hooks';
 
-export function StatusBadge({ status, size = 'sm' }) {
+export function StatusBadge({ status, size = 'sm', stateName, stateColor }) {
+  // If a custom state is provided, render with its color and name.
+  if (stateName && stateColor) {
+    return (
+      <span class={`badge badge-${size}`} style={{
+        background: stateColor,
+        color: '#fff',
+      }}>
+        {stateName}
+      </span>
+    );
+  }
   const display = status === 'unknown' ? 'pending' : status;
   const colors = {
     up: 'badge-up',
@@ -24,7 +35,7 @@ export function StatusBadge({ status, size = 'sm' }) {
   );
 }
 
-export function StatusDot({ status }) {
+export function StatusDot({ status, stateColor }) {
   const colors = {
     up: 'var(--color-up)',
     down: 'var(--color-down)',
@@ -39,7 +50,7 @@ export function StatusDot({ status }) {
       width: 10,
       height: 10,
       borderRadius: '50%',
-      background: colors[status] || colors.unknown,
+      background: stateColor || colors[status] || colors.unknown,
       flexShrink: 0,
     }} />
   );

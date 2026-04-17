@@ -8,7 +8,6 @@ const PlanFree OrgPlan = "free"
 
 // Free tier limits (shared, available in FOSS builds).
 const FreeMaxMonitors = 5
-const FreeMaxNotificationChannels = 5
 
 // MinCheckIntervalSeconds returns the minimum check interval for the given plan.
 func MinCheckIntervalSeconds(plan OrgPlan) int {

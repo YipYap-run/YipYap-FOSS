@@ -30,7 +30,7 @@ func New(cfg Config) *Mailer {
 		cfg.Port = 587
 	}
 	if cfg.From == "" {
-		cfg.From = "noreply@yipyap.run"
+		cfg.From = "noreply@localhost"
 	}
 	return &Mailer{cfg: cfg}
 }

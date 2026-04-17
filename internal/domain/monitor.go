@@ -41,7 +41,12 @@ type Monitor struct {
 	IntegrationKey     string          `json:"integration_key,omitempty"`
 	RunbookURL         string          `json:"runbook_url,omitempty"`
 	ServiceID          string          `json:"service_id,omitempty"`
+	GroupID            string          `json:"group_id,omitempty"`
+	Description        string          `json:"description,omitempty"`
+	AutoResolve        bool            `json:"auto_resolve"`
+	Muted              bool            `json:"muted"`
 	Enabled            bool            `json:"enabled"`
+	Labels             map[string]string `json:"labels,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
 }
@@ -53,15 +58,16 @@ type MonitorLabel struct {
 }
 
 type MonitorCheck struct {
-	ID         string      `json:"id"`
-	MonitorID  string      `json:"monitor_id"`
-	Status     CheckStatus `json:"status"`
-	LatencyMS  int         `json:"latency_ms"`
-	StatusCode int         `json:"status_code,omitempty"`
-	Error      string      `json:"error,omitempty"`
-	Metadata   string      `json:"metadata,omitempty"`
-	TLSExpiry  *time.Time  `json:"tls_expiry_at,omitempty"`
-	CheckedAt  time.Time   `json:"checked_at"`
+	ID             string      `json:"id"`
+	MonitorID      string      `json:"monitor_id"`
+	Status         CheckStatus `json:"status"`
+	LatencyMS      int         `json:"latency_ms"`
+	StatusCode     int         `json:"status_code,omitempty"`
+	Error          string      `json:"error,omitempty"`
+	Metadata       string      `json:"metadata,omitempty"`
+	TLSExpiry      *time.Time  `json:"tls_expiry_at,omitempty"`
+	CheckedAt      time.Time   `json:"checked_at"`
+	MatchedStateID string      `json:"matched_state_id,omitempty"`
 }
 
 type MonitorRollup struct {

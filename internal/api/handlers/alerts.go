@@ -153,6 +153,9 @@ func (h *AlertHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = h.store.Alerts().CreateEvent(r.Context(), event)
 
+	// Check incident auto-resolve.
+	h.maybeAutoResolveIncident(r.Context(), alert)
+
 	jsonResponse(w, http.StatusOK, alert)
 }
 

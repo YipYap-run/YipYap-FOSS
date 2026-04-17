@@ -150,6 +150,12 @@ func (e *Engine) handleTrigger(ctx context.Context, subject string, data []byte)
 	// Record triggered event.
 	e.createEvent(ctx, alertID, domain.EventTriggered, "", "", nil)
 
+	// If the monitor is muted, the alert is recorded but notifications are suppressed.
+	if monitor.Muted {
+		slog.Info("monitor muted, skipping notification", "monitor_id", monitor.ID)
+		return nil
+	}
+
 	// If the monitor has an escalation policy, start escalation.
 	if monitor.EscalationPolicyID == "" {
 		return nil
@@ -209,7 +215,42 @@ func (e *Engine) handleRecover(ctx context.Context, subject string, data []byte)
 	_ = e.store.Alerts().DeleteEscalationState(ctx, alert.ID)
 
 	e.createEvent(ctx, alert.ID, domain.EventResolved, "", "", nil)
+
+	// Auto-resolve: if the monitor has auto_resolve enabled, resolve any
+	// remaining active (firing or acknowledged) alerts for this monitor.
+	monitor, err := e.store.Monitors().GetByID(ctx, evt.MonitorID)
+	if err == nil && monitor.AutoResolve {
+		e.autoResolveAlerts(ctx, monitor)
+	}
+
+	// Check if the incident linked to this alert should be auto-resolved.
+	e.maybeAutoResolveIncident(ctx, alert)
+
 	return nil
+}
+
+// autoResolveAlerts resolves all active alerts (firing or acknowledged) for
+// the given monitor. Called when the monitor recovers and auto_resolve is on.
+func (e *Engine) autoResolveAlerts(ctx context.Context, monitor *domain.Monitor) {
+	// Keep resolving until no more active alerts remain.
+	for {
+		active, err := e.store.Alerts().GetActiveByMonitor(ctx, monitor.ID)
+		if err != nil || active == nil {
+			return
+		}
+		now := time.Now().UTC()
+		active.Status = domain.AlertResolved
+		active.ResolvedAt = &now
+		if err := e.store.Alerts().Update(ctx, active); err != nil {
+			slog.Error("escalation: auto-resolve alert", "alert_id", active.ID, "error", err)
+			return
+		}
+		if e.metrics != nil {
+			e.metrics.AddActiveAlert(ctx, active.OrgID, -1)
+		}
+		_ = e.store.Alerts().DeleteEscalationState(ctx, active.ID)
+		e.createEvent(ctx, active.ID, domain.EventResolved, "", "", nil)
+	}
 }
 
 func (e *Engine) handleAck(ctx context.Context, subject string, data []byte) error {

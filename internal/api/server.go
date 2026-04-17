@@ -86,11 +86,14 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	if opt.OnMonitorChange != nil {
 		monitorH.SetOnChange(opt.OnMonitorChange)
 	}
+	monitorGroupH := handlers.NewMonitorGroupHandler(s)
+	monitorStateH := handlers.NewMonitorStateHandler(s)
 	alertH := handlers.NewAlertHandler(s)
 	escalationH := handlers.NewEscalationHandler(s)
 	notifChanH := handlers.NewNotificationChannelHandler(s, opt.TestSender)
 	maintenanceH := handlers.NewMaintenanceHandler(s)
 	publicH := handlers.NewPublicHandler(s)
+	bulkImportH := handlers.NewBulkImportHandler(s)
 	accountDeleteH := handlers.NewAccountDeleteHandler(s, jwt, opt.Mailer, publicBaseURL)
 
 	authMiddleware := middleware.Auth(jwt, s.APIKeys(), opt.APIKeyHasher)
@@ -116,6 +119,12 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			r.Post("/auth/confirm-delete", accountDeleteH.ConfirmDeletion)
 			r.Post("/auth/recover-account", accountDeleteH.RequestRecovery)
 			r.Post("/auth/confirm-recover", accountDeleteH.ConfirmRecovery)
+		})
+
+		// Staff token exchange (ops panel).
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitByIP(10, time.Minute))
+			r.Post("/auth/staff-session", authH.AcceptStaffSession)
 		})
 
 		// Logout clears the session cookie and requires no valid token.
@@ -167,9 +176,11 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 
 			// Org.
 			r.Get("/org", orgH.Get)
+			r.Get("/org/settings", orgH.GetSettings)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole("owner", "admin"))
 				r.Patch("/org", orgH.Update)
+				r.Put("/org/settings", orgH.SetSettings)
 			})
 
 			// Users (read - any authenticated user).
@@ -202,11 +213,49 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 				r.Delete("/monitors/{id}", monitorH.Delete)
 				r.Post("/monitors/{id}/pause", monitorH.Pause)
 				r.Post("/monitors/{id}/resume", monitorH.Resume)
+				r.Post("/monitors/{id}/mute", monitorH.Mute)
+				r.Post("/monitors/{id}/unmute", monitorH.Unmute)
 				r.Get("/monitors/{id}/checks", monitorH.ListChecks)
 				r.Get("/monitors/{id}/uptime", monitorH.Uptime)
 				r.Get("/monitors/{id}/latency", monitorH.Latency)
 				r.Put("/monitors/{id}/labels", monitorH.SetLabels)
 				r.Delete("/monitors/{id}/labels/{key}", monitorH.DeleteLabel)
+			})
+
+			// Bulk import (admin/owner only).
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireRole("owner", "admin"))
+				r.Post("/import", bulkImportH.Import)
+			})
+
+			// Monitor Groups.
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireScope("monitors"))
+				r.Get("/monitor-groups", monitorGroupH.List)
+				r.Get("/monitor-groups/{id}", monitorGroupH.Get)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireRole("owner", "admin"))
+					r.Post("/monitor-groups", monitorGroupH.Create)
+					r.Patch("/monitor-groups/{id}", monitorGroupH.Update)
+					r.Delete("/monitor-groups/{id}", monitorGroupH.Delete)
+				})
+			})
+
+			// Monitor States.
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireScope("monitors"))
+				r.Get("/monitor-states", monitorStateH.List)
+				r.Get("/monitors/{id}/rules", monitorStateH.ListRules)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireRole("owner", "admin"))
+					r.Post("/monitor-states", monitorStateH.Create)
+					r.Patch("/monitor-states/{id}", monitorStateH.Update)
+					r.Delete("/monitor-states/{id}", monitorStateH.Delete)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireRole("owner", "admin", "member"))
+					r.Put("/monitors/{id}/rules", monitorStateH.ReplaceRules)
+				})
 			})
 
 			// Alerts.

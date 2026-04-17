@@ -18,8 +18,8 @@ func TestNew_DefaultPort(t *testing.T) {
 
 func TestNew_DefaultFrom(t *testing.T) {
 	m := New(Config{Host: "smtp.example.com"})
-	if m.cfg.From != "noreply@yipyap.run" {
-		t.Errorf("expected default from noreply@yipyap.run, got %s", m.cfg.From)
+	if m.cfg.From != "noreply@localhost" {
+		t.Errorf("expected default from noreply@localhost, got %s", m.cfg.From)
 	}
 }
 

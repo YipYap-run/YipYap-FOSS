@@ -129,7 +129,16 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Orgs().Create(r.Context(), org); err != nil {
 			return err
 		}
-		return tx.Users().Create(r.Context(), user)
+		if err := tx.Users().Create(r.Context(), user); err != nil {
+			return err
+		}
+		// Seed built-in monitor states for the new org.
+		if sp, ok := tx.(store.MonitorStateProvider); ok {
+			if err := sp.MonitorStates().SeedBuiltins(r.Context(), org.ID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		errorResponse(w, http.StatusConflict, "org or user already exists")
@@ -236,3 +245,4 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
+
