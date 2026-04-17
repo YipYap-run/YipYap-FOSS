@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
-import { get, post, patch } from '../../api/client';
+import { get, post, patch, del } from '../../api/client';
 import { PageHeader, Card, StatusBadge, StatusDot, SearchInput, LoadingPage, ErrorMessage, EmptyState, Modal, MiniUptimeBar } from '../../components/ui';
 import { currentOrg, appMeta } from '../../state/auth';
 
@@ -320,6 +320,21 @@ export function MonitorListPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!editId) return;
+    if (!confirm('Are you sure you want to delete this monitor?')) return;
+    setSaving(true);
+    try {
+      await del(`/monitors/${editId}`);
+      closeModal();
+      load();
+    } catch (err) {
+      alert(err.message || 'Failed to delete monitor');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) return <LoadingPage />;
   if (error) return <ErrorMessage error={error} onRetry={load} />;
 
@@ -468,9 +483,16 @@ export function MonitorListPage() {
               Enabled
             </label>
           </div>
-          <button type="submit" class="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving...' : 'Save'}
-          </button>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button type="submit" class="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+            {editId && (
+              <button type="button" class="btn btn-danger" disabled={saving} onClick={handleDelete}>
+                Delete
+              </button>
+            )}
+          </div>
         </form>
       </Modal>
     </div>

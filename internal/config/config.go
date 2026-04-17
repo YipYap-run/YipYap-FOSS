@@ -11,6 +11,7 @@ type Config struct {
 	DBDsn              string // connection string  - file path for sqlite, DSN for postgres/mariadb
 	JWTSecret          string
 	JWTExpiry          time.Duration
+	APIKeySecret       string // separate HMAC key for API key hashing; falls back to JWTSecret if empty
 	NotificationKey    string // hex-encoded 32-byte AES-256 key for encrypting notification configs
 	DiscordPublicKey      string // hex-encoded Ed25519 public key for Discord interaction verification
 	SlackSigningSecret    string // Slack app signing secret for request verification
@@ -27,6 +28,7 @@ func Load() *Config {
 		DBDsn:           envOr("YIPYAP_DB_DSN", "yipyap.db"),
 		JWTSecret:       envOr("YIPYAP_JWT_SECRET", ""),
 		JWTExpiry:       envDuration("YIPYAP_JWT_EXPIRY", 24*time.Hour),
+		APIKeySecret:    envOr("YIPYAP_API_KEY_SECRET", ""),
 		NotificationKey:  envOr("YIPYAP_NOTIFICATION_KEY", ""),
 		DiscordPublicKey:      envOr("YIPYAP_DISCORD_PUBLIC_KEY", ""),
 		SlackSigningSecret:    envOr("YIPYAP_SLACK_SIGNING_SECRET", ""),

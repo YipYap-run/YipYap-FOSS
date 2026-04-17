@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { setToken } from '../../api/client';
+import { api } from '../../api/client';
 import { loadUser } from '../../state/auth';
 import { route } from 'preact-router';
 
@@ -29,18 +29,8 @@ export function SSOCallbackPage() {
       return;
     }
 
-    // The backend sets an HttpOnly session cookie on the redirect, which is
-    // the authoritative session. The token may also appear in the URL fragment
-    // (#token=...) for the in-memory Authorization header fallback - read it
-    // if present, but it is not required.
-    const fragment = new URLSearchParams(window.location.hash.slice(1));
-    const token = fragment.get('token');
-    if (token) {
-      setToken(token);
-    }
-
-    // loadUser will use the cookie (via credentials: 'same-origin') to verify
-    // the session, so this succeeds even if the fragment token is absent.
+    // The backend sets an HttpOnly session cookie on the redirect.
+    // Use the cookie (via credentials: 'same-origin') to verify the session.
     loadUser().then(() => {
       route('/');
     });

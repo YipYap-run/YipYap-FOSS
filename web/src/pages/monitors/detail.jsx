@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { get, post } from '../../api/client';
+import { get, post, del } from '../../api/client';
 import { PageHeader, Card, StatusBadge, UptimeBar, LoadingPage, ErrorMessage, formatTime, formatDuration } from '../../components/ui';
 import { appMeta } from '../../state/auth';
 import { safeHref } from '../../utils/url';
@@ -235,6 +235,15 @@ export function MonitorDetailPage({ id }) {
               {isPaused ? 'Resume' : 'Pause'}
             </button>
             <a href={`/monitors?edit=${id}`} class="btn btn-sm">Edit</a>
+            <button class="btn btn-sm btn-danger" onClick={async () => {
+              if (!confirm('Delete this monitor? This cannot be undone.')) return;
+              try {
+                await del(`/monitors/${id}`);
+                window.location.href = '/monitors';
+              } catch (err) {
+                alert(err.message || 'Failed to delete monitor');
+              }
+            }}>Delete</button>
           </div>
         }
       />

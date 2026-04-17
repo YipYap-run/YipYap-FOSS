@@ -91,7 +91,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	notifChanH := handlers.NewNotificationChannelHandler(s, opt.TestSender)
 	maintenanceH := handlers.NewMaintenanceHandler(s)
 	publicH := handlers.NewPublicHandler(s)
-	webhookH := handlers.NewWebhookHandler()
+	accountDeleteH := handlers.NewAccountDeleteHandler(s, jwt, opt.Mailer, publicBaseURL)
 
 	authMiddleware := middleware.Auth(jwt, s.APIKeys(), opt.APIKeyHasher)
 
@@ -113,6 +113,9 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			r.Post("/auth/login", authH.Login)
 			r.Post("/auth/forgot-password", resetH.ForgotPassword)
 			r.Post("/auth/reset-password", resetH.ResetPassword)
+			r.Post("/auth/confirm-delete", accountDeleteH.ConfirmDeletion)
+			r.Post("/auth/recover-account", accountDeleteH.RequestRecovery)
+			r.Post("/auth/confirm-recover", accountDeleteH.ConfirmRecovery)
 		})
 
 		// Logout clears the session cookie and requires no valid token.
@@ -139,7 +142,6 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		// Twilio voice TwiML endpoints (Pro only, called by Twilio, no auth).
 		registerTwilioRoutes(r, s)
 
-		r.Post("/webhooks/slack", webhookH.Slack)
 		telegramInteractivityH := handlers.NewTelegramInteractivityHandler(s, msgBus, opt.TelegramWebhookSecret)
 		r.Post("/webhooks/telegram", telegramInteractivityH.Handle)
 
@@ -150,6 +152,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		// Authenticated routes.
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware)
+			r.Use(middleware.DisabledAccountGuard(s))
 			r.Use(middleware.ReadOnlyStaffGuard())
 			r.Use(middleware.RequireWriteAccess())
 			r.Use(middleware.ForcePasswordChange(s))
@@ -160,6 +163,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			r.Post("/auth/refresh", authH.Refresh)
 			r.Put("/auth/password", authH.ChangePassword)
 			r.Put("/auth/email", authH.ChangeEmail)
+			r.Post("/auth/delete-account", accountDeleteH.RequestDeletion)
 
 			// Org.
 			r.Get("/org", orgH.Get)
@@ -188,49 +192,64 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			})
 
 			// Monitors.
-			r.Get("/monitors", monitorH.List)
-			r.Post("/monitors", monitorH.Create)
-			r.Get("/monitors/check-stats", monitorH.CheckStats)
-			r.Get("/monitors/{id}", monitorH.Get)
-			r.Patch("/monitors/{id}", monitorH.Update)
-			r.Delete("/monitors/{id}", monitorH.Delete)
-			r.Post("/monitors/{id}/pause", monitorH.Pause)
-			r.Post("/monitors/{id}/resume", monitorH.Resume)
-			r.Get("/monitors/{id}/checks", monitorH.ListChecks)
-			r.Get("/monitors/{id}/uptime", monitorH.Uptime)
-			r.Get("/monitors/{id}/latency", monitorH.Latency)
-			r.Put("/monitors/{id}/labels", monitorH.SetLabels)
-			r.Delete("/monitors/{id}/labels/{key}", monitorH.DeleteLabel)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireScope("monitors"))
+				r.Get("/monitors", monitorH.List)
+				r.Post("/monitors", monitorH.Create)
+				r.Get("/monitors/check-stats", monitorH.CheckStats)
+				r.Get("/monitors/{id}", monitorH.Get)
+				r.Patch("/monitors/{id}", monitorH.Update)
+				r.Delete("/monitors/{id}", monitorH.Delete)
+				r.Post("/monitors/{id}/pause", monitorH.Pause)
+				r.Post("/monitors/{id}/resume", monitorH.Resume)
+				r.Get("/monitors/{id}/checks", monitorH.ListChecks)
+				r.Get("/monitors/{id}/uptime", monitorH.Uptime)
+				r.Get("/monitors/{id}/latency", monitorH.Latency)
+				r.Put("/monitors/{id}/labels", monitorH.SetLabels)
+				r.Delete("/monitors/{id}/labels/{key}", monitorH.DeleteLabel)
+			})
 
 			// Alerts.
-			r.Get("/alerts", alertH.List)
-			r.Get("/alerts/{id}", alertH.Get)
-			r.Post("/alerts/{id}/ack", alertH.Ack)
-			r.Post("/alerts/{id}/resolve", alertH.Resolve)
-			r.Get("/alerts/{id}/timeline", alertH.Timeline)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireScope("alerts"))
+				r.Get("/alerts", alertH.List)
+				r.Get("/alerts/{id}", alertH.Get)
+				r.Post("/alerts/{id}/ack", alertH.Ack)
+				r.Post("/alerts/{id}/resolve", alertH.Resolve)
+				r.Get("/alerts/{id}/timeline", alertH.Timeline)
+			})
 
 			// Escalation Policies.
-			r.Get("/escalation-policies", escalationH.List)
-			r.Post("/escalation-policies", escalationH.Create)
-			r.Get("/escalation-policies/{id}", escalationH.Get)
-			r.Patch("/escalation-policies/{id}", escalationH.Update)
-			r.Delete("/escalation-policies/{id}", escalationH.Delete)
-			r.Put("/escalation-policies/{id}/steps", escalationH.ReplaceSteps)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireScope("escalation_policies"))
+				r.Get("/escalation-policies", escalationH.List)
+				r.Post("/escalation-policies", escalationH.Create)
+				r.Get("/escalation-policies/{id}", escalationH.Get)
+				r.Patch("/escalation-policies/{id}", escalationH.Update)
+				r.Delete("/escalation-policies/{id}", escalationH.Delete)
+				r.Put("/escalation-policies/{id}/steps", escalationH.ReplaceSteps)
+			})
 
 			// Notification Channels.
-			r.Get("/notification-channels", notifChanH.List)
-			r.Post("/notification-channels", notifChanH.Create)
-			r.Get("/notification-channels/{id}", notifChanH.Get)
-			r.Patch("/notification-channels/{id}", notifChanH.Update)
-			r.Delete("/notification-channels/{id}", notifChanH.Delete)
-			r.Post("/notification-channels/{id}/test", notifChanH.Test)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireScope("notification_channels"))
+				r.Get("/notification-channels", notifChanH.List)
+				r.Post("/notification-channels", notifChanH.Create)
+				r.Get("/notification-channels/{id}", notifChanH.Get)
+				r.Patch("/notification-channels/{id}", notifChanH.Update)
+				r.Delete("/notification-channels/{id}", notifChanH.Delete)
+				r.Post("/notification-channels/{id}/test", notifChanH.Test)
+			})
 
 			// Maintenance Windows.
-			r.Get("/maintenance-windows", maintenanceH.List)
-			r.Post("/maintenance-windows", maintenanceH.Create)
-			r.Get("/maintenance-windows/{id}", maintenanceH.Get)
-			r.Patch("/maintenance-windows/{id}", maintenanceH.Update)
-			r.Delete("/maintenance-windows/{id}", maintenanceH.Delete)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireScope("maintenance_windows"))
+				r.Get("/maintenance-windows", maintenanceH.List)
+				r.Post("/maintenance-windows", maintenanceH.Create)
+				r.Get("/maintenance-windows/{id}", maintenanceH.Get)
+				r.Patch("/maintenance-windows/{id}", maintenanceH.Update)
+				r.Delete("/maintenance-windows/{id}", maintenanceH.Delete)
+			})
 
 		})
 

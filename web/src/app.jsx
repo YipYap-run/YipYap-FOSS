@@ -8,6 +8,9 @@ import { SSOCallbackPage } from './pages/auth/sso-callback';
 import MFAChallenge from './pages/auth/mfa-challenge';
 import { ForgotPasswordPage } from './pages/auth/forgot-password';
 import { ResetPasswordPage } from './pages/auth/reset-password';
+import { AccountRecoverPage } from './pages/account/recover';
+import { ConfirmDeletePage } from './pages/account/confirm-delete';
+import { ConfirmRecoverPage } from './pages/account/confirm-recover';
 import { DashboardPage } from './pages/dashboard';
 import { MonitorListPage } from './pages/monitors/list';
 import { MonitorDetailPage } from './pages/monitors/detail';
@@ -51,6 +54,9 @@ export function App() {
       <MFAChallenge path="/auth/mfa-challenge" />
       <ForgotPasswordPage path="/forgot-password" />
       <ResetPasswordPage path="/reset-password" />
+      <AccountRecoverPage path="/account/recover" />
+      <ConfirmDeletePage path="/account/confirm-delete" />
+      <ConfirmRecoverPage path="/account/confirm-recover" />
       <AuthRoute path="/" component={DashboardPage} />
       <AuthRoute path="/monitors" component={MonitorListPage} />
       <AuthRoute path="/monitors/:id" component={MonitorDetailPage} />

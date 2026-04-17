@@ -128,7 +128,7 @@ func (j *JWTIssuer) Validate(tokenStr string) (*Claims, error) {
 // password hash. When the password changes the nonce changes, automatically
 // invalidating any outstanding reset tokens.
 func PasswordResetNonce(passwordHash string) string {
-	h := sha256.Sum256([]byte(passwordHash[:min(8, len(passwordHash))]))
+	h := sha256.Sum256([]byte(passwordHash))
 	return fmt.Sprintf("%x", h[:8])
 }
 
@@ -166,6 +166,82 @@ func (j *JWTIssuer) ValidatePasswordReset(tokenString string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid password-reset token")
+	}
+	return claims, nil
+}
+
+// IssueAccountDeletion creates a 1-hour JWT with aud:"account-delete" for the given user.
+// The current password hash nonce is embedded so the token is automatically
+// invalidated once the password changes.
+func (j *JWTIssuer) IssueAccountDeletion(userID, orgID, email, passwordHash string) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID: userID,
+		OrgID:  orgID,
+		Role:   email, // Stash email in Role field for validation
+		Nonce:  PasswordResetNonce(passwordHash),
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(1 * time.Hour)),
+			Audience:  jwt.ClaimStrings{"account-delete"},
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(j.secret)
+}
+
+// ValidateAccountDeletion parses an account-delete token, checking aud:"account-delete" and expiry.
+func (j *JWTIssuer) ValidateAccountDeletion(tokenString string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return j.secret, nil
+	}, jwt.WithAudience("account-delete"))
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, fmt.Errorf("invalid account-delete token")
+	}
+	return claims, nil
+}
+
+// IssueAccountRecovery creates a 1-hour JWT with aud:"account-recover" for the given user.
+// The current password hash nonce is embedded so the token is automatically
+// invalidated once the password changes.
+func (j *JWTIssuer) IssueAccountRecovery(userID, orgID, email, passwordHash string) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID: userID,
+		OrgID:  orgID,
+		Role:   email, // Stash email in Role field for validation
+		Nonce:  PasswordResetNonce(passwordHash),
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(1 * time.Hour)),
+			Audience:  jwt.ClaimStrings{"account-recover"},
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(j.secret)
+}
+
+// ValidateAccountRecovery parses an account-recover token, checking aud:"account-recover" and expiry.
+func (j *JWTIssuer) ValidateAccountRecovery(tokenString string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return j.secret, nil
+	}, jwt.WithAudience("account-recover"))
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, fmt.Errorf("invalid account-recover token")
 	}
 	return claims, nil
 }

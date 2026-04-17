@@ -47,6 +47,34 @@ func (s *orgStore) Update(ctx context.Context, org *domain.Org) error {
 	return expectOneRow(res)
 }
 
+func (s *orgStore) Delete(ctx context.Context, id string) error {
+	// Delete all org-scoped data. Order matters for foreign key constraints:
+	// children first, then parents.
+	tables := []string{
+		"monitor_checks", "monitor_rollups", "monitor_labels",
+		"alert_events", "alert_escalation_state", "alerts",
+		"step_targets", "escalation_steps", "escalation_policies",
+		"notification_channels", "maintenance_windows",
+		"schedule_overrides", "schedules", "team_members", "teams",
+		"api_keys", "monitors", "users", "org_settings",
+	}
+	for _, table := range tables {
+		if _, err := s.q.ExecContext(ctx,
+			`DELETE FROM `+table+` WHERE org_id = ?`, id); err != nil {
+			// Some tables may not have org_id (e.g., monitor_checks references
+			// monitors, not orgs directly). Skip errors for those.
+			continue
+		}
+	}
+	// Delete child data that references monitors (not org_id directly).
+	_, _ = s.q.ExecContext(ctx,
+		`DELETE FROM monitor_checks WHERE monitor_id NOT IN (SELECT id FROM monitors)`)
+	_, _ = s.q.ExecContext(ctx,
+		`DELETE FROM monitor_rollups WHERE monitor_id NOT IN (SELECT id FROM monitors)`)
+	_, err := s.q.ExecContext(ctx, `DELETE FROM orgs WHERE id = ?`, id)
+	return err
+}
+
 func (s *orgStore) scanOrg(row *sql.Row) (*domain.Org, error) {
 	var o domain.Org
 	var plan, createdAt, updatedAt string
