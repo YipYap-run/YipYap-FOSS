@@ -29,7 +29,7 @@ const SETTING_TABS = [
 ];
 
 export function SettingsPage({ tab: initialTab }) {
-  const [tab, setTab] = useState(initialTab || 'channels');
+  const [tab, setTab] = useState(initialTab || 'account');
 
   function handleTabChange(t) {
     setTab(t);
@@ -584,7 +584,7 @@ function EscalationTab() {
             </div>
           </div>
         ))}
-        {policies.length === 0 && <p class="text-muted">No escalation policies</p>}
+        {policies.length === 0 && <p class="text-muted">No escalation policies yet. Create one to define how alerts are routed to your team.</p>}
       </div>
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Policy' : 'Add Policy'}>
@@ -633,7 +633,7 @@ function EscalationTab() {
                 <label>Repeat Count</label>
                 <input type="number" min="0" value={step.repeat_count}
                   onInput={e => updateStep(i, { repeat_count: +e.target.value })} />
-                <p class="text-muted text-xs">How many times to retry this step</p>
+                <p class="text-muted text-xs">How many times to re-notify at this step before escalating</p>
               </div>
               {step.repeat_count > 0 && (
                 <div class="form-group">
@@ -812,7 +812,7 @@ function TeamsTab() {
             </div>
           </div>
         ))}
-        {teams.length === 0 && <p class="text-muted">No teams</p>}
+        {teams.length === 0 && <p class="text-muted">No teams yet. Teams group members for on-call rotations and escalation targeting.</p>}
       </div>
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Team' : 'Add Team'}>
         <form onSubmit={e => { e.preventDefault(); save(); }}>
@@ -879,6 +879,7 @@ function MaintenanceTab() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', start_at: '', end_at: '', monitor_id: '', public: false, suppress_alerts: true, recurrence_type: 'none', recurrence_end_at: '', days_of_week: [], day_of_month: 1 });
   const [editId, setEditId] = useState(null);
+  const [monitors, setMonitors] = useState([]);
 
   async function load() {
     setLoading(true);
@@ -889,6 +890,9 @@ function MaintenanceTab() {
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    get('/monitors').then(d => setMonitors(d.monitors || d || [])).catch(() => {});
+  }, []);
 
   async function save() {
     const body = {
@@ -940,7 +944,7 @@ function MaintenanceTab() {
             </div>
           </div>
         ))}
-        {windows.length === 0 && <p class="text-muted">No maintenance windows</p>}
+        {windows.length === 0 && <p class="text-muted">No maintenance windows scheduled.</p>}
       </div>
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Schedule Maintenance">
         <form onSubmit={e => { e.preventDefault(); save(); }}>
@@ -961,8 +965,11 @@ function MaintenanceTab() {
             <input type="datetime-local" value={form.end_at} onInput={e => setForm({ ...form, end_at: e.target.value })} required />
           </div>
           <div class="form-group">
-            <label>Monitor ID</label>
-            <input type="text" value={form.monitor_id} onInput={e => setForm({ ...form, monitor_id: e.target.value })} placeholder="Single monitor ID" />
+            <label>Monitor</label>
+            <select value={form.monitor_id} onChange={e => setForm({ ...form, monitor_id: e.target.value })}>
+              <option value="">All monitors</option>
+              {monitors.map(m => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
+            </select>
           </div>
           <div class="form-group">
             <label>Recurrence</label>
@@ -1054,23 +1061,44 @@ function MonitorConfig({ monitor, orgMonitors, onUpdate, onRemove }) {
       </div>
       {monitor.show_uptime_bar && (
         <div class="form-group">
-          <label>Uptime Periods</label>
+          <label>Uptime Range</label>
           {(() => {
             const plan = currentOrg.value?.plan || 'free';
             const allPeriods = ['24h', '7d', '30d', '90d'];
-            const allowedPeriods = plan === 'free' ? ['24h'] : allPeriods;
+            const maxIdx = plan === 'free' ? 0 : allPeriods.length - 1;
+            const currentPeriods = (monitor.uptime_periods || '24h').split(',').filter(Boolean);
+            // Find the furthest selected period to set slider position
+            let sliderVal = 0;
+            allPeriods.forEach((p, i) => { if (currentPeriods.includes(p)) sliderVal = i; });
             return (
-              <select multiple
-                value={(monitor.uptime_periods || '').split(',').filter(Boolean)}
-                style="min-height: 80px;"
-                onChange={e => {
-                  const selected = Array.from(e.target.selectedOptions, o => o.value);
-                  onUpdate({ uptime_periods: selected.join(',') });
-                }}>
-                {allowedPeriods.map(p => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
+              <>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <input
+                    type="range"
+                    min="0"
+                    max={maxIdx}
+                    value={sliderVal}
+                    style="flex: 1; accent-color: var(--color-primary);"
+                    onInput={e => {
+                      const idx = parseInt(e.target.value);
+                      const selected = allPeriods.slice(0, idx + 1);
+                      onUpdate({ uptime_periods: selected.join(',') });
+                    }}
+                  />
+                  <span style="font-size: 0.875rem; font-weight: 600; min-width: 36px; text-align: right;">
+                    {allPeriods[sliderVal]}
+                  </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--color-text-muted); margin-top: 4px; padding: 0 2px;">
+                  {allPeriods.slice(0, maxIdx + 1).map(p => (
+                    <span key={p}>{p}</span>
+                  ))}
+                </div>
+                <p class="form-help" style="margin-top: 8px;">
+                  Shows uptime bars from 24h up to {allPeriods[sliderVal]} on the status page.
+                  {currentPeriods.length > 1 && ` Displaying: ${currentPeriods.join(', ')}`}
+                </p>
+              </>
             );
           })()}
           {(currentOrg.value?.plan || 'free') === 'free' && (
@@ -1370,7 +1398,7 @@ function StatusPageTab() {
             </div>
           </div>
         ))}
-        {pages.length === 0 && <p class="text-muted">No status pages yet</p>}
+        {pages.length === 0 && <p class="text-muted">No status pages yet. Create one to share your system status publicly.</p>}
       </div>
 
       <Modal open={showModal} onClose={closeModal} title={editId ? 'Edit Status Page' : 'Create Status Page'}>
@@ -1472,7 +1500,7 @@ function APIKeysTab() {
             <button class="btn btn-xs btn-danger" onClick={() => revoke(k.id)}>Revoke</button>
           </div>
         ))}
-        {keys.length === 0 && <p class="text-muted">No API keys</p>}
+        {keys.length === 0 && <p class="text-muted">No API keys yet. Create one to access the YipYap API programmatically.</p>}
       </div>
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Create API Key">
         {createdKey ? (
@@ -1594,7 +1622,7 @@ function SSOTab() {
             </div>
           </div>
         ))}
-        {connections.length === 0 && <p class="text-muted">No SSO connections configured</p>}
+        {connections.length === 0 && <p class="text-muted">No SSO connections configured. Add one to let your team sign in with an identity provider.</p>}
       </div>
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit SSO Connection' : 'Add SSO Connection'}>
         <form onSubmit={e => { e.preventDefault(); save(); }}>
@@ -1780,9 +1808,9 @@ function MembersTab() {
                 <td>
                   {isOwnerOrAdmin && m.id !== currentUser.value?.id && m.role !== 'owner' ? (
                     <select value={m.role} onChange={e => changeRole(m.id, e.target.value)}>
-                      <option value="member">member</option>
-                      <option value="admin">admin</option>
-                      {role === 'owner' && <option value="owner">owner</option>}
+                      <option value="member">Member</option>
+                      <option value="admin">Admin</option>
+                      {role === 'owner' && <option value="owner">Owner</option>}
                     </select>
                   ) : (
                     m.role
@@ -1800,7 +1828,7 @@ function MembersTab() {
             ))}
           </tbody>
         </table>
-        {members.length === 0 && <p class="text-muted">No members</p>}
+        {members.length === 0 && <p class="text-muted">No members found.</p>}
       </div>
       {role === 'owner' && admins.length > 0 && (
         <div style="margin-top: 1rem;">
@@ -1820,8 +1848,8 @@ function MembersTab() {
           <div class="form-group">
             <label>Role</label>
             <select value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value })}>
-              <option value="member">member</option>
-              <option value="admin">admin</option>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
             </select>
           </div>
           <button type="submit" class="btn btn-primary" disabled={saving}>{saving ? 'Inviting...' : 'Invite'}</button>

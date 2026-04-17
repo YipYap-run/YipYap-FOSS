@@ -30,7 +30,7 @@ export function ForgotPasswordPage() {
         </div>
         {sent ? (
           <div>
-            <p style="text-align:center;color:var(--text-secondary)">
+            <p style="text-align:center;color:var(--color-text-secondary)">
               If an account exists for <strong>{email}</strong>, we've sent a password reset link. Check your inbox.
             </p>
             <a href="/login" class="btn btn-primary btn-full" style="margin-top:16px">Back to Sign In</a>

@@ -186,7 +186,7 @@ export function MFATab() {
 
         {!totpEnabled && !totpSetup && (
           <div style="padding: 16px 0">
-            <p style="margin-bottom: 12px; color: var(--text-muted)">
+            <p style="margin-bottom: 12px; color: var(--color-text-muted)">
               Use an authenticator app like Google Authenticator, Authy, or 1Password to generate one-time codes.
             </p>
             <button class="btn btn-primary" onClick={startTotpSetup} disabled={totpLoading}>
@@ -289,9 +289,9 @@ export function MFATab() {
         )}
 
         {credsLoading ? (
-          <p style="color: var(--text-muted); padding: 16px 0">Loading\u2026</p>
+          <p style="color: var(--color-text-muted); padding: 16px 0">Loading\u2026</p>
         ) : credentials.length === 0 ? (
-          <p style="color: var(--text-muted); padding: 16px 0">No security keys or passkeys registered.</p>
+          <p style="color: var(--color-text-muted); padding: 16px 0">No security keys or passkeys registered.</p>
         ) : (
           <div class="settings-list" style="margin-top: 8px">
             {credentials.map(c => (

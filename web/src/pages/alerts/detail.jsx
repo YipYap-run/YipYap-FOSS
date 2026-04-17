@@ -86,24 +86,7 @@ export function AlertDetailPage({ id }) {
 
   return (
     <div class="alert-detail">
-      <PageHeader
-        title=""
-        actions={
-          <div style="display: flex; gap: 8px; align-items: center;">
-            {isActive && alert.status === 'firing' && (
-              <button class="btn btn-sm btn-warning" onClick={handleAck} disabled={actionLoading}>
-                Acknowledge
-              </button>
-            )}
-            {isActive && (
-              <button class="btn btn-sm btn-success" onClick={handleResolve} disabled={actionLoading}>
-                Resolve
-              </button>
-            )}
-            <a href="/alerts" class="btn btn-sm">Back</a>
-          </div>
-        }
-      />
+      <PageHeader title="Alert Detail" />
 
       {/* Hero section */}
       <div class={`alert-hero severity-${alert.severity}`}>
@@ -119,7 +102,7 @@ export function AlertDetailPage({ id }) {
               background: alert.severity === 'critical' ? '#ef4444' : alert.severity === 'warning' ? '#f59e0b' : '#3b82f6',
             }}>
               {alert.severity === 'critical' ? 'SEV1' : alert.severity === 'warning' ? 'SEV2' : 'SEV3'}
-              {' '}&mdash; {alert.severity}
+              {' - '}{alert.severity}
             </span>
             <AlertStatusPill status={alert.status} />
           </div>
@@ -136,22 +119,38 @@ export function AlertDetailPage({ id }) {
         )}
       </div>
 
-      {/* Create / View Incident - prominent position below header */}
-      {appMeta.value?.edition !== 'foss' && (
-        <div style="margin-bottom: 1rem;">
-          {alert.incident_id ? (
-            <a href={`/incidents/${alert.incident_id}`} class="btn btn-outline">
-              View Incident
-            </a>
-          ) : (
-            isActive && currentUser.value?.role !== 'viewer' && (
-              <button class="btn btn-primary" onClick={handleCreateIncident} disabled={actionLoading}>
-                Create Incident
-              </button>
+      {/* Action bar: Create Incident on left, Ack/Resolve/Back on right */}
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; gap: 8px; align-items: center;">
+          {appMeta.value?.edition !== 'foss' && (
+            alert.incident_id ? (
+              <a href={`/incidents/${alert.incident_id}`} class="btn btn-outline">
+                View Incident
+              </a>
+            ) : (
+              isActive && currentUser.value?.role !== 'viewer' && (
+                <button class="btn btn-primary" onClick={handleCreateIncident} disabled={actionLoading}>
+                  Create Incident
+                </button>
+              )
             )
           )}
         </div>
-      )}
+        <div style="display: flex; gap: 8px; align-items: center;">
+          {isActive && alert.status === 'firing' && (
+            <button class="btn btn-sm btn-warning" onClick={handleAck} disabled={actionLoading}>
+              Acknowledge
+            </button>
+          )}
+          {isActive && (
+            <button class="btn btn-sm" onClick={handleResolve} disabled={actionLoading}
+              style="color: var(--color-up); border-color: var(--color-up);">
+              Resolve
+            </button>
+          )}
+          <a href="/alerts" class="btn btn-sm">Back</a>
+        </div>
+      </div>
 
       <div class="alert-detail-body">
 

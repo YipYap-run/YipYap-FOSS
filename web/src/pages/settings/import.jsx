@@ -124,7 +124,7 @@ export function ImportTab() {
           <ul style="margin: 0; padding-left: 20px; font-size: 0.875rem;">
             {preview.monitors > 0 && <li>{preview.monitors} monitor(s)</li>}
             {preview.teams > 0 && <li>{preview.teams} team(s)</li>}
-            {preview.escalation_policies > 0 && <li>{preview.escalation_policies} escalation policy/policies</li>}
+            {preview.escalation_policies > 0 && <li>{preview.escalation_policies} escalation {preview.escalation_policies === 1 ? 'policy' : 'policies'}</li>}
             {preview.notification_channels > 0 && <li>{preview.notification_channels} notification channel(s)</li>}
           </ul>
         </div>
