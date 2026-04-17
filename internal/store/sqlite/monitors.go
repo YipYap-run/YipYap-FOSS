@@ -173,22 +173,23 @@ func (s *monitorStore) Update(ctx context.Context, m *domain.Monitor) error {
 	return expectOneRow(res)
 }
 
-func (s *monitorStore) GetNamesByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+func (s *monitorStore) GetNamesByIDs(ctx context.Context, orgID string, ids []string) (map[string]string, error) {
 	if len(ids) == 0 {
 		return map[string]string{}, nil
 	}
 	placeholders := make([]byte, 0, len(ids)*2)
-	args := make([]any, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, orgID)
 	for i, id := range ids {
 		if i > 0 {
 			placeholders = append(placeholders, ',')
 		}
 		placeholders = append(placeholders, '?')
-		args[i] = id
+		args = append(args, id)
 	}
 
 	rows, err := s.q.QueryContext(ctx,
-		`SELECT id, name FROM monitors WHERE id IN (`+string(placeholders)+`)`, args...)
+		`SELECT id, name FROM monitors WHERE org_id = ? AND id IN (`+string(placeholders)+`)`, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -54,7 +54,7 @@ func (h *AlertHandler) List(w http.ResponseWriter, r *http.Request) {
 			seen[a.MonitorID] = true
 		}
 	}
-	names, _ := h.store.Monitors().GetNamesByIDs(r.Context(), monitorIDs)
+	names, _ := h.store.Monitors().GetNamesByIDs(r.Context(), claims.OrgID, monitorIDs)
 
 	result := make([]alertResponse, len(alerts))
 	for i, a := range alerts {

@@ -69,7 +69,12 @@ func run() error {
 
 	// 2. Auth.
 	jwt := auth.NewJWTIssuer([]byte(cfg.JWTSecret), cfg.JWTExpiry)
-	apiKeyHasher := auth.NewAPIKeyHasher([]byte(cfg.JWTSecret))
+	apiKeySecret := cfg.APIKeySecret
+	if apiKeySecret == "" {
+		apiKeySecret = cfg.JWTSecret
+		log.Println("WARNING: YIPYAP_API_KEY_SECRET is not set; falling back to JWT secret for API key HMAC. Set a dedicated secret for better key isolation.")
+	}
+	apiKeyHasher := auth.NewAPIKeyHasher([]byte(apiKeySecret))
 
 	// 3. Message bus.
 	msgBus, err := openBus(cfg)
@@ -97,6 +102,10 @@ func run() error {
 			return fmt.Errorf("notification key: %w", err)
 		}
 		log.Println("notification config encryption enabled")
+	}
+
+	if envelope == nil {
+		log.Println("WARNING: YIPYAP_NOTIFICATION_KEY is not set. Notification channel secrets (Slack tokens, SMTP passwords, etc.) will be stored as PLAINTEXT in the database. Set YIPYAP_NOTIFICATION_KEY to a 32-byte hex key for AES-256 encryption.")
 	}
 
 	// 6. Escalation engine.
@@ -157,6 +166,7 @@ func run() error {
 	}
 
 	jobs.StartRetentionPruner(runCtx, db)
+	jobs.StartAccountCleanup(runCtx, db)
 
 	// 10. Graceful shutdown.
 	go func() {

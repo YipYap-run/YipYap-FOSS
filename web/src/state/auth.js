@@ -36,6 +36,9 @@ export async function login(email, password) {
   if (res.mfa_required) {
     return { mfa_required: true, mfa_token: res.mfa_token, mfa_methods: res.mfa_methods };
   }
+  if (res.account_disabled) {
+    return { account_disabled: true };
+  }
   // Server set the HttpOnly cookie; mirror token in-memory for fallback only.
   setToken(res.token);
   currentUser.value = res.user;

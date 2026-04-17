@@ -170,6 +170,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if user.DisabledAt != nil {
+		jsonResponse(w, http.StatusForbidden, map[string]interface{}{
+			"account_disabled": true,
+		})
+		return
+	}
+
 	// Check for MFA.
 	hasMFA, methods := userHasMFA(r.Context(), h.store, user)
 	if hasMFA {
@@ -206,6 +213,12 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.Users().GetByID(r.Context(), claims.UserID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+
+	if user.DisabledAt != nil {
+		clearSessionCookie(w)
+		errorResponse(w, http.StatusUnauthorized, "account is disabled")
 		return
 	}
 

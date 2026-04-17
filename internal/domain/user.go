@@ -25,8 +25,9 @@ type User struct {
 	ForcePasswordChange bool      `json:"force_password_change"`
 	MFAAppEnabled       bool      `json:"mfa_app_enabled"`
 	MFAEnforcedAt       string    `json:"mfa_enforced_at,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	DisabledAt   *time.Time `json:"disabled_at,omitempty"`
 }
 
 type OIDCConnection struct {

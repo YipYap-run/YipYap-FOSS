@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -106,38 +105,6 @@ func mergeConfig(channelType, newConfig, existingConfig string) string {
 	}
 	out, _ := json.Marshal(newM)
 	return string(out)
-}
-
-// validatePhoneConfig checks that a Twilio SMS/Voice channel config contains
-// a valid US/Canada phone number. International numbers are not supported.
-func validatePhoneConfig(raw json.RawMessage) error {
-	var cfg struct {
-		To string `json:"to"`
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return fmt.Errorf("invalid config")
-	}
-	if cfg.To == "" {
-		return fmt.Errorf("phone number is required")
-	}
-	// Strip formatting and validate NANP (US/Canada +1).
-	digits := ""
-	for _, r := range cfg.To {
-		if r >= '0' && r <= '9' {
-			digits += string(r)
-		}
-	}
-	switch len(digits) {
-	case 11:
-		if digits[0] != '1' {
-			return fmt.Errorf("only US and Canada phone numbers (+1) are supported at this time")
-		}
-	case 10:
-		// OK, implied +1
-	default:
-		return fmt.Errorf("only US and Canada phone numbers (+1) are supported at this time")
-	}
-	return nil
 }
 
 // TestSender can synchronously send a notification job (used for test endpoint).

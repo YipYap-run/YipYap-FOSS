@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { put, setToken } from '../../api/client';
+import { put, post, setToken } from '../../api/client';
 import { currentUser } from '../../state/auth';
 import { theme, setOLED, isDark } from '../../state/theme';
 
@@ -12,6 +12,14 @@ export function AccountTab() {
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState('');
+
+  // Delete account state
+  const [delPw, setDelPw] = useState('');
+  const [delMfa, setDelMfa] = useState('');
+  const [delPhrase, setDelPhrase] = useState('');
+  const [delLoading, setDelLoading] = useState(false);
+  const [delError, setDelError] = useState('');
+  const [delSuccess, setDelSuccess] = useState('');
 
   // Email change state
   const [newEmail, setNewEmail] = useState('');
@@ -56,6 +64,22 @@ export function AccountTab() {
     } catch (err) {
       setEmailError(err.message || 'Failed to update email');
     } finally { setEmailLoading(false); }
+  }
+
+  async function handleDeleteAccount(e) {
+    e.preventDefault();
+    setDelLoading(true); setDelError(''); setDelSuccess('');
+    try {
+      await post('/auth/delete-account', {
+        password: delPw,
+        mfa_code: delMfa || undefined,
+        confirm_phrase: delPhrase,
+      });
+      setDelSuccess('Check your email for a confirmation link');
+      setDelPw(''); setDelMfa(''); setDelPhrase('');
+    } catch (err) {
+      setDelError(err.message || 'Failed to delete account');
+    } finally { setDelLoading(false); }
   }
 
   return (
@@ -139,6 +163,43 @@ export function AccountTab() {
           </div>
         </div>
       )}
+
+      <div class="card" style="margin-top: 16px">
+        <div class="section-header"><h3 style="color: var(--color-down)">Delete Account</h3></div>
+        <p style="font-size: 0.875rem; color: var(--color-text-muted); margin: 0 0 12px">
+          Your account will be disabled immediately and permanently deleted after 96 hours.
+          During this period you can recover your account by logging in.
+        </p>
+        <form onSubmit={handleDeleteAccount}>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" value={delPw} onInput={e => setDelPw(e.target.value)} required />
+          </div>
+          {currentUser.value?.mfa_app_enabled && (
+            <div class="form-group">
+              <label>MFA Code</label>
+              <input type="text" inputMode="numeric" maxLength="6" value={delMfa} onInput={e => setDelMfa(e.target.value)} placeholder="6-digit code or backup code" />
+            </div>
+          )}
+          <div class="form-group">
+            <label>Confirmation</label>
+            <input type="text" value={delPhrase} onInput={e => setDelPhrase(e.target.value)} required />
+            <p style="font-size: 0.75rem; color: var(--color-text-muted); margin: 4px 0 0">
+              Type: <strong>I am sure I wish to delete my account</strong>
+            </p>
+          </div>
+          {delError && <div class="form-error">{delError}</div>}
+          {delSuccess && <div class="form-success" style="color: var(--color-up); margin-bottom: 8px">{delSuccess}</div>}
+          <button
+            type="submit"
+            class="btn btn-primary"
+            style="background: var(--color-down); border-color: var(--color-down)"
+            disabled={delLoading || !delPw || delPhrase !== 'I am sure I wish to delete my account'}
+          >
+            {delLoading ? 'Deleting...' : 'Delete My Account'}
+          </button>
+        </form>
+      </div>
     </>
   );
 }

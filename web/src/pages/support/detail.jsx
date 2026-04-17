@@ -72,6 +72,9 @@ export function SupportDetailPage({ id }) {
   const [replyBody, setReplyBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [csatRating, setCsatRating] = useState(0);
+  const [csatComment, setCsatComment] = useState('');
+  const [csatSubmitting, setCsatSubmitting] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -113,6 +116,21 @@ export function SupportDetailPage({ id }) {
       alert(err.message || 'Failed to close ticket');
     } finally {
       setClosing(false);
+    }
+  }
+
+  async function handleCSAT() {
+    if (!csatRating) return;
+    setCsatSubmitting(true);
+    try {
+      const payload = { rating: csatRating };
+      if (csatComment.trim()) payload.comment = csatComment.trim();
+      await post(`/support/tickets/${id}/feedback`, payload);
+      load();
+    } catch (err) {
+      alert(err.message || 'Failed to submit feedback');
+    } finally {
+      setCsatSubmitting(false);
     }
   }
 
@@ -227,6 +245,35 @@ export function SupportDetailPage({ id }) {
         }}>
           This ticket is closed. Create a new ticket if you need further help.
         </div>
+      )}
+
+      {isClosed && !ticket.csat_rating && (
+        <Card>
+          <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.9375rem' }}>How was your experience?</h4>
+          <div style={{ display: 'flex', gap: 8, margin: '12px 0' }}>
+            {[1, 2, 3, 4, 5].map(n => (
+              <button
+                key={n}
+                onClick={() => setCsatRating(n)}
+                class={`btn ${csatRating === n ? 'btn-primary' : ''}`}
+                style={{ minWidth: 40 }}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <div class="form-group">
+            <textarea
+              rows="3"
+              value={csatComment}
+              onInput={e => setCsatComment(e.target.value)}
+              placeholder="Any additional feedback? (optional)"
+            />
+          </div>
+          <button class="btn btn-primary" onClick={handleCSAT} disabled={!csatRating || csatSubmitting}>
+            {csatSubmitting ? 'Submitting...' : 'Submit Feedback'}
+          </button>
+        </Card>
       )}
     </div>
   );

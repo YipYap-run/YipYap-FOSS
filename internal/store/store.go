@@ -83,6 +83,7 @@ type OrgStore interface {
 	GetByID(ctx context.Context, id string) (*domain.Org, error)
 	GetBySlug(ctx context.Context, slug string) (*domain.Org, error)
 	Update(ctx context.Context, org *domain.Org) error
+	Delete(ctx context.Context, id string) error
 }
 
 // UserStore manages user CRUD within an organization.
@@ -93,6 +94,9 @@ type UserStore interface {
 	ListByOrg(ctx context.Context, orgID string, params ListParams) ([]*domain.User, error)
 	Update(ctx context.Context, user *domain.User) error
 	Delete(ctx context.Context, id string) error
+	Disable(ctx context.Context, id string, at time.Time) error
+	Enable(ctx context.Context, id string) error
+	ListDisabledBefore(ctx context.Context, before time.Time) ([]*domain.User, error)
 }
 
 // OIDCStore manages OIDC connections and user links.
@@ -116,7 +120,7 @@ type MonitorStore interface {
 	Delete(ctx context.Context, id string) error
 	ListAllEnabled(ctx context.Context) ([]*domain.Monitor, error)
 	GetByIntegrationKey(ctx context.Context, key string) (*domain.Monitor, error)
-	GetNamesByIDs(ctx context.Context, ids []string) (map[string]string, error)
+	GetNamesByIDs(ctx context.Context, orgID string, ids []string) (map[string]string, error)
 	SetLabels(ctx context.Context, monitorID string, labels map[string]string) error
 	GetLabels(ctx context.Context, monitorID string) (map[string]string, error)
 	DeleteLabel(ctx context.Context, monitorID, key string) error
