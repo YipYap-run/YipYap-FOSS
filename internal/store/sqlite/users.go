@@ -42,7 +42,7 @@ func (s *userStore) ListByOrg(ctx context.Context, orgID string, params store.Li
 	}
 	rows, err := s.q.QueryContext(ctx,
 		`SELECT id, org_id, email, name, password_hash, role, phone, force_password_change, mfa_app_enabled, mfa_enforced_at, created_at, updated_at, disabled_at
-		 FROM users WHERE org_id = ? ORDER BY email LIMIT ? OFFSET ?`,
+		 FROM users WHERE org_id = ? AND disabled_at IS NULL ORDER BY email LIMIT ? OFFSET ?`,
 		orgID, limit, params.Offset)
 	if err != nil {
 		return nil, err

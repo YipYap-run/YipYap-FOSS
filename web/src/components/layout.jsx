@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'preact/hooks';
 import { currentUser, currentOrg, logout, billingStatus, appMeta } from '../state/auth';
 import { wsConnected } from '../api/ws';
+import { get } from '../api/client';
 import { SupportFAB } from './support-fab';
 import { theme, toggleTheme } from '../state/theme';
 
@@ -37,9 +39,17 @@ function isActive(href) {
 export function Layout({ children }) {
   const user = currentUser.value;
   const org = currentOrg.value;
+  const [openTickets, setOpenTickets] = useState(0);
   const items = NAV_ITEMS.filter(item =>
     !item.saasOnly || appMeta.value?.edition !== 'foss'
   );
+
+  useEffect(() => {
+    if (appMeta.value?.edition === 'foss') return;
+    get('/support/tickets?limit=1')
+      .then(data => setOpenTickets(data.open_count ?? 0))
+      .catch(() => {});
+  }, []);
 
   return (
     <div class="app-layout">
@@ -56,6 +66,9 @@ export function Layout({ children }) {
                class={`nav-item ${isActive(item.href) ? 'active' : ''}`}>
               <NavIcon icon={item.icon} />
               <span class="nav-label">{item.label}</span>
+              {item.href === '/support' && openTickets > 0 && (
+                <span class="nav-badge">{openTickets}</span>
+              )}
             </a>
           ))}
         </nav>

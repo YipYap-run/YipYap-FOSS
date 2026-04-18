@@ -96,12 +96,7 @@ export function SupportFAB() {
   const isFOSS = appMeta.value?.edition === 'foss';
 
   useEffect(() => {
-    if (isFOSS) return;
-    get('/support/tickets?limit=1')
-      .then(data => {
-        setOpenCount(data.open_count ?? 0);
-      })
-      .catch(() => {});
+    // FAB doesn't show a count badge -- org ticket count is on the sidebar
   }, []);
 
   // Don't render in FOSS edition
@@ -169,7 +164,7 @@ export function SupportFAB() {
           <line x1="12" y1="17" x2="12.01" y2="17"/>
         </svg>
         <span>Help</span>
-        {openCount > 0 && (
+        {false && openCount > 0 && (
           <span style={badgeStyle}>{openCount}</span>
         )}
       </button>
