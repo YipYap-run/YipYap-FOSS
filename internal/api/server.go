@@ -39,6 +39,7 @@ type ServerOptions struct {
 	DiscordPublicKey      string // hex-encoded Ed25519 public key for Discord webhook verification
 	SlackSigningSecret    string // Slack app signing secret for request verification
 	TelegramWebhookSecret string // secret token for Telegram webhook verification
+	TelegramBotToken      string // Telegram Bot API token for editing messages on ack/resolve
 	// TrustedProxyNets lists CIDRs from which proxy headers (CF-Connecting-IP,
 	// X-Real-IP, X-Forwarded-For) are trusted. When empty, RemoteAddr is used
 	// as-is and proxy headers are ignored.
@@ -151,7 +152,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		// Twilio voice TwiML endpoints (Pro only, called by Twilio, no auth).
 		registerTwilioRoutes(r, s)
 
-		telegramInteractivityH := handlers.NewTelegramInteractivityHandler(s, msgBus, opt.TelegramWebhookSecret)
+		telegramInteractivityH := handlers.NewTelegramInteractivityHandler(s, msgBus, opt.TelegramWebhookSecret, opt.TelegramBotToken)
 		r.Post("/webhooks/telegram", telegramInteractivityH.Handle)
 
 		// Slack interactivity callback (button clicks for ack/resolve).

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -21,13 +22,16 @@ type TelegramInteractivityHandler struct {
 	store       store.Store
 	bus         bus.Bus
 	secretToken string
+	botToken    string
 }
 
 // NewTelegramInteractivityHandler creates a new TelegramInteractivityHandler.
 // secretToken is the secret token configured when registering the Telegram
 // webhook. If empty, all requests are rejected (fail closed).
-func NewTelegramInteractivityHandler(s store.Store, b bus.Bus, secretToken string) *TelegramInteractivityHandler {
-	return &TelegramInteractivityHandler{store: s, bus: b, secretToken: secretToken}
+// botToken is the Telegram Bot API token used to edit messages after
+// ack/resolve actions. If empty, messages will not be updated.
+func NewTelegramInteractivityHandler(s store.Store, b bus.Bus, secretToken, botToken string) *TelegramInteractivityHandler {
+	return &TelegramInteractivityHandler{store: s, bus: b, secretToken: secretToken, botToken: botToken}
 }
 
 // telegramWebhookUpdate mirrors the relevant fields of a Telegram webhook update.
@@ -42,6 +46,13 @@ type telegramWebhookCallbackQuery struct {
 		ID       int    `json:"id"`
 		Username string `json:"username"`
 	} `json:"from"`
+	Message *struct {
+		MessageID int `json:"message_id"`
+		Chat      struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
+		Text string `json:"text"`
+	} `json:"message"`
 	Data string `json:"data"`
 }
 
@@ -139,6 +150,50 @@ func (h *TelegramInteractivityHandler) Handle(w http.ResponseWriter, r *http.Req
 		if err := h.bus.Publish(r.Context(), "alert.recover", data); err != nil {
 			slog.Error("telegram interactivity: publish recover", "error", err)
 		}
+	}
+
+	// Update the original Telegram message: append who acted and remove
+	// the inline keyboard so buttons cannot be clicked again.
+	cbq := update.CallbackQuery
+	if h.botToken != "" && cbq.Message != nil {
+		go func() {
+			actionStr := "Acknowledged"
+			if action == "resolve" {
+				actionStr = "Resolved"
+			}
+			userName := cbq.From.Username
+			if userName == "" {
+				userName = fmt.Sprintf("user %d", cbq.From.ID)
+			}
+
+			updatedText := cbq.Message.Text
+			if updatedText != "" {
+				updatedText += "\n\n"
+			}
+			updatedText += fmt.Sprintf("%s by %s", actionStr, userName)
+
+			editURL := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", h.botToken)
+			editBody, _ := json.Marshal(map[string]any{
+				"chat_id":      cbq.Message.Chat.ID,
+				"message_id":   cbq.Message.MessageID,
+				"text":         updatedText,
+				"parse_mode":   "HTML",
+				"reply_markup": map[string]any{"inline_keyboard": []any{}},
+			})
+
+			req, err := http.NewRequest("POST", editURL, bytes.NewReader(editBody))
+			if err != nil {
+				slog.Warn("telegram: failed to build edit request", "error", err)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				slog.Warn("telegram: failed to edit message", "error", err)
+				return
+			}
+			_ = resp.Body.Close()
+		}()
 	}
 
 	w.WriteHeader(http.StatusOK)

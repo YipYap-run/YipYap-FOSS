@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -43,13 +44,19 @@ func NewDiscordInteractivityHandler(s store.Store, b bus.Bus, publicKeyHex strin
 
 // discordInteraction mirrors the relevant fields of a Discord interaction callback.
 type discordInteraction struct {
-	Type   int `json:"type"`
-	Member struct {
+	Type          int    `json:"type"`
+	Token         string `json:"token"`
+	ApplicationID string `json:"application_id"`
+	Member        struct {
 		User struct {
 			ID       string `json:"id"`
 			Username string `json:"username"`
 		} `json:"user"`
 	} `json:"member"`
+	Message struct {
+		Content string `json:"content"`
+		Embeds  []any  `json:"embeds"`
+	} `json:"message"`
 	Data struct {
 		CustomID      string `json:"custom_id"`
 		ComponentType int    `json:"component_type"`
@@ -182,9 +189,35 @@ func (h *DiscordInteractivityHandler) handleComponent(w http.ResponseWriter, r *
 
 	default:
 		slog.Warn("discord interactivity: unknown action", "action", action)
+		h.respondDeferred(w)
+		return
 	}
 
-	h.respondDeferred(w)
+	// Respond with UPDATE_MESSAGE (type 7) to replace the original message
+	// content and remove action buttons, showing who acted.
+	actionStr := "Acknowledged"
+	if action == "resolve" {
+		actionStr = "Resolved"
+	}
+	userName := interaction.Member.User.Username
+
+	// Preserve original message content and append the action status.
+	updatedContent := interaction.Message.Content
+	if updatedContent != "" {
+		updatedContent += "\n\n"
+	}
+	updatedContent += fmt.Sprintf("**%s** by %s", actionStr, userName)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type": 7, // UPDATE_MESSAGE
+		"data": map[string]any{
+			"content":    updatedContent,
+			"embeds":     interaction.Message.Embeds,
+			"components": []any{}, // remove buttons
+		},
+	})
 }
 
 // verifySignature checks the Ed25519 signature on a Discord interaction request.

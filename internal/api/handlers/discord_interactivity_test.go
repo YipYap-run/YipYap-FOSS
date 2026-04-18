@@ -116,13 +116,13 @@ func TestDiscordInteractivity_Ack(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	// Verify deferred update response (type 6).
+	// Verify update message response (type 7).
 	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result["type"] != float64(6) {
-		t.Fatalf("expected deferred response type 6, got %v", result["type"])
+	if result["type"] != float64(7) {
+		t.Fatalf("expected update message response type 7, got %v", result["type"])
 	}
 
 	select {
@@ -251,7 +251,7 @@ func TestDiscordInteractivity_NoCustomID(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result["type"] != float64(6) {
-		t.Fatalf("expected deferred response type 6, got %v", result["type"])
+		t.Fatalf("expected deferred ack response type 6, got %v", result["type"])
 	}
 }
 

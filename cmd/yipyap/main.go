@@ -143,6 +143,7 @@ func run() error {
 		DiscordPublicKey:      cfg.DiscordPublicKey,
 		SlackSigningSecret:    cfg.SlackSigningSecret,
 		TelegramWebhookSecret: cfg.TelegramWebhookSecret,
+		TelegramBotToken:      cfg.TelegramBotToken,
 		TrustedProxyNets:      api.ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs),
 	})
 	httpSrv := &http.Server{
