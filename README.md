@@ -11,8 +11,14 @@ Free, self-hosted monitoring and alerting for small teams. One binary, zero exte
 - **Multi-user** with role-based access (owner, admin, member, viewer)
 - **Dashboard** with real-time monitor status, latency charts, uptime bars
 - **Maintenance windows** with alert suppression
+- **Custom monitor states** with per-monitor match rules
+- **Monitor groups** for composite status rollup
+- **Tags** for filtering and organizing monitors
+- **Auto-resolve** to automatically close alerts when monitors recover
+- **Monitor description** field for context and runbook notes
+- **Mute/pause** to suppress notifications or stop checks entirely
 - **Alert acknowledgment and resolution** workflow
-- **SQLite** database - no external database needed
+- **SQLite** database, no external database needed
 
 ## Quick Start
 
