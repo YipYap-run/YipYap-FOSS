@@ -16,6 +16,7 @@ type Config struct {
 	DiscordPublicKey      string // hex-encoded Ed25519 public key for Discord interaction verification
 	SlackSigningSecret    string // Slack app signing secret for request verification
 	TelegramWebhookSecret string // secret token for Telegram webhook verification
+	TelegramBotToken      string // Telegram bot API token for editing messages after ack/resolve
 	RegistrationEnabled   bool   // when true, allow new org+user registration via POST /auth/register
 	TrustedProxyCIDRs     string // comma-separated CIDRs or "cloudflare"  - proxy headers trusted only from these IPs
 	DevSeed            bool   // when true, populate database with mock development data
@@ -33,6 +34,7 @@ func Load() *Config {
 		DiscordPublicKey:      envOr("YIPYAP_DISCORD_PUBLIC_KEY", ""),
 		SlackSigningSecret:    envOr("YIPYAP_SLACK_SIGNING_SECRET", ""),
 		TelegramWebhookSecret: envOr("YIPYAP_TELEGRAM_WEBHOOK_SECRET", ""),
+		TelegramBotToken:      envOr("YIPYAP_TELEGRAM_BOT_TOKEN", ""),
 		RegistrationEnabled: envBool("YIPYAP_REGISTRATION_ENABLED", true),
 		TrustedProxyCIDRs:   envOr("YIPYAP_TRUSTED_PROXY_CIDRS", ""),
 		DevSeed:             envBool("YIPYAP_DEV_SEED", false),

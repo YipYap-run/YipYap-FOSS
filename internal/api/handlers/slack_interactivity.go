@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -37,13 +38,22 @@ func NewSlackInteractivityHandler(s store.Store, b bus.Bus, signingSecret string
 type slackActionPayload struct {
 	Type string `json:"type"`
 	User struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Username string `json:"username"`
 	} `json:"user"`
 	Actions []struct {
 		ActionID string `json:"action_id"`
 		Value    string `json:"value"`
 	} `json:"actions"`
+	ResponseURL string            `json:"response_url"`
+	Message     slackOriginalMsg  `json:"message"`
+}
+
+// slackOriginalMsg captures the blocks from the original Slack message so we
+// can preserve alert text when updating the message after ack/resolve.
+type slackOriginalMsg struct {
+	Blocks []json.RawMessage `json:"blocks"`
 }
 
 // Handle processes POST /integrations/slack/actions.
@@ -167,6 +177,65 @@ func (h *SlackInteractivityHandler) Handle(w http.ResponseWriter, r *http.Reques
 		if err := h.bus.Publish(r.Context(), "alert.recover", data); err != nil {
 			slog.Error("slack interactivity: publish recover", "error", err)
 		}
+	}
+
+	// Update the original Slack message: keep alert text, replace action
+	// buttons with a context block showing who acted.
+	if payload.ResponseURL != "" {
+		go func() {
+			actionStr := "Acknowledged"
+			icon := ":white_check_mark:"
+			if action.ActionID == "resolve_alert" {
+				actionStr = "Resolved"
+				icon = ":resolved:"
+			}
+			userName := payload.User.Name
+			if userName == "" {
+				userName = payload.User.Username
+			}
+
+			// Keep all original blocks except the actions block, then
+			// append a context block with the action status.
+			var updatedBlocks []json.RawMessage
+			for _, blk := range payload.Message.Blocks {
+				var meta struct {
+					Type string `json:"type"`
+				}
+				if json.Unmarshal(blk, &meta) == nil && meta.Type == "actions" {
+					continue
+				}
+				updatedBlocks = append(updatedBlocks, blk)
+			}
+
+			ctxBlock, _ := json.Marshal(map[string]any{
+				"type": "context",
+				"elements": []map[string]any{
+					{
+						"type": "mrkdwn",
+						"text": fmt.Sprintf("%s *%s* by %s", icon, actionStr, userName),
+					},
+				},
+			})
+			updatedBlocks = append(updatedBlocks, ctxBlock)
+
+			updateBody, _ := json.Marshal(map[string]any{
+				"replace_original": true,
+				"blocks":           updatedBlocks,
+			})
+
+			req, err := http.NewRequest("POST", payload.ResponseURL, bytes.NewReader(updateBody))
+			if err != nil {
+				slog.Warn("slack: failed to build update request", "error", err)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				slog.Warn("slack: failed to update message", "error", err)
+				return
+			}
+			_ = resp.Body.Close()
+		}()
 	}
 
 	w.WriteHeader(http.StatusOK)
