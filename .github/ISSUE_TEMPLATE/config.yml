@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/YipYap-run/YipYap-FOSS/wiki
+    about: Installation, configuration, and usage guides.
+  - name: Security issue
+    url: https://github.com/YipYap-run/YipYap-FOSS/security/advisories/new
+    about: Report security issues privately via GitHub Security Advisories.
+  - name: YipYap Pro (hosted)
+    url: https://yipyap.run
+    about: Questions about Pro features (SSO, SMS, status pages) belong here, not on the FOSS issue tracker.

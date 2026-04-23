@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest a new feature or enhancement for YipYap FOSS.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest an improvement.
+
+        A few ground rules for scope:
+        - YipYap FOSS is the self-hostable monitoring and alerting core.
+          Features that require a managed SaaS integration (e.g. SMS or
+          voice via carrier accounts, hosted status pages, SSO / OIDC)
+          belong in YipYap Pro and cannot be accepted here.
+        - Features that would require ongoing maintenance of a new
+          external dependency are evaluated on a case-by-case basis.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve? What have you tried?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work? Include API surface, UI sketches, or config examples if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you considered and why they do not work as well.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any other context, screenshots, or examples.
+
+  - type: checkboxes
+    id: willing-to-contribute
+    attributes:
+      label: Would you be willing to implement this?
+      options:
+        - label: Yes, I would like to open a PR.
+        - label: I can help with testing or review.
