@@ -584,8 +584,18 @@ func (s *Scheduler) detectDNSChange(ctx context.Context, m *domain.Monitor, resu
 }
 
 // executeHeartbeatCheck enforces the grace period for heartbeat monitors.
-// If no heartbeat has been received within the grace period, the monitor
-// is marked as DOWN.
+// If no heartbeat ping has been received within the grace period, the
+// monitor is marked as DOWN.
+//
+// The evaluator reads only the latest STATUS=UP check to find the last
+// actual ping - Down checks in the table are evaluator-produced state
+// transitions and must not be treated as a ping timestamp, or the monitor
+// would oscillate Up / Down on every tick.
+//
+// Evaluator writes a check only on a state transition. Heartbeat POST
+// ingestion writes the Up checks. This keeps the check log semantically
+// clean (one row per real event) and avoids pinning "latest ping" to an
+// evaluator-generated row.
 func (s *Scheduler) executeHeartbeatCheck(ctx context.Context, m *domain.Monitor) {
 	var cfg domain.HeartbeatCheckConfig
 	if err := json.Unmarshal(m.Config, &cfg); err != nil {
@@ -600,25 +610,56 @@ func (s *Scheduler) executeHeartbeatCheck(ctx context.Context, m *domain.Monitor
 
 	now := time.Now().UTC()
 
-	latest, err := s.store.Checks().GetLatest(ctx, m.ID)
+	// Find the most recent ACTUAL ping. GetLatestHeartbeatPing filters to
+	// Up rows that carry a source_ip tag in metadata (set by the ingest
+	// handler), so legacy evaluator-written Up rows that predate the fix
+	// do not fool the grace-period calculation. Evaluator-produced Down
+	// rows are ignored automatically by the status filter.
+	lastPing, err := s.store.Checks().GetLatestHeartbeatPing(ctx, m.ID)
+	if err != nil {
+		slog.Error("heartbeat checker: look up last ping", "monitor_id", m.ID, "error", err)
+		return
+	}
 
 	var result *Result
-	if err != nil || latest == nil {
-		// Never received a heartbeat.
+	if lastPing == nil {
 		result = &Result{
 			Status: domain.StatusDown,
 			Error:  "no heartbeat received",
 		}
-	} else if now.Sub(latest.CheckedAt) > gracePeriod {
+	} else if now.Sub(lastPing.CheckedAt) > gracePeriod {
 		result = &Result{
 			Status: domain.StatusDown,
-			Error:  fmt.Sprintf("no heartbeat received in %s (last: %s)", gracePeriod, latest.CheckedAt.Format(time.RFC3339)),
+			Error:  fmt.Sprintf("no heartbeat received in %s (last: %s)", gracePeriod, lastPing.CheckedAt.Format(time.RFC3339)),
 		}
 	} else {
-		// Heartbeat is within grace period  - still healthy.
 		result = &Result{
 			Status: domain.StatusUp,
 		}
+	}
+
+	// State-change detection. Seed prevStatus from in-memory cache, or
+	// from the most recent stored check of any status on cold start.
+	s.statusMu.Lock()
+	prevStatus, seeded := s.lastStatus[m.ID]
+	s.statusMu.Unlock()
+	if !seeded {
+		if latestAny, err := s.store.Checks().GetLatest(ctx, m.ID); err == nil && latestAny != nil {
+			prevStatus = latestAny.Status
+		} else {
+			prevStatus = result.Status // avoids a spurious first-tick transition
+		}
+	}
+
+	s.statusMu.Lock()
+	s.lastStatus[m.ID] = result.Status
+	s.statusMu.Unlock()
+
+	// Only write a check (and publish an alert event) on a real transition.
+	// Up checks are written by the POST ingest handler; Down checks come
+	// from us here, exactly once per outage.
+	if prevStatus == result.Status {
+		return
 	}
 
 	check := &domain.MonitorCheck{
@@ -629,21 +670,6 @@ func (s *Scheduler) executeHeartbeatCheck(ctx context.Context, m *domain.Monitor
 		CheckedAt: now,
 	}
 	s.bw.Enqueue(check)
-
-	// State-change detection (same logic as active checks).
-	s.statusMu.Lock()
-	prevStatus, seeded := s.lastStatus[m.ID]
-	s.statusMu.Unlock()
-
-	if !seeded {
-		if latest != nil {
-			prevStatus = latest.Status
-		}
-	}
-
-	s.statusMu.Lock()
-	s.lastStatus[m.ID] = result.Status
-	s.statusMu.Unlock()
 
 	if result.Status == domain.StatusDown && prevStatus == domain.StatusUp {
 		s.publishAlertEvent(ctx, "alert.trigger", *m, result, now)

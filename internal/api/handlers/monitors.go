@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -757,11 +758,26 @@ func (h *MonitorHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
+
+	// Capture the ping's source IP. trustedProxyRealIP middleware has
+	// already resolved X-Forwarded-For / CF-Connecting-IP / X-Real-IP
+	// into r.RemoteAddr when the direct peer is a trusted proxy, so we
+	// only need to strip an optional port here.
+	sourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+		sourceIP = host
+	}
+	meta, err := json.Marshal(map[string]string{"source_ip": sourceIP})
+	if err != nil {
+		meta = []byte(`{}`)
+	}
+
 	check := &domain.MonitorCheck{
 		ID:        uuid.New().String(),
 		MonitorID: monitorID,
 		Status:    domain.StatusUp,
 		LatencyMS: 0,
+		Metadata:  string(meta),
 		CheckedAt: now,
 	}
 	if err := h.store.Checks().Create(r.Context(), check); err != nil {

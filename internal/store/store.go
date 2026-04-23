@@ -131,6 +131,16 @@ type CheckStore interface {
 	Create(ctx context.Context, check *domain.MonitorCheck) error
 	ListByMonitor(ctx context.Context, monitorID string, filter CheckFilter) ([]*domain.MonitorCheck, error)
 	GetLatest(ctx context.Context, monitorID string) (*domain.MonitorCheck, error)
+	// GetLatestByStatus returns the most recent check matching the given
+	// status, or (nil, nil) if none. Needed for heartbeat evaluation where
+	// the scheduler must distinguish actual pings (status=up) from its own
+	// Down transition writes in the same table.
+	GetLatestByStatus(ctx context.Context, monitorID string, status domain.CheckStatus) (*domain.MonitorCheck, error)
+	// GetLatestHeartbeatPing returns the most recent heartbeat POST the
+	// ingest handler wrote (identified by the presence of source_ip in
+	// metadata). Nil if no such row exists. Ignores legacy evaluator-
+	// written Up rows that predate the source_ip enrichment.
+	GetLatestHeartbeatPing(ctx context.Context, monitorID string) (*domain.MonitorCheck, error)
 	GetLatestByMonitors(ctx context.Context, monitorIDs []string) (map[string]*domain.MonitorCheck, error)
 	GetStatusSince(ctx context.Context, monitorID string, status domain.CheckStatus) (*time.Time, error)
 	CreateRollup(ctx context.Context, rollup *domain.MonitorRollup) error
