@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: CLA Assistant
-        uses: contributor-assistant/github-action@v2
+        uses: contributor-assistant/github-action@v2.6.1
         env:
           # Default GITHUB_TOKEN is used for status + PR comments.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
