@@ -26,7 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: CLA Assistant
-        uses: contributor-assistant/github-action@v2
+        # contributor-assistant/github-action was archived upstream but
+        # the v2.6.1 release is the last working tag. No v2 floating tag
+        # exists, which is why @v2 failed to resolve.
+        uses: contributor-assistant/github-action@v2.6.1
         env:
           # Default GITHUB_TOKEN is used for status + PR comments.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
