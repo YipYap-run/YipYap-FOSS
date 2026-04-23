@@ -1,0 +1,15 @@
+services:
+  yipyap:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - yipyap-data:/data
+    environment:
+      YIPYAP_DB_DSN: /data/yipyap.db
+      YIPYAP_JWT_SECRET: ${YIPYAP_JWT_SECRET:-change-me-in-production}
+      YIPYAP_DEV_SEED: "${YIPYAP_DEV_SEED:-false}"
+    restart: unless-stopped
+
+volumes:
+  yipyap-data:
