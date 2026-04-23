@@ -41,6 +41,3 @@ contributors to sign.
 - [ ] New or changed behaviour is covered by tests where reasonable.
 - [ ] User-facing changes are reflected in the [Wiki](https://github.com/YipYap-run/YipYap-FOSS/wiki)
       or are small enough that inline docs suffice.
-- [ ] No SaaS-only code or references are introduced (the upstream sync
-      strips `//go:build !foss` files, but new identifiers in shared
-      files should avoid leaking Pro-only concepts).
