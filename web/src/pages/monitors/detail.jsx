@@ -5,6 +5,23 @@ import { appMeta } from '../../state/auth';
 import { safeHref } from '../../utils/url';
 import 'uplot/dist/uPlot.min.css';
 
+// renderCheckMetric returns the right-hand summary cell for a check row.
+// For heartbeat monitors the "Latency" column is replaced with the ping's
+// source IP (captured by the ingest handler into check.metadata). For
+// everything else we show the usual millisecond latency.
+function renderCheckMetric(monitorType, c) {
+  if (monitorType === 'heartbeat') {
+    if (c.metadata) {
+      try {
+        const meta = typeof c.metadata === 'string' ? JSON.parse(c.metadata) : c.metadata;
+        if (meta.source_ip) return meta.source_ip;
+      } catch (_) { /* fall through */ }
+    }
+    return '-';
+  }
+  return c.latency_ms != null ? `${c.latency_ms}ms` : '-';
+}
+
 function HeartbeatCard({ monitorId, token, gracePeriod }) {
   const [copied, setCopied] = useState(false);
   const pingUrl = `${window.location.origin}/api/v1/heartbeat/${monitorId}?token=${token}`;
@@ -353,7 +370,7 @@ export function MonitorDetailPage({ id }) {
                   <tr>
                     <th>Time</th>
                     <th>Status</th>
-                    <th>Latency</th>
+                    <th>{monitor.type === 'heartbeat' ? 'Source' : 'Latency'}</th>
                     <th>Detail</th>
                   </tr>
                 </thead>
@@ -362,7 +379,7 @@ export function MonitorDetailPage({ id }) {
                     <tr key={c.id || i}>
                       <td>{formatTime(c.checked_at || c.created_at)}</td>
                       <td><StatusBadge status={c.status || (c.ok ? 'up' : 'down')} /></td>
-                      <td>{c.latency_ms != null ? `${c.latency_ms}ms` : '-'}</td>
+                      <td>{renderCheckMetric(monitor.type, c)}</td>
                       <td class="check-detail">{c.error || c.detail || '-'}</td>
                     </tr>
                   ))}
