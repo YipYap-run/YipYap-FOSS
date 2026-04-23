@@ -86,6 +86,50 @@ func (s *checkStore) GetLatest(ctx context.Context, monitorID string) (*domain.M
 	return &c, nil
 }
 
+func (s *checkStore) GetLatestHeartbeatPing(ctx context.Context, monitorID string) (*domain.MonitorCheck, error) {
+	row := s.q.QueryRowContext(ctx,
+		`SELECT id, monitor_id, status, latency_ms, status_code, error, metadata, tls_expiry_at, checked_at
+		 FROM monitor_checks
+		 WHERE monitor_id = ? AND status = 'up' AND metadata LIKE '%source_ip%'
+		 ORDER BY checked_at DESC LIMIT 1`,
+		monitorID)
+
+	var c domain.MonitorCheck
+	var s_, checkedAt string
+	var tlsExpiry *string
+	if err := row.Scan(&c.ID, &c.MonitorID, &s_, &c.LatencyMS, &c.StatusCode, &c.Error, &c.Metadata, &tlsExpiry, &checkedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	c.Status = domain.CheckStatus(s_)
+	c.CheckedAt = mustParseTime(checkedAt)
+	c.TLSExpiry = parseOptionalTime(tlsExpiry)
+	return &c, nil
+}
+
+func (s *checkStore) GetLatestByStatus(ctx context.Context, monitorID string, status domain.CheckStatus) (*domain.MonitorCheck, error) {
+	row := s.q.QueryRowContext(ctx,
+		`SELECT id, monitor_id, status, latency_ms, status_code, error, metadata, tls_expiry_at, checked_at
+		 FROM monitor_checks WHERE monitor_id = ? AND status = ? ORDER BY checked_at DESC LIMIT 1`,
+		monitorID, string(status))
+
+	var c domain.MonitorCheck
+	var s_, checkedAt string
+	var tlsExpiry *string
+	if err := row.Scan(&c.ID, &c.MonitorID, &s_, &c.LatencyMS, &c.StatusCode, &c.Error, &c.Metadata, &tlsExpiry, &checkedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	c.Status = domain.CheckStatus(s_)
+	c.CheckedAt = mustParseTime(checkedAt)
+	c.TLSExpiry = parseOptionalTime(tlsExpiry)
+	return &c, nil
+}
+
 func (s *checkStore) GetLatestByMonitors(ctx context.Context, monitorIDs []string) (map[string]*domain.MonitorCheck, error) {
 	if len(monitorIDs) == 0 {
 		return map[string]*domain.MonitorCheck{}, nil

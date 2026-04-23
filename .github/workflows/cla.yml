@@ -41,6 +41,7 @@ jobs:
           path-to-signatures: '.cla/signatures.json'
           path-to-document: 'https://github.com/YipYap-run/YipYap-FOSS/blob/main/CLA.md'
           branch: 'main'
+          # Bots that never sign and should be skipped.
           # WaffleThief123 is the project maintainer and does not need to
           # countersign their own CLA. Bots that will never sign (and whose
           # actions belong to the maintainer anyway) are explicitly listed.

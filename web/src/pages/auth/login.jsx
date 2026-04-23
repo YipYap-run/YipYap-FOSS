@@ -64,7 +64,25 @@ export function LoginPage() {
       connectWS();
       route('/');
     } catch (err) {
-      setError(err.message || 'Passkey login failed');
+      // The WebAuthn API throws a small set of DOMException names. Map
+      // each to a concrete, user-actionable message. The default browser
+      // text ("The request is not allowed by the user agent or the
+      // platform in the current context, possibly because the user
+      // denied permission") is confusing when the real cause is usually
+      // 'no passkey registered for this site yet'.
+      let msg = err.message || 'Passkey sign-in failed';
+      if (err && err.name === 'NotAllowedError') {
+        msg = 'No passkey found for this browser or device. Sign in with your email and password, then register a passkey under Settings > Security.';
+      } else if (err && err.name === 'SecurityError') {
+        msg = 'Passkey sign-in requires a secure (HTTPS) connection.';
+      } else if (err && err.name === 'InvalidStateError') {
+        msg = 'A passkey for this account already exists on this device but is not usable. Try another device or re-register the passkey.';
+      } else if (err && err.name === 'AbortError') {
+        msg = 'Passkey sign-in was cancelled.';
+      } else if (err && err.name === 'NotSupportedError') {
+        msg = 'Your browser or device does not support passkeys. Sign in with your email and password.';
+      }
+      setError(msg);
     }
   }
 
