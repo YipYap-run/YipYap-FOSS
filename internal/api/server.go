@@ -79,7 +79,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	}))
 
 	// Handler instances.
-	authH := handlers.NewAuthHandlerWithBaseURL(s, jwt, publicBaseURL)
+	authH := handlers.NewAuthHandlerFull(s, jwt, opt.Mailer, publicBaseURL)
 	resetH := handlers.NewPasswordResetHandler(s, jwt, opt.Mailer, publicBaseURL)
 	orgH := handlers.NewOrgHandlerWithHasher(s, opt.APIKeyHasher)
 	userH := handlers.NewUserHandler(s)
@@ -115,6 +115,8 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 				r.Post("/auth/register", authH.Register)
 			}
 			r.Post("/auth/login", authH.Login)
+			r.Post("/auth/verify-email", authH.VerifyEmail)
+			r.Post("/auth/resend-verification", authH.ResendVerification)
 			r.Post("/auth/forgot-password", resetH.ForgotPassword)
 			r.Post("/auth/reset-password", resetH.ResetPassword)
 			r.Post("/auth/confirm-delete", accountDeleteH.ConfirmDeletion)

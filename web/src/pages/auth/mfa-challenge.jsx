@@ -56,11 +56,14 @@ export default function MFAChallenge() {
       const assertion = await navigator.credentials.get({ publicKey });
       const serialized = serializeAssertion(assertion);
 
-      const res = await api(
-        '/auth/mfa/webauthn/finish?session_id=' +
-          encodeURIComponent(beginRes.session_id),
-        { method: 'POST', body: JSON.stringify({ ...serialized, mfa_token }) }
-      );
+      const qs = new URLSearchParams({
+        session_id: beginRes.session_id,
+        mfa_token,
+      });
+      const res = await api('/auth/mfa/webauthn/finish?' + qs.toString(), {
+        method: 'POST',
+        body: JSON.stringify(serialized),
+      });
 
       mfaState.value = null;
       await completeLogin(res.token, res.user);

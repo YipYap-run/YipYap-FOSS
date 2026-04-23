@@ -4,6 +4,8 @@ import { authLoading, isLoggedIn, loadUser, appMeta } from './state/auth';
 import { Layout } from './components/layout';
 import { LoginPage } from './pages/auth/login';
 import { RegisterPage } from './pages/auth/register';
+import { VerifyEmailPage } from './pages/auth/verify-email';
+import { VerifyEmailSentPage } from './pages/auth/verify-email-sent';
 import { SSOCallbackPage } from './pages/auth/sso-callback';
 import MFAChallenge from './pages/auth/mfa-challenge';
 import { ForgotPasswordPage } from './pages/auth/forgot-password';
@@ -50,6 +52,8 @@ export function App() {
     <Router onChange={handleRoute}>
       <LoginPage path="/login" />
       <RegisterPage path="/register" />
+      <VerifyEmailPage path="/verify-email" />
+      <VerifyEmailSentPage path="/verify-email-sent" />
       <SSOCallbackPage path="/auth/sso-callback" />
       <MFAChallenge path="/auth/mfa-challenge" />
       <ForgotPasswordPage path="/forgot-password" />

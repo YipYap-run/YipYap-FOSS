@@ -26,6 +26,10 @@ export function LoginPage() {
         route(`/account/recover?email=${encodeURIComponent(email)}`);
         return;
       }
+      if (result.email_not_verified) {
+        route(`/verify-email-sent?email=${encodeURIComponent(result.email || email)}`);
+        return;
+      }
       if (result.mfa_required) {
         mfaState.value = { mfa_token: result.mfa_token, mfa_methods: result.mfa_methods };
         route('/auth/mfa-challenge');

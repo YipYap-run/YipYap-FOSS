@@ -25,6 +25,12 @@ type User struct {
 	ForcePasswordChange bool      `json:"force_password_change"`
 	MFAAppEnabled       bool      `json:"mfa_app_enabled"`
 	MFAEnforcedAt       string    `json:"mfa_enforced_at,omitempty"`
+	// EmailVerifiedAt is nil until the user clicks the verification link
+	// emailed at registration. Login is blocked while nil.
+	EmailVerifiedAt                      *time.Time `json:"email_verified_at,omitempty"`
+	EmailVerificationSentAt              *time.Time `json:"-"`
+	EmailVerificationResendCount         int        `json:"-"`
+	EmailVerificationResendWindowStarted *time.Time `json:"-"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DisabledAt   *time.Time `json:"disabled_at,omitempty"`

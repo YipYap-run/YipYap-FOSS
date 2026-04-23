@@ -119,14 +119,19 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		PasswordHash: hash,
 		Role:         req.Role,
 		Phone:        req.Phone,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	if err := h.store.Users().Create(r.Context(), user); err != nil {
 		errorResponse(w, http.StatusConflict, "user already exists")
 		return
 	}
+	// Admin-invited accounts are implicitly trusted; skip the email gate.
+	if err := h.store.Users().MarkEmailVerified(r.Context(), user.ID, now); err != nil {
+		slog.Warn("users.create: failed to mark admin-invited user verified", "user_id", user.ID, "error", err)
+	}
+	user.EmailVerifiedAt = &now
 	if h.seats != nil {
 		if err := h.seats.OnSeatAdded(r.Context(), claims.OrgID); err != nil {
 			slog.Error("billing: seat add failed", "error", err, "org", claims.OrgID)

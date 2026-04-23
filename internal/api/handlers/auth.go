@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -10,12 +12,14 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
 type AuthHandler struct {
 	store         store.Store
 	jwt           *auth.JWTIssuer
+	mailer        *mailer.Mailer
 	publicBaseURL string
 }
 
@@ -25,6 +29,10 @@ func NewAuthHandler(s store.Store, jwt *auth.JWTIssuer) *AuthHandler {
 
 func NewAuthHandlerWithBaseURL(s store.Store, jwt *auth.JWTIssuer, publicBaseURL string) *AuthHandler {
 	return &AuthHandler{store: s, jwt: jwt, publicBaseURL: publicBaseURL}
+}
+
+func NewAuthHandlerFull(s store.Store, jwt *auth.JWTIssuer, m *mailer.Mailer, publicBaseURL string) *AuthHandler {
+	return &AuthHandler{store: s, jwt: jwt, mailer: m, publicBaseURL: publicBaseURL}
 }
 
 // setSessionCookie writes the JWT as an HttpOnly session cookie.
@@ -56,9 +64,10 @@ func clearSessionCookie(w http.ResponseWriter) {
 }
 
 type registerRequest struct {
-	OrgName  string `json:"org_name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	OrgName         string `json:"org_name"`
+	Email           string `json:"email"`
+	Password        string `json:"password"`
+	ConfirmPassword string `json:"confirm_password"`
 }
 
 type loginRequest struct {
@@ -98,6 +107,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, "password must be at least 8 characters")
 		return
 	}
+	if req.ConfirmPassword != "" && req.ConfirmPassword != req.Password {
+		errorResponse(w, http.StatusBadRequest, "passwords do not match")
+		return
+	}
 
 	passwordHash, err := auth.HashPassword(req.Password)
 	if err != nil {
@@ -132,7 +145,6 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Users().Create(r.Context(), user); err != nil {
 			return err
 		}
-		// Seed built-in monitor states for the new org.
 		if sp, ok := tx.(store.MonitorStateProvider); ok {
 			if err := sp.MonitorStates().SeedBuiltins(r.Context(), org.ID); err != nil {
 				return err
@@ -145,14 +157,54 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.jwt.Issue(user.ID, org.ID, string(user.Role))
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "failed to issue token")
+	// FOSS fallback: no mailer configured => auto-verify and issue session.
+	if h.mailer == nil {
+		if err := h.store.Users().MarkEmailVerified(r.Context(), user.ID, now); err != nil {
+			log.Printf("register: failed to auto-verify user %s: %v", user.ID, err)
+		}
+		token, err := h.jwt.Issue(user.ID, org.ID, string(user.Role))
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "failed to issue token")
+			return
+		}
+		h.setSessionCookie(w, token)
+		jsonResponse(w, http.StatusCreated, authResponse{Token: token, User: user})
 		return
 	}
 
-	h.setSessionCookie(w, token)
-	jsonResponse(w, http.StatusCreated, authResponse{Token: token, User: user})
+	h.sendVerificationEmail(r.Context(), user)
+	jsonResponse(w, http.StatusCreated, map[string]string{
+		"status": "verification_sent",
+		"email":  user.Email,
+	})
+}
+
+// sendVerificationEmail issues a 24h token, sends the email, and records the send
+// (updates sent_at + resend count/window). Best-effort; errors are logged only.
+func (h *AuthHandler) sendVerificationEmail(ctx context.Context, user *domain.User) {
+	if h.mailer == nil {
+		return
+	}
+	token, err := h.jwt.IssueEmailVerification(user.ID, user.OrgID, user.Email)
+	if err != nil {
+		log.Printf("verify-email: issue token for %s: %v", user.ID, err)
+		return
+	}
+	verifyURL := h.publicBaseURL + "/verify-email?token=" + token
+	subject := "YipYap: Verify your email"
+	body := "Welcome to YipYap!\n\n" +
+		"Click the link below to verify your email address and activate your account:\n\n" +
+		verifyURL + "\n\n" +
+		"This link expires in 24 hours.\n\n" +
+		"If you did not sign up for YipYap, you can safely ignore this email."
+	go func(email, id string) {
+		if err := h.mailer.Send(email, subject, body); err != nil {
+			log.Printf("verify-email: send to %s: %v", id, err)
+		}
+	}(user.Email, user.ID)
+	if err := h.store.Users().RecordVerificationSend(ctx, user.ID, time.Now().UTC()); err != nil {
+		log.Printf("verify-email: record send for %s: %v", user.ID, err)
+	}
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +234,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if user.DisabledAt != nil {
 		jsonResponse(w, http.StatusForbidden, map[string]interface{}{
 			"account_disabled": true,
+		})
+		return
+	}
+
+	if user.EmailVerifiedAt == nil {
+		jsonResponse(w, http.StatusForbidden, map[string]interface{}{
+			"email_not_verified": true,
+			"email":              user.Email,
 		})
 		return
 	}

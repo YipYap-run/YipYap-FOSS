@@ -97,6 +97,14 @@ type UserStore interface {
 	Disable(ctx context.Context, id string, at time.Time) error
 	Enable(ctx context.Context, id string) error
 	ListDisabledBefore(ctx context.Context, before time.Time) ([]*domain.User, error)
+	// MarkEmailVerified sets email_verified_at = now() for the given user.
+	MarkEmailVerified(ctx context.Context, id string, at time.Time) error
+	// RecordVerificationSend updates sent_at and increments the hourly
+	// resend counter (resetting the window if expired).
+	RecordVerificationSend(ctx context.Context, id string, at time.Time) error
+	// ListUnverifiedUnsent returns users who have never been sent a
+	// verification email (for the startup bulk send).
+	ListUnverifiedUnsent(ctx context.Context) ([]*domain.User, error)
 }
 
 // OIDCStore manages OIDC connections and user links.

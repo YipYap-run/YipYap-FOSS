@@ -13,5 +13,12 @@ type WebAuthnCredential struct {
 	Discoverable    bool      `json:"discoverable"`
 	UserHandle      []byte    `json:"-"`
 	Transports      []string  `json:"-"`
-	CreatedAt       time.Time `json:"created_at"`
+	// BackupEligible and BackupState are the BE/BS flags from the
+	// authenticator data at registration. The library rejects assertions
+	// whose BackupEligible differs from the stored credential; platform
+	// authenticators emit BE=true and must be stored that way to verify
+	// at login. Defaults (both false) are correct for legacy security keys.
+	BackupEligible bool      `json:"-"`
+	BackupState    bool      `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
 }
