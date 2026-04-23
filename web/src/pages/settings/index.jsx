@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { get, post, patch, del, put } from '../../api/client';
-import { PageHeader, Card, Tabs, Modal, LoadingPage, ErrorMessage, formatTime, useToast, ToastContainer } from '../../components/ui';
+import { PageHeader, Card, Modal, LoadingPage, ErrorMessage, formatTime, useToast, ToastContainer } from '../../components/ui';
 import { currentOrg, currentUser, appMeta } from '../../state/auth';
 import { route } from 'preact-router';
 import { MFATab } from './mfa.jsx';
@@ -36,33 +36,45 @@ export function SettingsPage({ tab: initialTab }) {
     route(`/settings/${t}`, true);
   }
 
+  const visibleTabs = SETTING_TABS.filter(t => {
+    const isFoss = appMeta.value?.edition === 'foss';
+    if (t.key === 'billing' && (isFoss || !appMeta.value?.billing_enabled)) return false;
+    if (isFoss && ['teams', 'status-page', 'sso', 'integrations'].includes(t.key)) return false;
+    if (t.key === 'security' && isFoss) return false;
+    return true;
+  });
+
   return (
     <div class="settings-page">
       <PageHeader title="Settings" />
-      <Tabs tabs={SETTING_TABS.filter(t => {
-        const isFoss = appMeta.value?.edition === 'foss';
-        if (t.key === 'billing' && (isFoss || !appMeta.value?.billing_enabled)) return false;
-        if (isFoss && ['teams', 'status-page', 'sso', 'integrations'].includes(t.key)) return false;
-        if (t.key === 'security' && isFoss) return false;
-        return true;
-      })} active={tab} onChange={handleTabChange} />
-      <div class="settings-content">
-        {tab === 'account' && <AccountTab />}
-        {tab === 'channels' && <ChannelsTab />}
-        {tab === 'escalation' && <EscalationTab />}
-        {tab === 'integrations' && <IntegrationsTab />}
-        {tab === 'teams' && <TeamsTab />}
-        {tab === 'monitor-states' && <MonitorStatesTab />}
-        {tab === 'maintenance' && <MaintenanceTab />}
-        {tab === 'status-page' && <StatusPageTab />}
-        {tab === 'api-keys' && <APIKeysTab />}
-        {tab === 'sso' && <SSOTab />}
-        {tab === 'members' && <MembersTab />}
-        {tab === 'billing' && <BillingTab />}
-        {tab === 'security' && <MFATab />}
-        {tab === 'import' && <ImportTab />}
-        {tab === 'data' && <DataTab />}
-        {tab === 'org' && <OrgTab />}
+      <div class="settings-layout">
+        <nav class="settings-nav" aria-label="Settings sections">
+          {visibleTabs.map(t => (
+            <button key={t.key}
+                    class={`settings-nav-item ${tab === t.key ? 'active' : ''}`}
+                    onClick={() => handleTabChange(t.key)}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <div class="settings-main">
+          {tab === 'account' && <AccountTab />}
+          {tab === 'channels' && <ChannelsTab />}
+          {tab === 'escalation' && <EscalationTab />}
+          {tab === 'integrations' && <IntegrationsTab />}
+          {tab === 'teams' && <TeamsTab />}
+          {tab === 'monitor-states' && <MonitorStatesTab />}
+          {tab === 'maintenance' && <MaintenanceTab />}
+          {tab === 'status-page' && <StatusPageTab />}
+          {tab === 'api-keys' && <APIKeysTab />}
+          {tab === 'sso' && <SSOTab />}
+          {tab === 'members' && <MembersTab />}
+          {tab === 'billing' && <BillingTab />}
+          {tab === 'security' && <MFATab />}
+          {tab === 'import' && <ImportTab />}
+          {tab === 'data' && <DataTab />}
+          {tab === 'org' && <OrgTab />}
+        </div>
       </div>
     </div>
   );
