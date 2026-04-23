@@ -45,7 +45,7 @@ func TestOTLPExportIntegration(t *testing.T) {
 
 	// Set up telemetry pointing at our fake server.
 	ctx := context.Background()
-	tel, err := telemetry.Setup(ctx, endpoint)
+	tel, err := telemetry.Setup(ctx, telemetry.SetupOptions{OTLPEndpoint: endpoint, ServiceName: "yipyap-test"})
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestSetup_NoEndpoint(t *testing.T) {
-	tel, err := telemetry.Setup(context.Background(), "")
+	tel, err := telemetry.Setup(context.Background(), telemetry.SetupOptions{ServiceName: "yipyap-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestSetup_NoEndpoint(t *testing.T) {
 }
 
 func TestNewMetrics(t *testing.T) {
-	tel, _ := telemetry.Setup(context.Background(), "")
+	tel, _ := telemetry.Setup(context.Background(), telemetry.SetupOptions{ServiceName: "yipyap-test"})
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 	m, err := telemetry.NewMetrics(tel.Meter)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestNewMetrics(t *testing.T) {
 }
 
 func TestTraceContextRoundTrip(t *testing.T) {
-	tel, _ := telemetry.Setup(context.Background(), "")
+	tel, _ := telemetry.Setup(context.Background(), telemetry.SetupOptions{ServiceName: "yipyap-test"})
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	ctx, span := tel.Tracer.Start(context.Background(), "test-span")
