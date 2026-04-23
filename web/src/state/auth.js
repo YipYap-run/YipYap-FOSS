@@ -32,12 +32,29 @@ export async function completeLogin(token, user) {
 }
 
 export async function login(email, password) {
-  const res = await post('/auth/login', { email, password });
+  let res;
+  try {
+    res = await post('/auth/login', { email, password });
+  } catch (err) {
+    // 403 with a body signals either account_disabled or email_not_verified.
+    if (err.status === 403 && err.body) {
+      if (err.body.email_not_verified) {
+        return { email_not_verified: true, email: err.body.email };
+      }
+      if (err.body.account_disabled) {
+        return { account_disabled: true };
+      }
+    }
+    throw err;
+  }
   if (res.mfa_required) {
     return { mfa_required: true, mfa_token: res.mfa_token, mfa_methods: res.mfa_methods };
   }
   if (res.account_disabled) {
     return { account_disabled: true };
+  }
+  if (res.email_not_verified) {
+    return { email_not_verified: true, email: res.email };
   }
   // Server set the HttpOnly cookie; mirror token in-memory for fallback only.
   setToken(res.token);
@@ -47,13 +64,33 @@ export async function login(email, password) {
   return res;
 }
 
-export async function register(orgName, email, password) {
-  const res = await post('/auth/register', { org_name: orgName, email, password });
-  setToken(res.token);
-  currentUser.value = res.user;
-  currentOrg.value = res.org || null;
-  connectWS();
+export async function register(orgName, email, password, confirmPassword) {
+  const res = await post('/auth/register', {
+    org_name: orgName,
+    email,
+    password,
+    confirm_password: confirmPassword,
+  });
+  // SaaS: server returns {status:"verification_sent", email}. Don't log in.
+  if (res && res.status === 'verification_sent') {
+    return res;
+  }
+  // FOSS: server returns a session token.
+  if (res && res.token) {
+    setToken(res.token);
+    currentUser.value = res.user;
+    currentOrg.value = res.org || null;
+    connectWS();
+  }
   return res;
+}
+
+export async function resendVerification(email) {
+  return post('/auth/resend-verification', { email });
+}
+
+export async function verifyEmail(token) {
+  return post('/auth/verify-email', { token });
 }
 
 export async function logout() {

@@ -170,6 +170,41 @@ func (j *JWTIssuer) ValidatePasswordReset(tokenString string) (*Claims, error) {
 	return claims, nil
 }
 
+// IssueEmailVerification creates a 24-hour JWT with aud:"email-verification" for the given user.
+func (j *JWTIssuer) IssueEmailVerification(userID, orgID, email string) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID: userID,
+		OrgID:  orgID,
+		Role:   email,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+			Audience:  jwt.ClaimStrings{"email-verification"},
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(j.secret)
+}
+
+// ValidateEmailVerification parses an email-verification token, checking aud and expiry.
+func (j *JWTIssuer) ValidateEmailVerification(tokenString string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return j.secret, nil
+	}, jwt.WithAudience("email-verification"))
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, fmt.Errorf("invalid email-verification token")
+	}
+	return claims, nil
+}
+
 // IssueAccountDeletion creates a 1-hour JWT with aud:"account-delete" for the given user.
 // The current password hash nonce is embedded so the token is automatically
 // invalidated once the password changes.

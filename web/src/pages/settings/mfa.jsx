@@ -32,6 +32,12 @@ export function MFATab() {
   const [deleteCredError, setDeleteCredError] = useState('');
   const [deleteCredLoading, setDeleteCredLoading] = useState(false);
 
+  // Shared password-prompt for register flows (totp setup, add passkey, add security key)
+  const [pwPromptKind, setPwPromptKind] = useState(null); // 'totp' | 'passkey' | 'key'
+  const [pwPromptValue, setPwPromptValue] = useState('');
+  const [pwPromptError, setPwPromptError] = useState('');
+  const [pwPromptBusy, setPwPromptBusy] = useState(false);
+
   useEffect(() => {
     loadCredentials();
   }, []);
@@ -49,18 +55,24 @@ export function MFATab() {
 
   /* ─── TOTP ─── */
 
-  async function startTotpSetup() {
-    setTotpLoading(true);
+  function startTotpSetup() {
     setTotpError('');
+    setPwPromptKind('totp');
+    setPwPromptValue('');
+    setPwPromptError('');
+  }
+
+  async function doStartTotpSetup(currentPassword) {
+    setTotpLoading(true);
     try {
-      const data = await post('/auth/mfa/totp/setup', {});
+      const data = await post('/auth/mfa/totp/setup', { current_password: currentPassword });
       setTotpSetup(data);
       setTotpCode('');
-      // Generate QR code image
       const url = await QRCode.toDataURL(data.uri, { width: 200 });
       setQrDataUrl(url);
+      setPwPromptKind(null);
     } catch (e) {
-      setTotpError(e?.message || 'Failed to start setup');
+      setPwPromptError(e?.message || 'Failed to start setup');
     }
     setTotpLoading(false);
   }
@@ -136,23 +148,55 @@ export function MFATab() {
 
   /* ─── WebAuthn ─── */
 
-  async function registerKey(isPasskey) {
+  function registerKey(isPasskey) {
     setRegisterError('');
+    setPwPromptKind(isPasskey ? 'passkey' : 'key');
+    setPwPromptValue('');
+    setPwPromptError('');
+  }
+
+  async function doRegisterKey(isPasskey, currentPassword) {
     const name = prompt('Name for this credential:') || (isPasskey ? 'Passkey' : 'Security Key');
     try {
-      const options = await post('/auth/mfa/webauthn/register/begin', { name, discoverable: isPasskey });
+      const options = await post('/auth/mfa/webauthn/register/begin', {
+        name,
+        discoverable: isPasskey,
+        current_password: currentPassword,
+      });
+      setPwPromptKind(null);
       const publicKey = prepareCreationOptions(options.publicKey || options);
       const credential = await navigator.credentials.create({ publicKey });
       const serialized = serializeCredential(credential);
       await post('/auth/mfa/webauthn/register/finish', serialized);
       loadCredentials();
     } catch (e) {
-      if (e?.name === 'NotAllowedError') {
+      if (pwPromptKind) {
+        setPwPromptError(e?.message || 'Registration failed');
+      } else if (e?.name === 'NotAllowedError') {
         setRegisterError('Registration was cancelled or timed out.');
       } else {
         setRegisterError(e?.message || 'Registration failed');
       }
     }
+  }
+
+  async function submitPasswordPrompt() {
+    if (!pwPromptValue) {
+      setPwPromptError('Password is required');
+      return;
+    }
+    setPwPromptBusy(true);
+    setPwPromptError('');
+    const kind = pwPromptKind;
+    const pw = pwPromptValue;
+    if (kind === 'totp') {
+      await doStartTotpSetup(pw);
+    } else if (kind === 'passkey') {
+      await doRegisterKey(true, pw);
+    } else if (kind === 'key') {
+      await doRegisterKey(false, pw);
+    }
+    setPwPromptBusy(false);
   }
 
   async function deleteCredential() {
@@ -330,6 +374,42 @@ export function MFATab() {
             {disableTotpLoading ? 'Disabling\u2026' : 'Disable authenticator'}
           </button>
           <button class="btn btn-outline" onClick={() => setShowDisableTotp(false)} disabled={disableTotpLoading}>
+            Cancel
+          </button>
+        </div>
+      </Modal>
+
+      {/* ─── Password Prompt (pre-register) ─── */}
+      <Modal
+        open={!!pwPromptKind}
+        onClose={() => !pwPromptBusy && setPwPromptKind(null)}
+        title={
+          pwPromptKind === 'totp' ? 'Confirm your password'
+            : pwPromptKind === 'passkey' ? 'Add a passkey'
+            : 'Add a security key'
+        }
+      >
+        <p style="margin-bottom: 12px">
+          Enter your current password to continue.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Current password</label>
+          <input
+            class="form-input"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Current password"
+            value={pwPromptValue}
+            onInput={e => { setPwPromptValue(e.target.value); setPwPromptError(''); }}
+            onKeyDown={e => e.key === 'Enter' && submitPasswordPrompt()}
+          />
+        </div>
+        {pwPromptError && <p class="form-error">{pwPromptError}</p>}
+        <div class="btn-group" style="margin-top: 16px">
+          <button class="btn btn-primary" onClick={submitPasswordPrompt} disabled={pwPromptBusy}>
+            {pwPromptBusy ? 'Working…' : 'Continue'}
+          </button>
+          <button class="btn btn-outline" onClick={() => setPwPromptKind(null)} disabled={pwPromptBusy}>
             Cancel
           </button>
         </div>
