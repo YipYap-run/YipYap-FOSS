@@ -1,0 +1,19 @@
+type: run.yipyap.reply.alert.deduplicated.v1
+direction: reply
+summary: Mark an alert as a duplicate of another alert. Future notifications for this alert redirect to the primary.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+    description: ID of the alert being marked duplicate.
+  - name: duplicate_of
+    type: string
+    required: true
+    format: ulid
+    description: ID of the primary alert this one deduplicates against. Must be a real, active alert in the same org.
+  - name: reason
+    type: string
+    required: true
+    description: Why the sink believes these are duplicates (e.g. "same underlying monitor, within 30s window").

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.status_page.v1.json",
+  "title": "run.yipyap.reply.alert.status_page.v1",
+  "description": "Record that an external status page has been updated in response to this alert. If the monitor has a public page, surfaces the update there.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.status_page.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "statuspage_io",
+            "instatus",
+            "atlassian_statuspage",
+            "cachet",
+            "custom"
+          ],
+          "description": "External status-page provider."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Public URL of the status-page entry."
+        },
+        "public_message": {
+          "type": "string",
+          "description": "Message rendered on the public page. Recorded verbatim in audit; bounded at 2KiB by handler."
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the external status-page update landed. May lag the CloudEvent receive time."
+        }
+      },
+      "required": [
+        "alert_id",
+        "provider",
+        "url",
+        "public_message",
+        "updated_at"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

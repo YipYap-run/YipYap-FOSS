@@ -1,0 +1,12 @@
+type: run.yipyap.ingest.status.v1
+direction: in
+summary: Ingested to set a monitor's status explicitly.
+subject_template: "monitor/{monitor_id}"
+data:
+  - name: status
+    type: string
+    required: true
+    enum: [up, down, degraded]
+  - name: message
+    type: string
+    required: false

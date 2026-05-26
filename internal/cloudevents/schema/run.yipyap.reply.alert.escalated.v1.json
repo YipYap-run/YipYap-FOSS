@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.escalated.v1.json",
+  "title": "run.yipyap.reply.alert.escalated.v1",
+  "description": "Override the alert's severity or jump to a specific escalation step. High blast radius, requires per-channel trust flag.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.escalated.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "new_severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ],
+          "description": "New severity. Omit to leave severity unchanged."
+        },
+        "step_index": {
+          "type": "integer",
+          "description": "Zero-based escalation step to jump to. Omit to leave step unchanged. Cannot jump past the final step."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Justification. Required because this mutates alert state visibly."
+        }
+      },
+      "required": [
+        "alert_id",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

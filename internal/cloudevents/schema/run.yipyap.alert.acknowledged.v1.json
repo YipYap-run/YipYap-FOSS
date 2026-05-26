@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.alert.acknowledged.v1.json",
+  "title": "run.yipyap.alert.acknowledged.v1",
+  "description": "Emitted when an alert is acknowledged by a human or integration.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.alert.acknowledged.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "monitor_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "acked_by": {
+          "type": "string",
+          "description": "User display name or integration identifier that performed the ack."
+        },
+        "acked_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "alert_id",
+        "monitor_id",
+        "acked_by",
+        "acked_at"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

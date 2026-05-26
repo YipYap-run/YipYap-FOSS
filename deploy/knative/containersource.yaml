@@ -1,0 +1,77 @@
+# Run yipyap as a Knative ContainerSource inside your own cluster.
+#
+# Prerequisites:
+#   - A running Kubernetes cluster with Knative Eventing installed.
+#   - A Broker (or any other Knative Addressable) to receive events.
+#   - An org-scoped YipYap API key, stored in the yipyap-source-api-key secret.
+#
+# Create the secret first:
+#   kubectl create secret generic yipyap-source-api-key \
+#     --namespace yipyap \
+#     --from-literal=YIPYAP_API_KEY=yy_your_api_key
+#
+# Then apply this file:
+#   kubectl apply -f containersource.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yipyap
+---
+apiVersion: sources.knative.dev/v1
+kind: ContainerSource
+metadata:
+  name: yipyap-alerts
+  namespace: yipyap
+spec:
+  template:
+    spec:
+      containers:
+        # Pin to a specific release tag in production, never :latest.
+        # See https://github.com/YipYap-run/knative-source/releases for the
+        # current versions.
+        - image: ghcr.io/yipyap-run/knative-source:v0.1.0
+          env:
+            - name: YIPYAP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: yipyap-source-api-key
+                  key: YIPYAP_API_KEY
+            # For self-hosted yipyap, set YIPYAP_BASE_URL to your console URL.
+            # - name: YIPYAP_BASE_URL
+            #   value: https://yipyap.example.com
+            - name: YIPYAP_EVENT_FILTER
+              value: "run.yipyap.alert.*"
+            # YIPYAP_MODE overrides the server hint. Leave unset for auto.
+            # - name: YIPYAP_MODE
+            #   value: poll
+            - name: YIPYAP_POLL_INTERVAL
+              value: 5s
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: cursor
+              mountPath: /var/run/yipyap
+      volumes:
+        - name: cursor
+          emptyDir: {}
+  sink:
+    ref:
+      apiVersion: eventing.knative.dev/v1
+      kind: Broker
+      name: default
+  ceOverrides:
+    extensions:
+      # Optional: tag every forwarded event with fixed attributes.
+      environment: prod
+      region: us-east-1

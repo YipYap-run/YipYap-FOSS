@@ -1,0 +1,56 @@
+# YipYap reverse proxy example for Traefik v3 (docker-compose labels).
+#
+# Run YipYap and Traefik side-by-side on the same docker network. Traefik
+# discovers YipYap via container labels. Replace yipyap.example.com and
+# the contact email before deploying.
+
+services:
+  traefik:
+    image: traefik:v3
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-acme:/data
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@example.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/data/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+
+  yipyap:
+    image: ghcr.io/yipyap-run/yipyap-foss:latest
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - yipyap-data:/data
+    environment:
+      YIPYAP_DB_DSN: /data/yipyap.db
+      YIPYAP_JWT_SECRET: ${YIPYAP_JWT_SECRET}
+      YIPYAP_NOTIFICATION_KEY: ${YIPYAP_NOTIFICATION_KEY}
+      YIPYAP_TRUSTED_PROXY_CIDRS: "172.16.0.0/12"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.yipyap.rule=Host(`yipyap.example.com`)"
+      - "traefik.http.routers.yipyap.entrypoints=websecure"
+      - "traefik.http.routers.yipyap.tls.certresolver=letsencrypt"
+      - "traefik.http.services.yipyap.loadbalancer.server.port=8080"
+      - "traefik.http.routers.yipyap.middlewares=yipyap-sec-headers"
+      - "traefik.http.middlewares.yipyap-sec-headers.headers.stsseconds=31536000"
+      - "traefik.http.middlewares.yipyap-sec-headers.headers.stsincludesubdomains=true"
+      - "traefik.http.middlewares.yipyap-sec-headers.headers.contenttypenosniff=true"
+      - "traefik.http.middlewares.yipyap-sec-headers.headers.framedeny=true"
+      - "traefik.http.middlewares.yipyap-sec-headers.headers.referrerpolicy=strict-origin-when-cross-origin"
+
+volumes:
+  traefik-acme:
+  yipyap-data:

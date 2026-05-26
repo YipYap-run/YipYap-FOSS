@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.ownership.v1.json",
+  "title": "run.yipyap.reply.alert.ownership.v1",
+  "description": "Transfer alert ownership to a team or person. Does not ack; ownership is separate from ack state.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.ownership.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "owner_kind": {
+          "type": "string",
+          "enum": [
+            "team",
+            "user"
+          ],
+          "description": "Whether the new owner is a yipyap team or user."
+        },
+        "owner_id": {
+          "type": "string",
+          "description": "ID of the team or user. Must exist in this org; unknown IDs reject at handler level."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional justification (e.g. \"escalating to platform team\")."
+        }
+      },
+      "required": [
+        "alert_id",
+        "owner_kind",
+        "owner_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

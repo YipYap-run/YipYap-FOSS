@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.monitor.deregister.v1.json",
+  "title": "run.yipyap.reply.monitor.deregister.v1",
+  "description": "Disable the monitor associated with this alert. Highest-blast-radius reply type, requires a separate per-channel explicit-trust flag. UI renders a warning banner when enabled.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.monitor.deregister.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "description": "Alert ID. Used solely for ce_alertref validation; the handler derives monitor_id from the correlated outbound event."
+        },
+        "monitor_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "description": "The monitor to deregister. Must match the monitor referenced by the correlated outbound event's registry entry, cross-monitor deregister rejected."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Justification required by the handler. Stored in audit log. Must be at least 16 characters, forces an intentional, documented action."
+        }
+      },
+      "required": [
+        "alert_id",
+        "monitor_id",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

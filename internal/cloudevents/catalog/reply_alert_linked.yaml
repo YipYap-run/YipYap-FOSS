@@ -1,0 +1,28 @@
+type: run.yipyap.reply.alert.linked.v1
+direction: reply
+summary: Sent by a sink to attach an external reference (Jira ticket, PagerDuty incident, Slack thread, etc.) to an alert.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+    description: ID of the alert. Must match ce_alertref on the reply envelope.
+  - name: kind
+    type: string
+    required: true
+    enum: [jira, pagerduty, slack_thread, github_issue, gitlab_issue, linear, servicenow, other]
+    description: Provider of the external reference.
+  - name: id
+    type: string
+    required: true
+    description: External system's canonical ID for the reference (e.g. "INC-123", "PROJ-456").
+  - name: url
+    type: string
+    required: false
+    format: uri
+    description: Optional clickable URL pointing at the external reference.
+  - name: title
+    type: string
+    required: false
+    description: Optional human-readable title of the referenced item.

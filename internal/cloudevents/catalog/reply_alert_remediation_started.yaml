@@ -1,0 +1,21 @@
+type: run.yipyap.reply.alert.remediation_started.v1
+direction: reply
+summary: Signal that automated remediation is in progress. Suppresses re-notify for a bounded window until a remediation_result reply arrives.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: remediation_id
+    type: string
+    required: true
+    description: Unique ID minted by the remediator. Correlates this event with the eventual remediation_result reply.
+  - name: description
+    type: string
+    required: true
+    description: Human-readable description of the remediation attempt (e.g. "restart pod alpha-5, draining first").
+  - name: expected_duration_seconds
+    type: int
+    required: false
+    description: How long the remediator expects this to take. Capped at the channel's max_remediation_seconds (default 600). Renotify-suppression lifts at this timeout even without a remediation_result.

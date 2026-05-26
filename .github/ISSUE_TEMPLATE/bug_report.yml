@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a bug in YipYap FOSS.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more of this
+        template you can fill in, the faster we can reproduce and fix
+        the problem.
+
+        **Before filing**, please check:
+        - The [Wiki](https://github.com/YipYap-run/YipYap-FOSS/wiki) for
+          documented behaviour.
+        - Existing open and closed issues for duplicates.
+        - The release notes for the version you are running.
+
+        **Security issues** should be reported privately via GitHub
+        Security Advisories, not here.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: YipYap version or commit SHA.
+      placeholder: v1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: deployment
+    attributes:
+      label: Deployment
+      description: How are you running YipYap?
+      placeholder: Docker (ghcr.io/yipyap-run/yipyap-foss:1.0.0) on Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Clear description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps we can follow to reliably see the problem.
+      placeholder: |
+        1. Create a monitor with ...
+        2. Wait for ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Log lines, stack traces, or error messages from the YipYap container or binary. Redact secrets.
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Environment variables and monitor or channel config. Redact secrets.
+      render: shell
+
+  - type: dropdown
+    id: reporter-type
+    attributes:
+      label: How are you using YipYap?
+      options:
+        - Personal project
+        - Internal tooling at work
+        - Evaluating for production
+        - Running in production
+        - Contributing to the project
+    validations:
+      required: false

@@ -1,0 +1,28 @@
+type: run.yipyap.reply.alert.status_page.v1
+direction: reply
+summary: Record that an external status page has been updated in response to this alert. If the monitor has a public page, surfaces the update there.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: provider
+    type: string
+    required: true
+    enum: [statuspage_io, instatus, atlassian_statuspage, cachet, custom]
+    description: External status-page provider.
+  - name: url
+    type: string
+    required: true
+    format: uri
+    description: Public URL of the status-page entry.
+  - name: public_message
+    type: string
+    required: true
+    description: Message rendered on the public page. Recorded verbatim in audit; bounded at 2KiB by handler.
+  - name: updated_at
+    type: string
+    required: true
+    format: rfc3339
+    description: When the external status-page update landed. May lag the CloudEvent receive time.

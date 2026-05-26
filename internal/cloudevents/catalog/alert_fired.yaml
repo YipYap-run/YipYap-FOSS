@@ -1,0 +1,24 @@
+type: run.yipyap.alert.fired.v1
+direction: out
+summary: Emitted when an alert transitions from pending to fired.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: monitor_id
+    type: string
+    required: true
+    format: ulid
+  - name: severity
+    type: string
+    required: true
+    enum: [info, warning, critical]
+  - name: reason
+    type: string
+    required: true
+  - name: fired_at
+    type: string
+    required: true
+    format: rfc3339

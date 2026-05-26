@@ -1,0 +1,2 @@
+ALTER TABLE orgs ADD COLUMN promo_expires_at TEXT;
+ALTER TABLE orgs ADD COLUMN promo_grace_days INTEGER NOT NULL DEFAULT 30;

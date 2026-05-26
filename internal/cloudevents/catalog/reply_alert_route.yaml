@@ -1,0 +1,26 @@
+type: run.yipyap.reply.alert.route.v1
+direction: reply
+summary: Create a scoped, time-limited routing rule that redirects future matching alerts to a specified channel. High blast radius, requires per-channel trust flag and mandatory expiry.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: target_channel_id
+    type: string
+    required: true
+    description: Notification channel ID to route matching alerts to. Must exist in this org.
+  - name: match_filter
+    type: object
+    required: true
+    description: "Fields describing which alerts the rule covers. Must include at least one of: monitor_id (string), severity (string), type_glob (string). Empty match_filter rejected."
+  - name: expires_at
+    type: string
+    required: true
+    format: rfc3339
+    description: When this routing rule stops applying. Mandatory and bounded at channel level (default max 24h from now). Rejects if in the past or beyond the cap.
+  - name: reason
+    type: string
+    required: true
+    description: Justification stored on the audit log and rendered on the rule in the admin UI.

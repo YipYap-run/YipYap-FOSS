@@ -1,0 +1,21 @@
+type: run.yipyap.alert.resolved.v1
+direction: out
+summary: Emitted when an alert is resolved (automatically or by a user).
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: monitor_id
+    type: string
+    required: true
+    format: ulid
+  - name: resolved_by
+    type: string
+    required: false
+    description: User display name or "system" when auto-resolved by monitor recovery.
+  - name: resolved_at
+    type: string
+    required: true
+    format: rfc3339

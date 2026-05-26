@@ -1,0 +1,43 @@
+# Apply a YipYapSource CR to run yipyap as a first-class Knative event
+# source. Requires the Helm chart from ghcr.io/yipyap-run/knative-source
+# to be installed first (see Knative-Source-CRD wiki page).
+#
+# Prerequisites:
+#   helm repo add yipyap-source https://yipyap-run.github.io/knative-source
+#   helm install yipyap-source yipyap-source/yipyap-source \
+#     --namespace yipyap-sources --create-namespace
+#
+#   kubectl -n yipyap create secret generic yipyap-creds \
+#     --from-literal=api-key=yy_your_org_scoped_api_key
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yipyap
+---
+apiVersion: sources.yipyap.run/v1alpha1
+kind: YipYapSource
+metadata:
+  name: prod-alerts
+  namespace: yipyap
+spec:
+  apiKeyRef:
+    name: yipyap-creds
+    # key defaults to "api-key"
+  # baseURL defaults to https://console.yipyap.run for SaaS.
+  # For self-hosted yipyap, point at your console:
+  # baseURL: https://yipyap.example.com
+  filter:
+    types:
+      - run.yipyap.alert.*
+    severities: [warning, critical]
+  mode: auto      # auto | poll | stream
+  sink:
+    ref:
+      apiVersion: eventing.knative.dev/v1
+      kind: Broker
+      name: default
+  ceOverrides:
+    extensions:
+      environment: prod
+      region: us-east-1

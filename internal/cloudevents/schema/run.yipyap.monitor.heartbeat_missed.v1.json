@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.monitor.heartbeat_missed.v1.json",
+  "title": "run.yipyap.monitor.heartbeat_missed.v1",
+  "description": "Emitted when a heartbeat monitor's expected window expires without a ping.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.monitor.heartbeat_missed.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "monitor_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "expected_by": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp by which a heartbeat ping was expected."
+        },
+        "last_seen_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the most recent observed heartbeat, if any."
+        }
+      },
+      "required": [
+        "monitor_id",
+        "expected_by"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

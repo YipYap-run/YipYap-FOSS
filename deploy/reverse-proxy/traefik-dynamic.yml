@@ -1,0 +1,57 @@
+# YipYap reverse proxy example for Traefik v3 (file provider).
+#
+# Pair this dynamic config with a static config that enables the file
+# provider and a certificate resolver. Minimal static config:
+#
+#   # /etc/traefik/traefik.yml
+#   entryPoints:
+#     web:
+#       address: ":80"
+#       http:
+#         redirections:
+#           entryPoint:
+#             to: websecure
+#             scheme: https
+#     websecure:
+#       address: ":443"
+#   certificatesResolvers:
+#     letsencrypt:
+#       acme:
+#         email: admin@example.com
+#         storage: /data/acme.json
+#         httpChallenge:
+#           entryPoint: web
+#   providers:
+#     file:
+#       filename: /etc/traefik/dynamic.yml
+#       watch: true
+#
+# Save this file at /etc/traefik/dynamic.yml.
+
+http:
+  routers:
+    yipyap:
+      rule: "Host(`yipyap.example.com`)"
+      service: yipyap
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - yipyap-security-headers
+
+  services:
+    yipyap:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080"
+        passHostHeader: true
+
+  middlewares:
+    yipyap-security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: "strict-origin-when-cross-origin"

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.remediation_result.v1.json",
+  "title": "run.yipyap.reply.alert.remediation_result.v1",
+  "description": "Record the outcome of an automated remediation attempt. When outcome=success and the monitor has recovered, auto-resolves the alert.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.remediation_result.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "remediation_id": {
+          "type": "string",
+          "description": "ID from the matching remediation_started reply. Used to correlate and close the remediation record."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ],
+          "description": "Result class. \"success\" may trigger auto-resolve if the monitor has recovered; \"failure\" logs and re-enables notify; \"partial\" logs without state change."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable outcome summary (e.g. \"restart succeeded, pod is Ready, monitor last check UP\")."
+        },
+        "artifact_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Optional link to a remediation run log, script output, or dashboard."
+        }
+      },
+      "required": [
+        "alert_id",
+        "remediation_id",
+        "outcome",
+        "message"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

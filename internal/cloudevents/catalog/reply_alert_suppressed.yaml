@@ -1,0 +1,22 @@
+type: run.yipyap.reply.alert.suppressed.v1
+direction: reply
+summary: Silence matching alerts for a declared duration. Duration must be finite and bounded by channel policy.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+    description: ID of the alert being suppressed. Must match ce_alertref on the reply envelope.
+  - name: duration_seconds
+    type: int
+    required: true
+    description: How long to suppress this alert and matching alerts. Capped at the channel's max_suppress_seconds (default 3600).
+  - name: reason
+    type: string
+    required: true
+    description: Human-readable justification (e.g. "known issue during deploy window"). Stored on the audit log.
+  - name: match_filter
+    type: object
+    required: false
+    description: "Optional fields restricting which future alerts this suppression covers. Absence means 'this exact alert only'. Fields: monitor_id (string), severity (string)."

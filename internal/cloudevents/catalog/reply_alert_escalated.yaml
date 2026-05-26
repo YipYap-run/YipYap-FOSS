@@ -1,0 +1,22 @@
+type: run.yipyap.reply.alert.escalated.v1
+direction: reply
+summary: Override the alert's severity or jump to a specific escalation step. High blast radius, requires per-channel trust flag.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: new_severity
+    type: string
+    required: false
+    enum: [info, warning, critical]
+    description: New severity. Omit to leave severity unchanged.
+  - name: step_index
+    type: int
+    required: false
+    description: Zero-based escalation step to jump to. Omit to leave step unchanged. Cannot jump past the final step.
+  - name: reason
+    type: string
+    required: true
+    description: Justification. Required because this mutates alert state visibly.

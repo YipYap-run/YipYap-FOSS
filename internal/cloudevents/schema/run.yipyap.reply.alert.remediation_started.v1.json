@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.remediation_started.v1.json",
+  "title": "run.yipyap.reply.alert.remediation_started.v1",
+  "description": "Signal that automated remediation is in progress. Suppresses re-notify for a bounded window until a remediation_result reply arrives.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.remediation_started.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "remediation_id": {
+          "type": "string",
+          "description": "Unique ID minted by the remediator. Correlates this event with the eventual remediation_result reply."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the remediation attempt (e.g. \"restart pod alpha-5, draining first\")."
+        },
+        "expected_duration_seconds": {
+          "type": "integer",
+          "description": "How long the remediator expects this to take. Capped at the channel's max_remediation_seconds (default 600). Renotify-suppression lifts at this timeout even without a remediation_result."
+        }
+      },
+      "required": [
+        "alert_id",
+        "remediation_id",
+        "description"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

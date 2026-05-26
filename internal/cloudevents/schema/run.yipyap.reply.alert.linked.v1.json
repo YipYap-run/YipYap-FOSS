@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.linked.v1.json",
+  "title": "run.yipyap.reply.alert.linked.v1",
+  "description": "Sent by a sink to attach an external reference (Jira ticket, PagerDuty incident, Slack thread, etc.) to an alert.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.linked.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "description": "ID of the alert. Must match ce_alertref on the reply envelope."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "jira",
+            "pagerduty",
+            "slack_thread",
+            "github_issue",
+            "gitlab_issue",
+            "linear",
+            "servicenow",
+            "other"
+          ],
+          "description": "Provider of the external reference."
+        },
+        "id": {
+          "type": "string",
+          "description": "External system's canonical ID for the reference (e.g. \"INC-123\", \"PROJ-456\")."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Optional clickable URL pointing at the external reference."
+        },
+        "title": {
+          "type": "string",
+          "description": "Optional human-readable title of the referenced item."
+        }
+      },
+      "required": [
+        "alert_id",
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

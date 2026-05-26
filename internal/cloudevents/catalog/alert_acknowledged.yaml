@@ -1,0 +1,21 @@
+type: run.yipyap.alert.acknowledged.v1
+direction: out
+summary: Emitted when an alert is acknowledged by a human or integration.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: monitor_id
+    type: string
+    required: true
+    format: ulid
+  - name: acked_by
+    type: string
+    required: true
+    description: User display name or integration identifier that performed the ack.
+  - name: acked_at
+    type: string
+    required: true
+    format: rfc3339

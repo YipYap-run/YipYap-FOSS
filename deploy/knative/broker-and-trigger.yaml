@@ -1,0 +1,91 @@
+# Route YipYap CloudEvents into a Knative Broker and fan out via Triggers.
+#
+# Prerequisites:
+#   - A Kubernetes cluster with Knative Eventing installed (see
+#     https://knative.dev/docs/eventing/install/).
+#   - A `cloudevent_http` notification channel in YipYap whose Sink URL
+#     points at this Broker's ingress URL.
+#
+# Apply with:
+#   kubectl apply -f broker-and-trigger.yaml
+#
+# Then in YipYap:
+#   1. Settings → Notification Channels → New Channel → CloudEvents (Knative)
+#   2. Sink URL: the value of `kubectl -n yipyap get broker default -o jsonpath='{.status.address.url}'`
+#   3. HTTP Mode: Binary (default)
+#   4. Event Types Filter (optional): ["run.yipyap.alert.*", "run.yipyap.monitor.down.v1"]
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yipyap
+---
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: default
+  namespace: yipyap
+spec:
+  config:
+    apiVersion: v1
+    kind: ConfigMap
+    name: config-br-default-channel
+    namespace: knative-eventing
+---
+# Trigger: route alert.fired events to a consumer of your choice.
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: yipyap-alert-fired
+  namespace: yipyap
+spec:
+  broker: default
+  filter:
+    attributes:
+      type: run.yipyap.alert.fired.v1
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: alert-handler
+---
+# Trigger: route monitor-down transitions to another consumer.
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: yipyap-monitor-down
+  namespace: yipyap
+spec:
+  broker: default
+  filter:
+    attributes:
+      type: run.yipyap.monitor.down.v1
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: incident-creator
+---
+# Example sink: event_display echoes received CloudEvents to its logs. Useful
+# for verifying delivery end-to-end. Replace with your real handlers.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: alert-handler
+  namespace: yipyap
+spec:
+  template:
+    spec:
+      containers:
+        - image: gcr.io/knative-releases/knative.dev/eventing/cmd/event_display
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: incident-creator
+  namespace: yipyap
+spec:
+  template:
+    spec:
+      containers:
+        - image: gcr.io/knative-releases/knative.dev/eventing/cmd/event_display

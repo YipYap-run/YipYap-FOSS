@@ -1,0 +1,58 @@
+# SinkBinding that wires an in-cluster workload to YipYap as a CloudEvents
+# sink. The bound Deployment's pods get K_SINK (the YipYap ingest URL) and
+# K_CE_OVERRIDES injected as env vars; your application reads K_SINK and
+# POSTs `run.yipyap.ingest.heartbeat.v1` (or `.status.v1`) CloudEvents.
+#
+# Apply with:
+#   1. Edit the `sink.uri` below to replace YOUR-INTEGRATION-KEY with the
+#      monitor's actual integration key (Monitor detail page → copy key).
+#   2. kubectl apply -f sinkbinding-heartbeat.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-batch-worker
+  namespace: yipyap
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-batch-worker
+  template:
+    metadata:
+      labels:
+        app: my-batch-worker
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/your-worker:latest
+          # Your app reads $K_SINK and sends CloudEvents to it. Example:
+          #
+          #   curl -X POST "$K_SINK" \
+          #     -H "ce-specversion: 1.0" \
+          #     -H "ce-type: run.yipyap.ingest.heartbeat.v1" \
+          #     -H "ce-source: my-batch-worker" \
+          #     -H "ce-id: $(uuidgen)" \
+          #     -H "Content-Type: application/json" \
+          #     -d '{"note":"batch completed"}'
+---
+apiVersion: sources.knative.dev/v1
+kind: SinkBinding
+metadata:
+  name: yipyap-heartbeat
+  namespace: yipyap
+spec:
+  subject:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-batch-worker
+    namespace: yipyap
+  # Replace console.yipyap.run with your self-hosted YipYap URL if applicable.
+  # Replace YOUR-INTEGRATION-KEY with the monitor's key.
+  sink:
+    uri: https://console.yipyap.run/api/v1/cloudevents/ingest/YOUR-INTEGRATION-KEY
+  ceOverrides:
+    extensions:
+      # Optional: tag every event with fixed attributes.
+      environment: prod
+      region: us-east-1

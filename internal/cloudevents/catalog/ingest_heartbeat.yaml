@@ -1,0 +1,9 @@
+type: run.yipyap.ingest.heartbeat.v1
+direction: in
+summary: Ingested to mark a heartbeat monitor healthy.
+subject_template: "monitor/{monitor_id}"
+data:
+  - name: note
+    type: string
+    required: false
+    description: Optional free-form note stored with the heartbeat check.

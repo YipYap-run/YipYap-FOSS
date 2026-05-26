@@ -1,0 +1,22 @@
+type: run.yipyap.reply.alert.claimed.v1
+direction: reply
+summary: Sent by a sink to record that the alert has been claimed by a human or integration.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+    description: ID of the alert being claimed. Must match the ce_alertref extension on the reply envelope.
+  - name: who
+    type: string
+    required: true
+    description: Display name or identifier of the claimant. Paired with the verified OIDC sub for audit.
+  - name: claimed_at
+    type: string
+    required: true
+    format: rfc3339
+  - name: note
+    type: string
+    required: false
+    description: Optional free-form note explaining the claim (e.g. "taking this one, paging me").

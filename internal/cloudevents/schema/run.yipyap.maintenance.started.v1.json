@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.maintenance.started.v1.json",
+  "title": "run.yipyap.maintenance.started.v1",
+  "description": "Emitted when a maintenance window begins.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.maintenance.started.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "window_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "monitors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "description": "IDs of monitors affected by this maintenance window. An empty array means the window is org-wide and affects every monitor in the org."
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scheduled_end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Planned end time of the window, if known in advance."
+        }
+      },
+      "required": [
+        "window_id",
+        "monitors",
+        "started_at"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

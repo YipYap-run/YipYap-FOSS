@@ -1,0 +1,56 @@
+# Knative EventPolicy that authorises YipYap's delivery identity to publish
+# CloudEvents to a Broker. Requires Knative Eventing 1.17+ with the OIDC
+# feature flag enabled:
+#
+#   kubectl -n knative-eventing patch cm config-features \
+#     --type merge \
+#     --patch '{"data":{"authentication-oidc":"enabled"}}'
+#
+# Prerequisites:
+#   - An external IdP (Dex / Keycloak / Authentik) configured as a trusted
+#     issuer in your Knative cluster. YipYap's client-credentials flow mints
+#     tokens against that IdP with the client_id you configure below.
+#   - A `cloudevent_http` notification channel in YipYap with auth.type=oidc,
+#     pointing at the same IdP's token endpoint, with matching client_id and
+#     audience = the Broker's ingress URL.
+#
+# The `sub` claim value depends on how your IdP mints tokens, see each
+# vendor's docs for the client-credentials subject format. Dex produces
+# "client:<client_id>"; Keycloak uses "service-account-<client_id>". Adjust
+# the from.sub value to match.
+
+apiVersion: eventing.knative.dev/v1alpha1
+kind: EventPolicy
+metadata:
+  name: allow-yipyap-delivery
+  namespace: yipyap
+spec:
+  to:
+    - ref:
+        apiVersion: eventing.knative.dev/v1
+        kind: Broker
+        name: default
+  from:
+    # Replace with the subject string your IdP produces for the YipYap client.
+    # Dex:      "client:yipyap-delivery"
+    # Keycloak: "service-account-yipyap-delivery"
+    # Authentik: "pk-<client-id-hash>"
+    - sub: "client:yipyap-delivery"
+---
+# Optional, also restrict which event types this subject can deliver.
+# This EventPolicy accepts only run.yipyap.alert.* events from yipyap.
+apiVersion: eventing.knative.dev/v1alpha1
+kind: EventPolicy
+metadata:
+  name: allow-yipyap-alerts-only
+  namespace: yipyap
+spec:
+  to:
+    - ref:
+        apiVersion: eventing.knative.dev/v1
+        kind: Broker
+        name: alerts-broker
+  from:
+    - sub: "client:yipyap-delivery"
+  filters:
+    - cesql: "type LIKE 'run.yipyap.alert.%'"

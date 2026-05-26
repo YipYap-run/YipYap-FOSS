@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.suppressed.v1.json",
+  "title": "run.yipyap.reply.alert.suppressed.v1",
+  "description": "Silence matching alerts for a declared duration. Duration must be finite and bounded by channel policy.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.suppressed.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "description": "ID of the alert being suppressed. Must match ce_alertref on the reply envelope."
+        },
+        "duration_seconds": {
+          "type": "integer",
+          "description": "How long to suppress this alert and matching alerts. Capped at the channel's max_suppress_seconds (default 3600)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable justification (e.g. \"known issue during deploy window\"). Stored on the audit log."
+        },
+        "match_filter": {
+          "type": "object",
+          "description": "Optional fields restricting which future alerts this suppression covers. Absence means 'this exact alert only'. Fields: monitor_id (string), severity (string)."
+        }
+      },
+      "required": [
+        "alert_id",
+        "duration_seconds",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

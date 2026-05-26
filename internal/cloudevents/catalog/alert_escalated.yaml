@@ -1,0 +1,25 @@
+type: run.yipyap.alert.escalated.v1
+direction: out
+summary: Emitted when an escalation step fires for an unresolved alert.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: monitor_id
+    type: string
+    required: true
+    format: ulid
+  - name: step_index
+    type: int
+    required: true
+    description: Zero-based index of the escalation step that just fired.
+  - name: to_channel
+    type: string
+    required: true
+    description: Notification channel ID receiving the escalation.
+  - name: escalated_at
+    type: string
+    required: true
+    format: rfc3339

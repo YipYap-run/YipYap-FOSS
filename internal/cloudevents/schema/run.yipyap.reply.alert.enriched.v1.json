@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://console.yipyap.run/schemas/cloudevents/run.yipyap.reply.alert.enriched.v1.json",
+  "title": "run.yipyap.reply.alert.enriched.v1",
+  "description": "Sent by a sink to attach structured context (links, previews) to an alert's timeline.",
+  "type": "object",
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri"
+    },
+    "type": {
+      "const": "run.yipyap.reply.alert.enriched.v1"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "alert_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "description": "ID of the alert being enriched. Must match ce_alertref on the reply envelope."
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "Fields: label (string, required), href (string, optional URL), preview (string, optional text snippet), kind (string, optional category hint, e.g. 'log', 'graph', 'runbook')."
+          },
+          "description": "One or more attachment records rendered as a \"Related context\" block on the alert detail page."
+        }
+      },
+      "required": [
+        "alert_id",
+        "attachments"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "data"
+  ],
+  "additionalProperties": true
+}

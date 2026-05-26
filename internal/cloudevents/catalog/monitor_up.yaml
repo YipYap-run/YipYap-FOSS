@@ -1,0 +1,21 @@
+type: run.yipyap.monitor.up.v1
+direction: out
+summary: Emitted when a monitor transitions to the UP state.
+subject_template: "monitor/{monitor_id}"
+data:
+  - name: monitor_id
+    type: string
+    required: true
+    format: ulid
+  - name: check_id
+    type: string
+    required: true
+    format: ulid
+    description: ID of the check that triggered this state transition.
+  - name: latency_ms
+    type: int
+    required: false
+  - name: checked_at
+    type: string
+    required: true
+    format: rfc3339

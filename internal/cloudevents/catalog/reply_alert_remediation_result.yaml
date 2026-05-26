@@ -1,0 +1,27 @@
+type: run.yipyap.reply.alert.remediation_result.v1
+direction: reply
+summary: Record the outcome of an automated remediation attempt. When outcome=success and the monitor has recovered, auto-resolves the alert.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: remediation_id
+    type: string
+    required: true
+    description: ID from the matching remediation_started reply. Used to correlate and close the remediation record.
+  - name: outcome
+    type: string
+    required: true
+    enum: [success, failure, partial]
+    description: Result class. "success" may trigger auto-resolve if the monitor has recovered; "failure" logs and re-enables notify; "partial" logs without state change.
+  - name: message
+    type: string
+    required: true
+    description: Human-readable outcome summary (e.g. "restart succeeded, pod is Ready, monitor last check UP").
+  - name: artifact_url
+    type: string
+    required: false
+    format: uri
+    description: Optional link to a remediation run log, script output, or dashboard.

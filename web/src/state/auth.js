@@ -1,0 +1,171 @@
+import { signal, computed } from '@preact/signals';
+import { post, get, setToken } from '../api/client';
+import { connectWS, disconnectWS } from '../api/ws';
+
+export const currentUser = signal(null);
+export const currentOrg = signal(null);
+export const authLoading = signal(true);
+export const billingStatus = signal(null);
+export const appMeta = signal(null);
+export const isLoggedIn = computed(() => !!currentUser.value);
+export const mfaState = signal(null); // { mfa_token, mfa_methods }
+
+// True when the org may use paid (Pro+) features. promo counts as paid.
+// In FOSS edition these features are build-stripped, so don't gate there.
+export const isPaidPlan = computed(() => {
+  if (appMeta.value?.edition === 'foss') return true;
+  const plan = appMeta.value?.plan ?? currentOrg.value?.plan;
+  return !!plan && plan !== 'free';
+});
+
+export async function loadMeta() {
+  try {
+    appMeta.value = await get('/meta');
+  } catch (_) {
+    appMeta.value = { edition: 'foss', billing_enabled: false };
+  }
+}
+
+export async function completeLogin(token, user) {
+  // Keep an in-memory copy of the token for the Authorization header fallback,
+  // but the real session lives in the HttpOnly cookie set by the server.
+  setToken(token);
+  currentUser.value = user;
+  try {
+    currentOrg.value = await get('/org');
+  } catch (_) {
+    currentOrg.value = null;
+  }
+  connectWS();
+}
+
+export async function login(email, password) {
+  let res;
+  try {
+    res = await post('/auth/login', { email, password });
+  } catch (err) {
+    // 403 with a body signals either account_disabled or email_not_verified.
+    if (err.status === 403 && err.body) {
+      if (err.body.email_not_verified) {
+        return { email_not_verified: true, email: err.body.email };
+      }
+      if (err.body.account_disabled) {
+        return { account_disabled: true };
+      }
+    }
+    throw err;
+  }
+  if (res.mfa_required) {
+    return { mfa_required: true, mfa_token: res.mfa_token, mfa_methods: res.mfa_methods };
+  }
+  if (res.account_disabled) {
+    return { account_disabled: true };
+  }
+  if (res.email_not_verified) {
+    return { email_not_verified: true, email: res.email };
+  }
+  // Server set the HttpOnly cookie; mirror token in-memory for fallback only.
+  setToken(res.token);
+  currentUser.value = res.user;
+  currentOrg.value = res.org || null;
+  connectWS();
+  return res;
+}
+
+export async function register(orgName, email, password, confirmPassword) {
+  const res = await post('/auth/register', {
+    org_name: orgName,
+    email,
+    password,
+    confirm_password: confirmPassword,
+  });
+  // SaaS: server returns {status:"verification_sent", email}. Don't log in.
+  if (res && res.status === 'verification_sent') {
+    return res;
+  }
+  // FOSS: server returns a session token.
+  if (res && res.token) {
+    setToken(res.token);
+    currentUser.value = res.user;
+    currentOrg.value = res.org || null;
+    connectWS();
+  }
+  return res;
+}
+
+export async function resendVerification(email) {
+  return post('/auth/resend-verification', { email });
+}
+
+export async function verifyEmail(token) {
+  return post('/auth/verify-email', { token });
+}
+
+export async function logout() {
+  // Ask the server to clear the HttpOnly cookie.
+  try {
+    await post('/auth/logout', {});
+  } catch (_) {
+    // Best-effort - clear local state regardless.
+  }
+  setToken(null);
+  currentUser.value = null;
+  currentOrg.value = null;
+  disconnectWS();
+}
+
+export async function loadUser() {
+  authLoading.value = true;
+  await loadMeta();
+  try {
+    // Try to refresh - the server will accept the HttpOnly cookie and issue a
+    // fresh one. If this succeeds we know the session is valid.
+    // Refresh may fail for impersonation tokens - that's OK, use as-is.
+    try {
+      const res = await post('/auth/refresh', {});
+      if (res.token) setToken(res.token);
+      if (res.user) currentUser.value = res.user;
+    } catch (_) {
+      // Token may still be valid for reads even if refresh fails.
+      // Set a synthetic user so the UI doesn't redirect to login.
+      if (!currentUser.value && appMeta.value?.edition !== 'foss') {
+        // Probe /org to see if the cookie-only session is still usable.
+        try {
+          const org = await get('/org', { noRedirect: true });
+          currentOrg.value = org;
+          currentUser.value = { id: 'session', role: 'viewer', name: 'Read-only session' };
+          connectWS();
+        } catch (_) {
+          // No valid session at all.
+          authLoading.value = false;
+          return;
+        }
+      }
+      authLoading.value = false;
+      return;
+    }
+
+    try {
+      const org = await get('/org', { noRedirect: true });
+      currentOrg.value = org;
+    } catch (_) {
+      currentOrg.value = null;
+    }
+
+    if (appMeta.value?.billing_enabled) {
+      try {
+        const billing = await get('/billing', { noRedirect: true });
+        billingStatus.value = billing;
+      } catch (_) {
+        billingStatus.value = null;
+      }
+    }
+
+    connectWS();
+  } catch (_) {
+    setToken(null);
+    currentUser.value = null;
+  } finally {
+    authLoading.value = false;
+  }
+}

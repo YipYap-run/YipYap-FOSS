@@ -1,0 +1,36 @@
+# YipYap reverse proxy example for Caddy v2.
+#
+# Caddy fetches a TLS certificate from Let's Encrypt automatically. Make
+# sure ports 80 and 443 are reachable from the public internet before the
+# first run, otherwise the ACME HTTP-01 challenge will fail.
+#
+# Place this file at /etc/caddy/Caddyfile (or point your Caddy instance
+# at it), then reload with `caddy reload`.
+
+yipyap.example.com {
+    encode gzip zstd
+
+    # Security headers. Remove Strict-Transport-Security while testing.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # WebSocket upgrades are handled automatically by reverse_proxy.
+    reverse_proxy localhost:8080 {
+        # Forward real client IP to YipYap. Make sure the matching CIDR
+        # is listed in YIPYAP_TRUSTED_PROXY_CIDRS on the YipYap side.
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Access log (optional). Comment out if you want Caddy's default.
+    log {
+        output file /var/log/caddy/yipyap.log
+        format json
+    }
+}

@@ -1,0 +1,26 @@
+type: run.yipyap.maintenance.started.v1
+direction: out
+summary: Emitted when a maintenance window begins.
+subject_template: "maintenance/{window_id}"
+data:
+  - name: window_id
+    type: string
+    required: true
+    format: ulid
+  - name: monitors
+    type: array
+    required: true
+    items:
+      name: monitor_id
+      type: string
+      format: ulid
+    description: IDs of monitors affected by this maintenance window. An empty array means the window is org-wide and affects every monitor in the org.
+  - name: started_at
+    type: string
+    required: true
+    format: rfc3339
+  - name: scheduled_end
+    type: string
+    required: false
+    format: rfc3339
+    description: Planned end time of the window, if known in advance.

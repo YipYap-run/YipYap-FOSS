@@ -1,0 +1,21 @@
+type: run.yipyap.monitor.down.v1
+direction: out
+summary: Emitted when a monitor transitions to the DOWN state.
+subject_template: "monitor/{monitor_id}"
+data:
+  - name: monitor_id
+    type: string
+    required: true
+    format: ulid
+  - name: check_id
+    type: string
+    required: true
+    format: ulid
+  - name: failure_reason
+    type: string
+    required: true
+    description: Human-readable reason the check failed (e.g. "HTTP 503", "timeout", "TLS handshake failed").
+  - name: checked_at
+    type: string
+    required: true
+    format: rfc3339

@@ -1,0 +1,15 @@
+# Trigger routes events of type run.yipyap.alert.fired.v1 to event-display.
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: yipyap-alert-fired
+spec:
+  broker: default
+  filter:
+    attributes:
+      type: run.yipyap.alert.fired.v1
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: event-display

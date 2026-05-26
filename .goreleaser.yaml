@@ -1,0 +1,110 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: yipyap
+    main: ./cmd/yipyap
+    binary: yipyap
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: arm
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+
+archives:
+  - id: yipyap
+    ids:
+      - yipyap
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    files:
+      - README.md
+      - LICENSE*
+      - docker-compose.yml
+
+dockers_v2:
+  - id: yipyap
+    ids:
+      - yipyap
+    images:
+      - "ghcr.io/yipyap-run/yipyap-foss"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+    dockerfile: Dockerfile.goreleaser
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: git
+  abbrev: -1
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: New Features
+      regexp: "^.*feat.*$"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^.*fix.*$"
+      order: 1
+    - title: Other Changes
+      order: 999
+
+release:
+  github:
+    owner: YipYap-run
+    name: YipYap-FOSS
+  draft: false
+  prerelease: auto
+  mode: replace
+  footer: |
+    ## Docker
+
+    ```bash
+    docker pull ghcr.io/yipyap-run/yipyap-foss:{{ .Version }}
+    ```
+
+    ## Quick Start
+
+    ```bash
+    # Single binary
+    YIPYAP_JWT_SECRET=your-secret ./yipyap
+
+    # Docker Compose
+    docker compose up
+    ```
+
+    **Full Changelog**: https://github.com/YipYap-run/YipYap-FOSS/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"

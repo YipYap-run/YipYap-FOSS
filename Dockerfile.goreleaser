@@ -1,0 +1,10 @@
+# Base image pinning (security-review A5-LOW): pin by SHA256 digest for
+# reproducibility. Captured 2026-04-24.
+FROM alpine:latest@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS certs
+RUN apk --no-cache add ca-certificates
+
+FROM scratch
+ARG TARGETPLATFORM
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY ${TARGETPLATFORM}/yipyap /yipyap
+ENTRYPOINT ["/yipyap"]

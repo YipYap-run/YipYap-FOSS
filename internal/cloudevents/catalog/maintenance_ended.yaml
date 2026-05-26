@@ -1,0 +1,17 @@
+type: run.yipyap.maintenance.ended.v1
+direction: out
+summary: Emitted when a maintenance window ends (scheduled or early termination).
+subject_template: "maintenance/{window_id}"
+data:
+  - name: window_id
+    type: string
+    required: true
+    format: ulid
+  - name: ended_at
+    type: string
+    required: true
+    format: rfc3339
+  - name: ended_early
+    type: bool
+    required: false
+    description: True when the window was closed before its scheduled end.

@@ -1,0 +1,58 @@
+# Reference Helm values for the yipyap-source chart.
+# Override via:
+#   helm install yipyap-source yipyap-source/yipyap-source \
+#     --namespace yipyap-sources --create-namespace \
+#     -f helm-values.example.yaml
+
+namespace:
+  create: true
+  name: yipyap-sources
+
+images:
+  # Pin image tags to a specific release in production. `""` defaults to
+  # the chart's appVersion.
+  controller:
+    repository: ghcr.io/yipyap-run/knative-source-controller
+    tag: ""
+    pullPolicy: IfNotPresent
+  webhook:
+    repository: ghcr.io/yipyap-run/knative-source-webhook
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Adapter image deployed per-YipYapSource. The controller passes this
+  # to each generated Deployment via YIPYAP_SOURCE_RA_IMAGE.
+  adapter:
+    repository: ghcr.io/yipyap-run/knative-source
+    tag: ""
+
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+webhook:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  # failurePolicy: Fail rejects CR apply when the webhook is unreachable.
+  # Set to Ignore if availability matters more than correctness.
+  failurePolicy: Fail
+  port: 8443
+
+metrics:
+  enabled: true
+  port: 9090
+
+# Set installCRD: false if you manage the CRD via a separate path
+# (e.g. GitOps-driven CRD repo).
+installCRD: true

@@ -1,0 +1,18 @@
+type: run.yipyap.reply.alert.enriched.v1
+direction: reply
+summary: Sent by a sink to attach structured context (links, previews) to an alert's timeline.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+    description: ID of the alert being enriched. Must match ce_alertref on the reply envelope.
+  - name: attachments
+    type: array
+    required: true
+    description: One or more attachment records rendered as a "Related context" block on the alert detail page.
+    items:
+      name: attachment
+      type: object
+      description: "Fields: label (string, required), href (string, optional URL), preview (string, optional text snippet), kind (string, optional category hint, e.g. 'log', 'graph', 'runbook')."

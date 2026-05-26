@@ -1,0 +1,22 @@
+type: run.yipyap.reply.alert.ack_with_context.v1
+direction: reply
+summary: Rich acknowledgement carrying a reason code and optional free-form note. Transitions the alert to ACKED state.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: reason_code
+    type: string
+    required: true
+    enum: [resolved_by_deploy, duplicate_of, known_issue, investigating, false_positive, transient, other]
+    description: Structured reason for the ack. Feeds alert-pattern analytics.
+  - name: note
+    type: string
+    required: false
+    description: Free-form elaboration.
+  - name: reference_id
+    type: string
+    required: false
+    description: Optional ID for reason_codes that reference another system (e.g. deploy sha for resolved_by_deploy, ticket ID for known_issue).

@@ -1,0 +1,22 @@
+type: run.yipyap.reply.alert.ownership.v1
+direction: reply
+summary: Transfer alert ownership to a team or person. Does not ack; ownership is separate from ack state.
+subject_template: "alert/{alert_id}"
+data:
+  - name: alert_id
+    type: string
+    required: true
+    format: ulid
+  - name: owner_kind
+    type: string
+    required: true
+    enum: [team, user]
+    description: Whether the new owner is a yipyap team or user.
+  - name: owner_id
+    type: string
+    required: true
+    description: ID of the team or user. Must exist in this org; unknown IDs reject at handler level.
+  - name: reason
+    type: string
+    required: false
+    description: Optional justification (e.g. "escalating to platform team").
