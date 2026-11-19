@@ -812,7 +812,7 @@ func (s *Scheduler) publishAlertEvent(ctx context.Context, subject string, m dom
 		return
 	}
 
-	if err := s.bus.Publish(ctx, subject, data); err != nil {
+	if err := s.bus.PublishAlert(ctx, subject, data, ""); err != nil {
 		slog.Error("failed to publish alert event", "subject", subject, "error", err)
 	}
 }

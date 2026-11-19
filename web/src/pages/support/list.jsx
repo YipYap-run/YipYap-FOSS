@@ -35,7 +35,7 @@ export function SupportListPage() {
       {tickets.length === 0 ? (
         <EmptyState
           title="No tickets yet"
-          description="Use the help button to create one."
+          description="Use the 'Need Help' button to create one."
         />
       ) : (
         <div class="alert-list">

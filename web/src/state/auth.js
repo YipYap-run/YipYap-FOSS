@@ -67,7 +67,13 @@ export async function login(email, password) {
   // Server set the HttpOnly cookie; mirror token in-memory for fallback only.
   setToken(res.token);
   currentUser.value = res.user;
-  currentOrg.value = res.org || null;
+  // Load the org (plan, name) so isPaidPlan gates correctly. The login
+  // response carries no org, so fetch it now that the token is set.
+  try {
+    currentOrg.value = await get('/org');
+  } catch (_) {
+    currentOrg.value = res.org || null;
+  }
   connectWS();
   return res;
 }
@@ -87,7 +93,11 @@ export async function register(orgName, email, password, confirmPassword) {
   if (res && res.token) {
     setToken(res.token);
     currentUser.value = res.user;
-    currentOrg.value = res.org || null;
+    try {
+      currentOrg.value = await get('/org');
+    } catch (_) {
+      currentOrg.value = res.org || null;
+    }
     connectWS();
   }
   return res;

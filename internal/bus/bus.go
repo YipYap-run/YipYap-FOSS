@@ -31,6 +31,13 @@ type Bus interface {
 	// Publish and the msgID is ignored.
 	PublishDurable(ctx context.Context, subject string, data []byte, msgID string) error
 
+	// PublishAlert publishes an alert lifecycle event (alert.trigger,
+	// alert.recover, alert.ack) to both the durable stream (for the
+	// escalation engine's pull consumer) and the core broadcast channel
+	// (for the WebSocket hub). On non-durable buses this collapses to a
+	// single publish so embedded deployments do not deliver it twice.
+	PublishAlert(ctx context.Context, subject string, data []byte, msgID string) error
+
 	// PullSubscribe creates a durable pull-based consumer on the given
 	// subject. The handler receives messages that must be explicitly
 	// acknowledged. On non-durable buses this falls back to

@@ -87,6 +87,12 @@ type Dialect struct {
 	SchemaDDL   string
 	AppliedAt   func() any
 
+	// NoTransaction disables the per-migration transaction. YugabyteDB DDL is
+	// non-transactional, so wrapping a migration in a tx makes the driver abort
+	// mid-migrate. Migrations are written idempotently (IF NOT EXISTS), so
+	// running them outside a tx is safe and recoverable.
+	NoTransaction bool
+
 	// Sub-store arg encoding (write side). The read side is handled uniformly
 	// by the sqlx.Time and sqlx.Bool scanners.
 	Now             func() any
@@ -97,7 +103,8 @@ type Dialect struct {
 
 // Migrate runs pending migrations from fsys/dir against db. Each migration is
 // applied inside a transaction so a mid-file failure does not leave a
-// partially-applied, unrecorded migration behind.
+// partially-applied, unrecorded migration behind, unless the dialect opts out
+// (NoTransaction) because its DDL is not transactional.
 func Migrate(ctx context.Context, db *sql.DB, fsys fs.FS, dir string, d Dialect) error {
 	if _, err := db.ExecContext(ctx, d.SchemaDDL); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
@@ -121,26 +128,42 @@ func Migrate(ctx context.Context, db *sql.DB, fsys fs.FS, dir string, d Dialect)
 		if err != nil {
 			return fmt.Errorf("read migration %d: %w", m.Version, err)
 		}
+
+		if d.NoTransaction {
+			if err := applyMigration(ctx, db, string(data), m, d); err != nil {
+				return err
+			}
+			continue
+		}
+
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %d: %w", m.Version, err)
 		}
-		for _, stmt := range store.SplitSQLStatements(string(data)) {
-			if _, err := tx.ExecContext(ctx, stmt); err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("apply migration %d (%s): %w", m.Version, m.Filename, err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO schema_migrations (version, applied_at) VALUES ("+d.Placeholder(1)+", "+d.Placeholder(2)+")",
-			m.Version, d.AppliedAt(),
-		); err != nil {
+		if err := applyMigration(ctx, tx, string(data), m, d); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("record migration %d: %w", m.Version, err)
+			return err
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit migration %d: %w", m.Version, err)
 		}
+	}
+	return nil
+}
+
+// applyMigration executes each statement in data, then records the version, on
+// the given queryable (either *sql.DB or *sql.Tx).
+func applyMigration(ctx context.Context, q Queryable, data string, m Migration, d Dialect) error {
+	for _, stmt := range store.SplitSQLStatements(data) {
+		if _, err := q.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("apply migration %d (%s): %w", m.Version, m.Filename, err)
+		}
+	}
+	if _, err := q.ExecContext(ctx,
+		"INSERT INTO schema_migrations (version, applied_at) VALUES ("+d.Placeholder(1)+", "+d.Placeholder(2)+")",
+		m.Version, d.AppliedAt(),
+	); err != nil {
+		return fmt.Errorf("record migration %d: %w", m.Version, err)
 	}
 	return nil
 }

@@ -53,7 +53,7 @@ export function DashboardPage() {
 
   return (
     <div class="dashboard">
-      <PageHeader title="Dashboard" subtitle="System overview" />
+      <PageHeader title="Dashboard" subtitle="Your monitors, alerts, and on-call at a glance" />
 
       <div class="stat-grid">
         <Card class="stat-card stat-up">

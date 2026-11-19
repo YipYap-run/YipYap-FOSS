@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"net"
 	"net/http"
 	"sync"
 
+	"github.com/go-chi/httprate"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 )
 
@@ -24,6 +26,19 @@ func RateLimitKeyByOrg(r *http.Request) (string, error) {
 		return "org:" + claims.OrgID, nil
 	}
 	return "anonymous", nil
+}
+
+// RateLimitKeyByClientIP keys rate limits on the resolved client IP. The
+// trustedProxyRealIP middleware already overwrites r.RemoteAddr with the
+// trusted client IP (CF-Connecting-IP / X-Real-IP / X-Forwarded-For) when the
+// direct peer is a trusted proxy, so RemoteAddr is the right key here.
+// CanonicalizeIP buckets IPv6 by /64.
+func RateLimitKeyByClientIP(r *http.Request) (string, error) {
+	ip := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	return httprate.CanonicalizeIP(ip), nil
 }
 
 // StreamConcurrencyGate caps concurrent long-lived /cloudevents/stream

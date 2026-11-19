@@ -106,6 +106,11 @@ func run() error {
 		FlushConcurrency:  cfg.CheckerFlushConcurrency,
 	})
 
+	// CloudEvent emitter for monitor and alert state egress. Shared by the
+	// scheduler (monitor up/down) and the escalation engine (alert lifecycle).
+	cePublisher := cloudevents.NewPublisher(msgBus)
+	sched.SetCloudEventEmitter(cePublisher)
+
 	// 5. Envelope encryption for notification configs.
 	var envelope *crypto.Envelope
 	if cfg.NotificationKey != "" {
@@ -122,6 +127,7 @@ func run() error {
 
 	// 6. Escalation engine.
 	engine := escalation.NewEngine(db, msgBus, envelope, nil)
+	engine.SetCloudEventEmitter(cePublisher)
 
 	// 7. Notification dispatcher.
 	var decrypt notify.DecryptFunc
