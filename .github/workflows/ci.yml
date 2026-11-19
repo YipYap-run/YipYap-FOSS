@@ -150,7 +150,7 @@ jobs:
           file dist/yipyap-linux-arm64
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: yipyap-linux-arm64
           path: dist/yipyap-linux-arm64
