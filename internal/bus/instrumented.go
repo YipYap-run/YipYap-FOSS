@@ -48,6 +48,15 @@ func (b *InstrumentedBus) PublishDurable(ctx context.Context, subject string, da
 	return err
 }
 
+func (b *InstrumentedBus) PublishAlert(ctx context.Context, subject string, data []byte, msgID string) error {
+	err := b.Bus.PublishAlert(ctx, subject, data, msgID)
+	if err == nil {
+		b.m.PublishCount.Add(ctx, 1, metric.WithAttributeSet(
+			attribute.NewSet(attribute.String("subject", subject))))
+	}
+	return err
+}
+
 func (b *InstrumentedBus) Subscribe(subject string, handler Handler) error {
 	return b.Bus.Subscribe(subject, b.wrapHandler(subject, handler))
 }

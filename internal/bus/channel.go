@@ -132,6 +132,12 @@ func (b *ChannelBus) PublishDurable(ctx context.Context, subject string, data []
 	return b.Publish(ctx, subject, data)
 }
 
+// PublishAlert falls back to a single Publish (the in-process channel already
+// fans out to both broadcast and queue-group subscribers).
+func (b *ChannelBus) PublishAlert(ctx context.Context, subject string, data []byte, _ string) error {
+	return b.Publish(ctx, subject, data)
+}
+
 // PullSubscribe adapts QueueSubscribe with an auto-ack Msg wrapper.
 // The consumer name is used as the queue group so that multiple pull
 // consumers on the same subject get competing-consumer semantics.

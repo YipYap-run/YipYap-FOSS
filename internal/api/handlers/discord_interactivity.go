@@ -158,7 +158,7 @@ func (h *DiscordInteractivityHandler) handleComponent(w http.ResponseWriter, r *
 		// CloudEvent emission for acknowledged.v1 happens in escalation.Engine.handleAck
 		// when it consumes this alert.ack message. Slack/Discord/Telegram interactivity
 		// handlers are intentionally not wired with their own cloudevents.Emitter.
-		if err := h.bus.Publish(r.Context(), "alert.ack", data); err != nil {
+		if err := h.bus.PublishAlert(r.Context(), "alert.ack", data, ""); err != nil {
 			slog.Error("discord interactivity: publish ack", "error", err)
 		}
 
@@ -188,7 +188,7 @@ func (h *DiscordInteractivityHandler) handleComponent(w http.ResponseWriter, r *
 			h.respondDeferred(w)
 			return
 		}
-		if err := h.bus.Publish(r.Context(), "alert.recover", data); err != nil {
+		if err := h.bus.PublishAlert(r.Context(), "alert.recover", data, ""); err != nil {
 			slog.Error("discord interactivity: publish recover", "error", err)
 		}
 
