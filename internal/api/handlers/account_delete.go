@@ -224,7 +224,7 @@ func (h *AccountDeleteHandler) RequestRecovery(w http.ResponseWriter, r *http.Re
 	user, err := h.store.Users().GetByEmail(ctx, req.Email)
 	if err != nil {
 		// User not found - run dummy bcrypt to prevent timing leak.
-		_ = auth.VerifyPassword("$2a$10$0000000000000000000000uKMCRsMNJOq3hGBEExGSm3LpaFGvleq", req.Password)
+		_ = auth.DummyVerify(req.Password)
 		errorResponse(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}

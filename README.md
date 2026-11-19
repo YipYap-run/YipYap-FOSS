@@ -18,7 +18,7 @@ Free, self-hosted monitoring and alerting for small teams. One binary, zero exte
 - **Monitor description** field for context and runbook notes
 - **Mute/pause** to suppress notifications or stop checks entirely
 - **Alert acknowledgment and resolution** workflow
-- **SQLite** by default, with optional PostgreSQL or MariaDB for larger deployments
+- **SQLite** storage, single binary, zero external dependencies
 
 ## Quick Start
 

@@ -44,13 +44,20 @@ func (m *Mailer) Send(to, subject, body string) error {
 		"From: YipYap <%s>\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
 		sanitizeHeader(m.cfg.From), sanitizeHeader(to), sanitizeHeader(subject), body,
 	)
+	return m.SendMessage(to, []byte(msg))
+}
 
+// SendMessage sends a pre-formatted raw SMTP message (headers and body) to the
+// given recipient, enforcing TLS: SMTPS on port 465, STARTTLS otherwise, and
+// aborting if the server does not advertise STARTTLS so credentials are never
+// sent in cleartext.
+func (m *Mailer) SendMessage(to string, msg []byte) error {
 	done := make(chan error, 1)
 	go func() {
 		if m.cfg.Port == 465 {
-			done <- m.sendSMTPS(to, []byte(msg))
+			done <- m.sendSMTPS(to, msg)
 		} else {
-			done <- m.sendSTARTTLS(to, []byte(msg))
+			done <- m.sendSTARTTLS(to, msg)
 		}
 	}()
 	select {

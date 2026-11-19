@@ -48,29 +48,42 @@ func (s *orgStore) Update(ctx context.Context, org *domain.Org) error {
 }
 
 func (s *orgStore) Delete(ctx context.Context, id string) error {
-	// Delete all org-scoped data. Order matters for foreign key constraints:
-	// children first, then parents.
+	// Clean up rows that reference a parent by id but declare neither
+	// org_id nor a foreign key, so ON DELETE CASCADE does not reach them.
+	_, _ = s.q.ExecContext(ctx,
+		`DELETE FROM alert_status_page_refs WHERE alert_id IN (SELECT id FROM alerts WHERE org_id = ?)`, id)
+	_, _ = s.q.ExecContext(ctx,
+		`DELETE FROM cloudevent_ingest_idempotency WHERE monitor_id IN (SELECT id FROM monitors WHERE org_id = ?)`, id)
+
+	// Delete every org_id-bearing table. Their children are removed by
+	// ON DELETE CASCADE (foreign_keys=ON). Ordering matters only for two
+	// non-cascade references: alerts.monitor_id (so alerts before monitors)
+	// and monitor_match_rules.state_id (so monitors before
+	// org_monitor_states).
 	tables := []string{
-		"monitor_checks", "monitor_rollups", "monitor_labels",
-		"alert_events", "alert_escalation_state", "alerts",
-		"step_targets", "escalation_steps", "escalation_policies",
+		"alert_remediations", "alert_routing_rules", "alert_suppressions",
+		"cloudevent_reply_audit",
+		"alerts",
+		"escalation_policies",
 		"notification_channels", "maintenance_windows",
-		"schedule_overrides", "schedules", "team_members", "teams",
-		"api_keys", "monitors", "users", "org_settings",
+		"teams",
+		"api_keys",
+		"monitors",
+		"monitor_groups",
+		"org_monitor_states",
+		"services",
+		"incidents",
+		"status_pages",
+		"support_tickets",
+		"oidc_connections",
+		"billing",
+		"users",
+		"org_settings",
 	}
 	for _, table := range tables {
-		if _, err := s.q.ExecContext(ctx,
-			`DELETE FROM `+table+` WHERE org_id = ?`, id); err != nil {
-			// Some tables may not have org_id (e.g., monitor_checks references
-			// monitors, not orgs directly). Skip errors for those.
-			continue
-		}
+		_, _ = s.q.ExecContext(ctx,
+			`DELETE FROM `+table+` WHERE org_id = ?`, id)
 	}
-	// Delete child data that references monitors (not org_id directly).
-	_, _ = s.q.ExecContext(ctx,
-		`DELETE FROM monitor_checks WHERE monitor_id NOT IN (SELECT id FROM monitors)`)
-	_, _ = s.q.ExecContext(ctx,
-		`DELETE FROM monitor_rollups WHERE monitor_id NOT IN (SELECT id FROM monitors)`)
 	_, err := s.q.ExecContext(ctx, `DELETE FROM orgs WHERE id = ?`, id)
 	return err
 }

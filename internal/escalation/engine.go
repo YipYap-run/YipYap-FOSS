@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
 	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
 	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/crypto"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/google/uuid"
 )
 
 // EngineMetrics records escalation metrics. Pass nil to disable.
@@ -47,6 +47,18 @@ type Engine struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 }
+
+const (
+	// escalationTickInterval is how often the engine advances firing alerts.
+	escalationTickInterval = 5 * time.Second
+	// escalationLeaderKey is the dedup key used to elect a single engine per
+	// tick window. The dedup Claim is atomic first-writer-wins with a TTL;
+	// the FOSS stub always claims (single-box).
+	escalationLeaderKey = "escalation-leader"
+	// escalationLeaderTTL is slightly shorter than the tick interval so each
+	// tick re-runs the election instead of being blocked by the prior claim.
+	escalationLeaderTTL = escalationTickInterval - time.Second
+)
 
 // SetCloudEventEmitter attaches a CloudEvent emitter to the engine. A nil
 // emitter disables CloudEvent emission (the default). Must be called before
@@ -116,7 +128,10 @@ func (e *Engine) handleTrigger(ctx context.Context, subject string, data []byte)
 	}
 
 	// Check if there's already an active alert for this monitor.
-	existing, _ := e.store.Alerts().GetActiveByMonitor(ctx, evt.MonitorID)
+	existing, err := e.store.Alerts().GetActiveByMonitor(ctx, evt.MonitorID)
+	if err != nil {
+		slog.Warn("escalation: get active alert", "monitor_id", evt.MonitorID, "error", err)
+	}
 	if existing != nil {
 		return nil // already firing, skip
 	}
@@ -333,7 +348,7 @@ func (e *Engine) handleAck(ctx context.Context, subject string, data []byte) err
 func (e *Engine) tickLoop() {
 	defer close(e.done)
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(escalationTickInterval)
 	defer ticker.Stop()
 
 	for {
@@ -348,6 +363,14 @@ func (e *Engine) tickLoop() {
 
 func (e *Engine) processFiringAlerts() {
 	ctx := e.ctx
+
+	// Leader election: in a multi-instance deployment every engine runs its
+	// own ticker, so without this they would all advance the same alerts and
+	// double-fire escalations. Claim a short lease; only the winner processes
+	// this tick window.
+	if leader, err := e.store.Dedup().Claim(ctx, escalationLeaderKey, escalationLeaderTTL); err != nil || !leader {
+		return
+	}
 
 	alerts, err := e.store.Alerts().ListFiring(ctx)
 	if err != nil {
@@ -559,7 +582,7 @@ func (e *Engine) notifyStep(ctx context.Context, alert *domain.Alert, monitor *d
 				Channel:      ch.Type, // "slack", "webhook", etc.  - for dispatcher routing
 				TargetConfig: base64.StdEncoding.EncodeToString(versionedConfig),
 				Message:      fmt.Sprintf("Alert: %s is %s", monitor.Name, alert.Status),
-				DedupeKey:    fmt.Sprintf("%s-%s-%s", alert.ID, step.ID, userID),
+				DedupeKey:    fmt.Sprintf("%s-%s-%s-%d-%d", alert.ID, step.ID, userID, e.getLoopCount(state), state.RetryCount),
 			}
 
 			e.enrichJobWithServiceContext(ctx, &job, monitor, alert)
@@ -573,8 +596,12 @@ func (e *Engine) notifyStep(ctx context.Context, alert *domain.Alert, monitor *d
 			// The bus delivers near-instantly; if the dispatcher handles
 			// it, it marks the outbox row complete. If the worker dies
 			// before completing, the outbox poller reclaims the stale job.
-			_ = e.store.Outbox().Enqueue(ctx, job.ID, string(data))
-			_ = e.bus.PublishDurable(ctx, "notify.request", data, job.ID)
+			if err := e.store.Outbox().Enqueue(ctx, job.ID, string(data)); err != nil {
+				slog.Error("escalation: outbox enqueue failed", "alert_id", alert.ID, "error", err)
+			}
+			if err := e.bus.PublishDurable(ctx, "notify.request", data, job.ID); err != nil {
+				slog.Error("escalation: publish notify.request failed", "alert_id", alert.ID, "error", err)
+			}
 
 			e.createEvent(ctx, alert.ID, domain.EventNotified, ch.Type, userID, nil)
 		}

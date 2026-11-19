@@ -1,4 +1,4 @@
-package sqlite
+package sqlx
 
 import (
 	"context"
@@ -9,16 +9,25 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-type teamStore struct{ q queryable }
+// TeamStore implements store.TeamStore across SQL backends.
+type TeamStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *teamStore) Create(ctx context.Context, t *domain.Team) error {
+// NewTeamStore returns a TeamStore bound to q with the given dialect.
+func NewTeamStore(q Queryable, d Dialect) *TeamStore {
+	return &TeamStore{q: q, d: d}
+}
+
+func (s *TeamStore) Create(ctx context.Context, t *domain.Team) error {
 	_, err := s.q.ExecContext(ctx,
 		`INSERT INTO teams (id, org_id, name) VALUES (?, ?, ?)`,
 		t.ID, t.OrgID, t.Name)
 	return err
 }
 
-func (s *teamStore) GetByID(ctx context.Context, id string) (*domain.Team, error) {
+func (s *TeamStore) GetByID(ctx context.Context, id string) (*domain.Team, error) {
 	var t domain.Team
 	err := s.q.QueryRowContext(ctx,
 		`SELECT id, org_id, name FROM teams WHERE id = ?`, id).
@@ -32,7 +41,7 @@ func (s *teamStore) GetByID(ctx context.Context, id string) (*domain.Team, error
 	return &t, nil
 }
 
-func (s *teamStore) ListByOrg(ctx context.Context, orgID string, params store.ListParams) ([]*domain.Team, error) {
+func (s *TeamStore) ListByOrg(ctx context.Context, orgID string, params store.ListParams) ([]*domain.Team, error) {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 50
@@ -56,49 +65,49 @@ func (s *teamStore) ListByOrg(ctx context.Context, orgID string, params store.Li
 	return out, rows.Err()
 }
 
-func (s *teamStore) Update(ctx context.Context, t *domain.Team) error {
+func (s *TeamStore) Update(ctx context.Context, t *domain.Team) error {
 	res, err := s.q.ExecContext(ctx, `UPDATE teams SET name = ? WHERE id = ?`, t.Name, t.ID)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *teamStore) Delete(ctx context.Context, id string) error {
+func (s *TeamStore) Delete(ctx context.Context, id string) error {
 	res, err := s.q.ExecContext(ctx, `DELETE FROM teams WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *teamStore) AddMember(ctx context.Context, m *domain.TeamMember) error {
+func (s *TeamStore) AddMember(ctx context.Context, m *domain.TeamMember) error {
 	_, err := s.q.ExecContext(ctx,
 		`INSERT INTO team_members (team_id, user_id, position) VALUES (?, ?, ?)`,
 		m.TeamID, m.UserID, m.Position)
 	return err
 }
 
-func (s *teamStore) RemoveMember(ctx context.Context, teamID, userID string) error {
+func (s *TeamStore) RemoveMember(ctx context.Context, teamID, userID string) error {
 	res, err := s.q.ExecContext(ctx,
 		`DELETE FROM team_members WHERE team_id = ? AND user_id = ?`, teamID, userID)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *teamStore) UpdateMember(ctx context.Context, m *domain.TeamMember) error {
+func (s *TeamStore) UpdateMember(ctx context.Context, m *domain.TeamMember) error {
 	res, err := s.q.ExecContext(ctx,
 		`UPDATE team_members SET position = ? WHERE team_id = ? AND user_id = ?`,
 		m.Position, m.TeamID, m.UserID)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *teamStore) ListMembers(ctx context.Context, teamID string) ([]*domain.TeamMember, error) {
+func (s *TeamStore) ListMembers(ctx context.Context, teamID string) ([]*domain.TeamMember, error) {
 	rows, err := s.q.QueryContext(ctx,
 		`SELECT team_id, user_id, position FROM team_members WHERE team_id = ? ORDER BY position`,
 		teamID)

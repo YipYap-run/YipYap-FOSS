@@ -536,7 +536,7 @@ func (h *CloudEventHandler) loadIngestConfig(ctx context.Context, orgID string) 
 		return cfg, nil
 	}
 	// OrgSettings is not on the top-level Store interface; the concrete
-	// backends (postgres/sqlite/mariadb) expose it via OrgSettingsProvider.
+	// backends (sqlite/postgres) expose it via OrgSettingsProvider.
 	// When the underlying store doesn't implement it we degrade to "no
 	// auth configured" rather than failing, this keeps test doubles and
 	// any future backends without settings support usable.
@@ -546,7 +546,7 @@ func (h *CloudEventHandler) loadIngestConfig(ctx context.Context, orgID string) 
 	}
 	raw, err := provider.OrgSettings().Get(ctx, orgID, ingestAuthSettingKey)
 	if err != nil {
-		// The sqlite/postgres/mariadb implementations return a fmt.Errorf
+		// The sqlite/postgres implementations return a fmt.Errorf
 		// "org setting not found: ..." on missing rows; treat that, and
 		// only that, as absence. Any other error is unexpected and must
 		// propagate so operators see DB outages rather than silent

@@ -1,37 +1,7 @@
 import { useState, useEffect } from 'preact/hooks';
 import { get, post, patch } from '../../api/client';
 import { currentUser } from '../../state/auth';
-import { PageHeader, Card, LoadingPage, ErrorMessage, relativeTime } from '../../components/ui';
-
-const STATUS_COLORS = {
-  open:    { bg: '#27ae60', label: 'OPEN' },
-  pending: { bg: '#f39c12', label: 'PENDING' },
-  closed:  { bg: '#6b7280', label: 'CLOSED' },
-};
-
-const PRIORITY_COLORS = {
-  low:    { bg: '#6b7280', label: 'LOW' },
-  normal: { bg: '#3b82f6', label: 'NORMAL' },
-  high:   { bg: '#e67e22', label: 'HIGH' },
-  urgent: { bg: '#e74c3c', label: 'URGENT' },
-};
-
-function Pill({ config, value }) {
-  const c = config[value] || { bg: 'var(--color-muted)', label: value?.toUpperCase() || 'UNKNOWN' };
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '3px 10px',
-      borderRadius: 9999,
-      background: c.bg,
-      color: '#fff',
-      fontSize: '0.6875rem',
-      fontWeight: 700,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-    }}>{c.label}</span>
-  );
-}
+import { PageHeader, Card, LoadingPage, ErrorMessage, relativeTime, ConfigPill, SUPPORT_STATUS_COLORS, SUPPORT_PRIORITY_COLORS } from '../../components/ui';
 
 const messageBubbleBase = {
   padding: '12px 16px',
@@ -147,8 +117,8 @@ export function SupportDetailPage({ id }) {
         title={ticket.subject}
         subtitle={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <Pill config={STATUS_COLORS} value={ticket.status} />
-            <Pill config={PRIORITY_COLORS} value={ticket.priority} />
+            <ConfigPill config={SUPPORT_STATUS_COLORS} value={ticket.status} />
+            <ConfigPill config={SUPPORT_PRIORITY_COLORS} value={ticket.priority} />
           </span>
         }
         actions={
