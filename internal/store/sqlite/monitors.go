@@ -257,6 +257,21 @@ func (s *monitorStore) ListAllEnabled(ctx context.Context) ([]*domain.Monitor, e
 }
 
 func (s *monitorStore) Delete(ctx context.Context, id string) error {
+	// alerts.monitor_id lacks ON DELETE CASCADE, so the monitor's alerts must
+	// be removed first (mirrors org.Delete's ordering). alert_events and
+	// alert_escalation_state cascade from the alert delete; the alert children
+	// below reference alert_id or monitor_id without a foreign key, so they are
+	// cleaned up explicitly to avoid orphaned rows.
+	_, _ = s.q.ExecContext(ctx,
+		`DELETE FROM alert_status_page_refs WHERE alert_id IN (SELECT id FROM alerts WHERE monitor_id = ?)`, id)
+	_, _ = s.q.ExecContext(ctx,
+		`DELETE FROM alert_remediations WHERE alert_id IN (SELECT id FROM alerts WHERE monitor_id = ?)`, id)
+	_, _ = s.q.ExecContext(ctx,
+		`DELETE FROM alert_suppressions WHERE monitor_id = ? OR alert_id IN (SELECT id FROM alerts WHERE monitor_id = ?)`, id, id)
+	_, _ = s.q.ExecContext(ctx, `DELETE FROM cloudevent_ingest_idempotency WHERE monitor_id = ?`, id)
+	if _, err := s.q.ExecContext(ctx, `DELETE FROM alerts WHERE monitor_id = ?`, id); err != nil {
+		return err
+	}
 	res, err := s.q.ExecContext(ctx, `DELETE FROM monitors WHERE id = ?`, id)
 	if err != nil {
 		return err

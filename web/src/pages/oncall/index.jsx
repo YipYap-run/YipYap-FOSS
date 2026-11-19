@@ -168,7 +168,7 @@ export function OnCallPage() {
 
   return (
     <div class="oncall-page">
-      <PageHeader title="On-Call" subtitle="Rotation schedules"
+      <PageHeader title="On-Call" subtitle="Who's on call and when, across your teams"
         actions={<button class="btn btn-primary" onClick={() => openScheduleModal()}>New Schedule</button>}
       />
 

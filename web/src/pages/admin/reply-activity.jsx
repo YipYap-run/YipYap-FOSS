@@ -4,15 +4,12 @@ import { PageHeader, Card, LoadingPage, ErrorMessage, formatTime } from '../../c
 import { currentUser } from '../../state/auth';
 
 // ReplyActivityPage renders a reverse-chronological feed of every
-// state-mutating reply event the admin's org has received, with basic
-// filters for channel, alert, type, and time window. Clicking a row
-// opens a detail panel with the before/after JSON: the MVP of our
-// reply-audit forensic tool.
+// state-mutating reply the org's sinks have sent back, translated into
+// plain language: what happened, on which monitor, through which channel,
+// and whether it was accepted or rejected and why. Clicking a row opens
+// the before/after JSON for forensic detail.
 //
-// Data source: GET /api/v1/admin/cloudevents/replies. The server
-// enforces the owner/admin role gate; this page additionally bails out
-// early on the client to avoid a useless network round-trip for non-
-// admins.
+// Data source: GET /api/v1/admin/cloudevents/replies (owner/admin only).
 
 const SINCE_OPTIONS = [
   { key: '1h',  label: 'Last hour',   ms: 1 * 60 * 60 * 1000 },
@@ -21,40 +18,69 @@ const SINCE_OPTIONS = [
   { key: '30d', label: 'Last 30 days', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
-// REPLY_TYPE_OPTIONS mirrors the Phase-2 + Phase-5 catalog. We hard-code
-// the list so the filter dropdown is populated without an extra API call;
-// when the catalog grows we just update this array.
 const REPLY_TYPE_OPTIONS = [
-  { key: 'run.yipyap.reply.alert.claimed.v1',           label: 'alert.claimed' },
-  { key: 'run.yipyap.reply.alert.enriched.v1',          label: 'alert.enriched' },
-  { key: 'run.yipyap.reply.alert.linked.v1',            label: 'alert.linked' },
-  { key: 'run.yipyap.reply.alert.suppressed.v1',        label: 'alert.suppressed' },
-  { key: 'run.yipyap.reply.alert.deduplicated.v1',      label: 'alert.deduplicated' },
-  { key: 'run.yipyap.reply.alert.ack_with_context.v1',  label: 'alert.ack_with_context' },
-  { key: 'run.yipyap.reply.alert.ownership.v1',         label: 'alert.ownership' },
-  { key: 'run.yipyap.reply.alert.remediation_started.v1', label: 'alert.remediation_started' },
-  { key: 'run.yipyap.reply.alert.remediation_result.v1',  label: 'alert.remediation_result' },
-  { key: 'run.yipyap.reply.alert.status_page.v1',       label: 'alert.status_page' },
-  { key: 'run.yipyap.reply.alert.escalated.v1',         label: 'alert.escalated' },
-  { key: 'run.yipyap.reply.alert.route.v1',             label: 'alert.route' },
-  { key: 'run.yipyap.reply.monitor.deregister.v1',      label: 'monitor.deregister' },
+  { key: 'run.yipyap.reply.alert.claimed.v1',           label: 'Claimed alert' },
+  { key: 'run.yipyap.reply.alert.enriched.v1',          label: 'Enriched alert' },
+  { key: 'run.yipyap.reply.alert.linked.v1',            label: 'Linked alert to incident' },
+  { key: 'run.yipyap.reply.alert.suppressed.v1',        label: 'Suppressed alert' },
+  { key: 'run.yipyap.reply.alert.deduplicated.v1',      label: 'Deduplicated alert' },
+  { key: 'run.yipyap.reply.alert.ack_with_context.v1',  label: 'Acknowledged alert' },
+  { key: 'run.yipyap.reply.alert.ownership.v1',         label: 'Changed alert ownership' },
+  { key: 'run.yipyap.reply.alert.remediation_started.v1', label: 'Started remediation' },
+  { key: 'run.yipyap.reply.alert.remediation_result.v1',  label: 'Recorded remediation result' },
+  { key: 'run.yipyap.reply.alert.status_page.v1',       label: 'Updated status page' },
+  { key: 'run.yipyap.reply.alert.escalated.v1',         label: 'Escalated alert' },
+  { key: 'run.yipyap.reply.alert.route.v1',             label: 'Routed alert' },
+  { key: 'run.yipyap.reply.monitor.deregister.v1',      label: 'Deregistered monitor' },
 ];
 
-// truncateID returns the short form of a ULID / UUID suitable for inline
-// display, just enough to tell two rows apart without crowding.
+// Human-readable verb for a reply type. Falls back to a trimmed type name.
+const REPLY_TYPE_LABELS = Object.fromEntries(
+  REPLY_TYPE_OPTIONS.map((o) => [o.key, o.label])
+);
+
+// Human-readable outcome + badge styling.
+const OUTCOME_LABELS = {
+  'accepted': 'Accepted',
+  'rejected:org_mismatch': 'Rejected · wrong org',
+  'rejected:channel_mismatch': 'Rejected · wrong channel',
+  'rejected:trust_required': 'Rejected · trust not established',
+  'rejected:rate_limited': 'Rejected · rate limited',
+  'rejected:unknown_alertref': 'Rejected · unknown alert',
+  'rejected:alertref_expired': 'Rejected · reference expired',
+  'rejected:unknown_type': 'Rejected · unknown reply type',
+};
+
+function outcomeStyle(outcome) {
+  if (outcome === 'accepted') {
+    return { color: 'var(--color-up)', bg: 'var(--color-up-bg)' };
+  }
+  if (outcome.startsWith('handler_error:')) {
+    return { color: 'var(--color-down)', bg: 'var(--color-down-bg)' };
+  }
+  if (outcome.startsWith('rejected:')) {
+    return { color: 'var(--color-warning)', bg: 'var(--color-warning-bg)' };
+  }
+  return { color: 'var(--color-muted)', bg: 'var(--color-muted-bg)' };
+}
+
 function truncateID(id) {
   if (!id) return '';
   if (id.length <= 10) return id;
   return id.slice(0, 8) + '…';
 }
 
-// outcomeColor returns an inline foreground color for the Outcome cell.
-function outcomeColor(outcome) {
-  if (!outcome) return 'var(--color-muted)';
-  if (outcome === 'accepted') return 'var(--color-up, #16a34a)';
-  if (outcome.startsWith('rejected:')) return 'var(--color-warning, #f59e0b)';
-  if (outcome.startsWith('handler_error:')) return 'var(--color-down, #ef4444)';
-  return 'var(--color-muted)';
+// replyLabel turns a reply type into its human verb, falling back to the
+// trimmed type name for types not yet in the catalog.
+function replyLabel(type) {
+  if (!type) return 'Unknown reply';
+  return REPLY_TYPE_LABELS[type] || type.replace('run.yipyap.', '');
+}
+
+// outcomeLabel turns a raw outcome into human copy.
+function outcomeLabel(outcome) {
+  if (!outcome) return '—';
+  return OUTCOME_LABELS[outcome] || outcome;
 }
 
 export function ReplyActivityPage() {
@@ -67,18 +93,38 @@ export function ReplyActivityPage() {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
 
-  // Filter state. `channel` and `alert` are free-text (exact match). The
-  // server accepts empty strings as "no filter" so we pass them through
-  // verbatim.
   const [sinceKey, setSinceKey] = useState('24h');
   const [channel, setChannel] = useState('');
   const [alert, setAlert] = useState('');
   const [replyType, setReplyType] = useState('');
 
+  // ID -> name maps, populated once so rows show real names instead of UUIDs.
+  const [monitorNames, setMonitorNames] = useState({});
+  const [channels, setChannels] = useState({});
+  const [alertMonitors, setAlertMonitors] = useState({});
+
   const sinceMs = useMemo(() => {
     const hit = SINCE_OPTIONS.find((s) => s.key === sinceKey);
     return hit ? hit.ms : 24 * 60 * 60 * 1000;
   }, [sinceKey]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    (async () => {
+      try {
+        const [m, c, a] = await Promise.all([
+          get('/monitors'),
+          get('/notification-channels'),
+          get('/alerts'),
+        ]);
+        setMonitorNames(Object.fromEntries((m || []).map((x) => [x.id, x.name])));
+        setChannels(Object.fromEntries((c || []).map((x) => [x.id, x])));
+        setAlertMonitors(Object.fromEntries((a || []).map((x) => [x.id, x.monitor_id])));
+      } catch (_) {
+        // Names are cosmetic; keep going if any lookup fails.
+      }
+    })();
+  }, [isAdmin]);
 
   async function load({ append = false, cursor = null } = {}) {
     if (!isAdmin) return;
@@ -113,13 +159,9 @@ export function ReplyActivityPage() {
   }, [isAdmin, sinceKey, channel, alert, replyType]);
 
   function loadMore() {
-    // "Load more" pages by sliding the since cursor to just-before the
-    // oldest row currently in view. The server returns the next window
-    // in reverse-chrono order; we append.
     if (entries.length === 0) return;
     const oldest = entries[entries.length - 1];
     const cursor = new Date(new Date(oldest.received_at).getTime() - 1).toISOString();
-    // Swap to a manual load: skip the useEffect re-run.
     (async () => {
       setLoading(true);
       try {
@@ -128,13 +170,9 @@ export function ReplyActivityPage() {
         if (channel) params.set('channel', channel);
         if (alert) params.set('alert', alert);
         if (replyType) params.set('type', replyType);
-        // Overfetch the existing window then drop rows already in view.
-        // Simpler and correct for the MVP; a proper pagination cursor is
-        // a follow-up.
         params.set('limit', String(Math.min(500, entries.length + 100)));
         const data = await get('/admin/cloudevents/replies?' + params.toString());
         const rows = data?.entries || [];
-        // Dedup on id: the server may return entries we already have.
         const seen = new Set(entries.map((e) => e.id));
         const fresh = rows.filter((e) => !seen.has(e.id));
         setEntries([...entries, ...fresh]);
@@ -145,6 +183,19 @@ export function ReplyActivityPage() {
         setLoading(false);
       }
     })();
+  }
+
+  // Resolve an entry's subject: the monitor name if present, else the
+  // alert's monitor, else a fallback.
+  function subjectName(e) {
+    const mid = e.monitor_id || alertMonitors[e.alert_id];
+    return monitorNames[mid] || (mid ? 'Monitor ' + truncateID(mid) : 'a monitor');
+  }
+
+  function channelLabel(e) {
+    const c = channels[e.channel_id];
+    if (c) return `${c.name} · ${c.type}`;
+    return e.channel_id ? 'Channel ' + truncateID(e.channel_id) : 'unknown channel';
   }
 
   if (!isAdmin) {
@@ -160,10 +211,19 @@ export function ReplyActivityPage() {
 
   return (
     <div class="reply-activity-page">
-      <PageHeader title="Reply Activity" subtitle="CloudEvent replies received from downstream sinks." />
+      <PageHeader
+        title="Reply Activity"
+        subtitle="CloudEvent replies sent back by your connected sinks — the inbound half of yipyap's cloud-native eventing loop."
+      />
 
       <Card>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:12px">
+        <p class="text-muted" style="margin:0 0 14px 0;font-size:0.9em">
+          A <code>cloudevent_http</code> channel connects an alert to a downstream sink over the
+          CNCF CloudEvents protocol. That sink can answer with its own CloudEvent, typed{' '}
+          <code>run.yipyap.reply.*</code>. Each entry below is one such reply, with the action it
+          took, the monitor it targeted, and whether it was accepted or rejected.
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px">
           <label style="display:flex;flex-direction:column;gap:2px">
             <span class="form-help">Since</span>
             <select value={sinceKey} onChange={(e) => setSinceKey(e.target.value)}>
@@ -171,7 +231,7 @@ export function ReplyActivityPage() {
             </select>
           </label>
           <label style="display:flex;flex-direction:column;gap:2px">
-            <span class="form-help">Reply type</span>
+            <span class="form-help">CloudEvent type</span>
             <select value={replyType} onChange={(e) => setReplyType(e.target.value)}>
               <option value="">all</option>
               {REPLY_TYPE_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
@@ -194,41 +254,64 @@ export function ReplyActivityPage() {
         {loading && entries.length === 0 && <LoadingPage />}
 
         {!loading && entries.length === 0 && !error && (
-          <p class="text-muted" style="margin-top:12px">No reply events in this window.</p>
+          <p class="text-muted" style="margin-top:12px">
+            No CloudEvent replies in this window. Replies appear once a
+            connected sink answers an alert with a <code>run.yipyap.reply.*</code> CloudEvent.
+          </p>
         )}
 
         {entries.length > 0 && (
-          <div style="overflow-x:auto">
-            <table class="data-table" style="width:100%;border-collapse:collapse">
-              <thead>
-                <tr>
-                  <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--color-border)">Time</th>
-                  <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--color-border)">Type</th>
-                  <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--color-border)">Alert</th>
-                  <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--color-border)">Channel</th>
-                  <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--color-border)">Outcome</th>
-                  <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--color-border)">Sub</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((e) => {
-                  const short = (e.reply_type || '').replace('run.yipyap.', '');
-                  const active = selected && selected.id === e.id;
-                  return (
-                    <tr key={e.id}
-                        onClick={() => setSelected(active ? null : e)}
-                        style={`cursor:pointer;background:${active ? 'var(--color-bg-hover, #f1f5f9)' : 'transparent'}`}>
-                      <td style="padding:6px 8px;font-family:monospace;font-size:0.85em;white-space:nowrap">{formatTime(e.received_at)}</td>
-                      <td style="padding:6px 8px"><code style="font-size:0.85em">{short}</code></td>
-                      <td style="padding:6px 8px;font-family:monospace;font-size:0.85em" title={e.alert_id}>{truncateID(e.alert_id)}</td>
-                      <td style="padding:6px 8px;font-family:monospace;font-size:0.85em" title={e.channel_id}>{truncateID(e.channel_id)}</td>
-                      <td style={`padding:6px 8px;font-weight:600;color:${outcomeColor(e.outcome)}`}>{e.outcome}</td>
-                      <td style="padding:6px 8px;font-family:monospace;font-size:0.85em" title={e.reply_sub}>{truncateID(e.reply_sub)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            {entries.map((e) => {
+              const active = selected && selected.id === e.id;
+              const badge = outcomeStyle(e.outcome);
+              return (
+                <div
+                  key={e.id}
+                  onClick={() => setSelected(active ? null : e)}
+                  style={{
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                    background: active ? 'var(--color-surface-elevated)' : 'var(--color-surface)',
+                  }}
+                >
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      marginTop: 1,
+                      fontSize: '0.72em',
+                      fontWeight: 700,
+                      letterSpacing: '0.02em',
+                      padding: '3px 8px',
+                      borderRadius: 999,
+                      color: badge.color,
+                      background: badge.bg,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {outcomeLabel(e.outcome)}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600 }}>
+                      {replyLabel(e.reply_type)}{' '}
+                      <span style="color:var(--color-text-muted, #94a3b8);font-weight:400">·</span>{' '}
+                      {subjectName(e)}
+                    </div>
+                    <div style="font-size:0.85em;color:var(--color-text-muted, #94a3b8);margin-top:2px">
+                      via {channelLabel(e)} · {formatTime(e.received_at)}
+                    </div>
+                  </div>
+                  <span style="color:var(--color-text-muted, #94a3b8);font-size:1.2em;line-height:1;margin-top:2px">
+                    {active ? '×' : '›'}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -257,28 +340,33 @@ export function ReplyActivityPage() {
 function ReplyDetail({ entry }) {
   const before = formatJSON(entry.before);
   const after = formatJSON(entry.after);
+  const badge = outcomeStyle(entry.outcome);
   return (
     <div class="reply-detail">
+      <p style="margin:0 0 12px 0">
+        <strong>{replyLabel(entry.reply_type)}</strong> ·{' '}
+        <span style={`color:${badge.color};font-weight:600`}>{outcomeLabel(entry.outcome)}</span>
+      </p>
+
       <dl style="display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0 0 12px 0;font-size:0.9em">
         <dt class="text-muted">Reply ID</dt><dd><code>{entry.reply_id}</code></dd>
-        <dt class="text-muted">Type</dt><dd><code>{entry.reply_type}</code></dd>
+        <dt class="text-muted">CloudEvent type</dt><dd><code>{entry.reply_type}</code></dd>
         <dt class="text-muted">Source</dt><dd><code>{entry.reply_source}</code></dd>
         <dt class="text-muted">Sub</dt><dd><code>{entry.reply_sub || '(none)'}</code></dd>
         <dt class="text-muted">Alert</dt><dd><code>{entry.alert_id || '(none)'}</code></dd>
         <dt class="text-muted">Monitor</dt><dd><code>{entry.monitor_id || '(none)'}</code></dd>
         <dt class="text-muted">Channel</dt><dd><code>{entry.channel_id}</code></dd>
-        <dt class="text-muted">Outcome</dt><dd><strong style={`color:${outcomeColor(entry.outcome)}`}>{entry.outcome}</strong></dd>
         <dt class="text-muted">Received</dt><dd>{formatTime(entry.received_at)}</dd>
       </dl>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div>
           <div class="form-help" style="margin-bottom:4px">Before</div>
-          <pre style="background:var(--color-bg-alt, #f8fafc);border:1px solid var(--color-border);padding:8px;border-radius:4px;font-size:0.8em;overflow:auto;max-height:260px;margin:0">{before}</pre>
+          <pre style="background:var(--color-surface-elevated);border:1px solid var(--color-border);padding:8px;border-radius:4px;font-size:0.8em;overflow:auto;max-height:260px;margin:0">{before}</pre>
         </div>
         <div>
           <div class="form-help" style="margin-bottom:4px">After</div>
-          <pre style="background:var(--color-bg-alt, #f8fafc);border:1px solid var(--color-border);padding:8px;border-radius:4px;font-size:0.8em;overflow:auto;max-height:260px;margin:0">{after}</pre>
+          <pre style="background:var(--color-surface-elevated);border:1px solid var(--color-border);padding:8px;border-radius:4px;font-size:0.8em;overflow:auto;max-height:260px;margin:0">{after}</pre>
         </div>
       </div>
     </div>
@@ -286,9 +374,7 @@ function ReplyDetail({ entry }) {
 }
 
 // formatJSON renders a value for the before/after <pre>. Store columns
-// arrive as raw JSON (we typed them as json.RawMessage on the wire so
-// the Fetch layer keeps them as already-decoded JS values once parsed).
-// If a column is missing we render "(none)" rather than "null" so it is
+// arrive as raw JSON; if a column is missing we render "(none)" so it is
 // obvious the handler didn't emit one.
 function formatJSON(v) {
   if (v === undefined || v === null) return '(none)';

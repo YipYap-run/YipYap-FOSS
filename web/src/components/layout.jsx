@@ -12,7 +12,7 @@ const NAV_ITEMS = [
   { href: '/monitors', label: 'Monitors', icon: 'activity' },
   { href: '/alerts', label: 'Alerts', icon: 'bell' },
   { href: '/incidents', label: 'Incidents', icon: 'megaphone', saasOnly: true, paidOnly: true },
-  { href: '/oncall', label: 'On-Call', icon: 'phone' },
+  { href: '/oncall', label: 'On-Call', icon: 'phone', saasOnly: true },
   { href: '/services', label: 'Services', icon: 'layers', saasOnly: true },
   { href: '/admin/reply-activity', label: 'Reply Activity', icon: 'activity', saasOnly: true, ownerAdminOnly: true },
   { href: '/support', label: 'Support', icon: 'help-circle', saasOnly: true },

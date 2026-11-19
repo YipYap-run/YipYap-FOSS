@@ -125,7 +125,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 
 		// Rate-limited public auth routes.
 		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(10, time.Minute))
+			r.Use(httprate.LimitBy(10, time.Minute, handlers.RateLimitKeyByClientIP))
 			if opt.RegistrationEnabled {
 				r.Post("/auth/register", authH.Register)
 			}
@@ -147,14 +147,14 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		r.Get("/public/{orgSlug}/maintenance", publicH.Maintenance)
 
 		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(60, time.Minute))
+			r.Use(httprate.LimitBy(60, time.Minute, handlers.RateLimitKeyByClientIP))
 			r.Post("/heartbeat/{monitorID}", monitorH.Heartbeat)
 		})
 
 		// Inbound Events API (authenticated by integration key in body).
 		eventsH := handlers.NewEventsHandler(s, msgBus)
 		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(100, time.Minute))
+			r.Use(httprate.LimitBy(100, time.Minute, handlers.RateLimitKeyByClientIP))
 			r.Post("/events", eventsH.Ingest)
 		})
 
@@ -162,7 +162,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		ceIngestH := handlers.NewCloudEventHandler(s)
 		ceIngestH.SetMetrics(opt.Metrics)
 		r.Route("/cloudevents", func(r chi.Router) {
-			r.Use(httprate.LimitByIP(60, time.Minute))
+			r.Use(httprate.LimitBy(60, time.Minute, handlers.RateLimitKeyByClientIP))
 			r.Post("/ingest/{token}", ceIngestH.Ingest)
 		})
 
@@ -199,7 +199,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			r.Use(authMiddleware)
 			r.Use(middleware.RequirePaidPlan(s))
 			r.Group(func(r chi.Router) {
-				r.Use(httprate.Limit(60, time.Minute, httprate.WithKeyFuncs(handlers.RateLimitKeyByOrg)))
+				r.Use(httprate.LimitBy(60, time.Minute, handlers.RateLimitKeyByOrg))
 				r.Get("/cloudevents/poll", cePollH.Poll)
 			})
 			r.Group(func(r chi.Router) {

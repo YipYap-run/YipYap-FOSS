@@ -113,6 +113,10 @@ func (r *recordingBus) PublishDurable(_ context.Context, subject string, data []
 	return nil
 }
 
+func (r *recordingBus) PublishAlert(_ context.Context, subject string, data []byte, msgID string) error {
+	return r.PublishDurable(context.Background(), subject, data, msgID)
+}
+
 func (r *recordingBus) Subscribe(string, bus.Handler) error              { return nil }
 func (r *recordingBus) QueueSubscribe(string, string, bus.Handler) error { return nil }
 func (r *recordingBus) PullSubscribe(string, string, bus.AckHandler, ...bus.PullOpt) error {

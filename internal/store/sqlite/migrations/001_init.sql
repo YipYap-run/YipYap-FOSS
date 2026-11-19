@@ -177,7 +177,7 @@ CREATE INDEX IF NOT EXISTS idx_schedule_overrides_schedule_id ON schedule_overri
 -- Alerts
 CREATE TABLE IF NOT EXISTS alerts (
     id TEXT PRIMARY KEY,
-    monitor_id TEXT NOT NULL REFERENCES monitors(id),
+    monitor_id TEXT NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
     org_id TEXT NOT NULL REFERENCES orgs(id),
     status TEXT NOT NULL DEFAULT 'firing',
     severity TEXT NOT NULL DEFAULT 'critical',

@@ -78,11 +78,11 @@ export function App() {
       <AuthRoute path="/settings/:tab" component={SettingsPage} />
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/services" component={ServiceListPage} />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/services/:id" component={ServiceDetailPage} />}
-      <AuthRoute path="/incidents" component={IncidentListPage} />
-      <AuthRoute path="/incidents/:id" component={IncidentDetailPage} />
-      <AuthRoute path="/support" component={SupportListPage} />
-      <AuthRoute path="/support/:id" component={SupportDetailPage} />
-      <AuthRoute path="/admin/reply-activity" component={ReplyActivityPage} />
+      {appMeta.value?.edition !== 'foss' && <AuthRoute path="/incidents" component={IncidentListPage} />}
+      {appMeta.value?.edition !== 'foss' && <AuthRoute path="/incidents/:id" component={IncidentDetailPage} />}
+      {appMeta.value?.edition !== 'foss' && <AuthRoute path="/support" component={SupportListPage} />}
+      {appMeta.value?.edition !== 'foss' && <AuthRoute path="/support/:id" component={SupportDetailPage} />}
+      {appMeta.value?.edition !== 'foss' && <AuthRoute path="/admin/reply-activity" component={ReplyActivityPage} />}
     </Router>
   );
 }

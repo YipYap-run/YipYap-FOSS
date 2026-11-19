@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
@@ -69,5 +70,33 @@ func TestMonitorLabels(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("expected 1 label after delete, got %d", len(got))
+	}
+}
+
+func TestMonitorDeleteWithAlerts(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	org := createTestOrg(t, s)
+	mon := createTestMonitor(t, s, org.ID)
+
+	// A firing alert (plus its cascading children) must not block the delete.
+	alert := createTestAlert(t, s, org.ID, mon.ID)
+	if err := s.Alerts().CreateEvent(ctx, &domain.AlertEvent{
+		ID:        "evt-1",
+		AlertID:   alert.ID,
+		EventType: domain.EventTriggered,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Monitors().Delete(ctx, mon.ID); err != nil {
+		t.Fatalf("delete monitor with alerts: %v", err)
+	}
+
+	if _, err := s.Monitors().GetByID(ctx, mon.ID); err == nil {
+		t.Fatal("expected monitor to be gone after delete")
+	}
+	if _, err := s.Alerts().GetByID(ctx, alert.ID); err == nil {
+		t.Fatal("expected alert to be gone after monitor delete")
 	}
 }

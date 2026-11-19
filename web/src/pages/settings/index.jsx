@@ -47,7 +47,7 @@ export function SettingsPage({ tab: initialTab }) {
 
   return (
     <div class="settings-page">
-      <PageHeader title="Settings" />
+      <PageHeader title="Settings" subtitle="Org, teams, channels, and plan" />
       <div class="settings-layout">
         <nav class="settings-nav" aria-label="Settings sections">
           {visibleTabs.map(t => (

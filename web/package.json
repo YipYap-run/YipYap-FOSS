@@ -14,7 +14,7 @@
   "type": "commonjs",
   "dependencies": {
     "@preact/signals": "^2.9.0",
-    "preact": "^10.29.0",
+    "preact": "^11.2.0",
     "preact-router": "^4.1.2",
     "qrcode": "^1.5.4",
     "uplot": "^1.6.32"

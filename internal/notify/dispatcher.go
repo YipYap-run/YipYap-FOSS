@@ -305,11 +305,13 @@ func (d *Dispatcher) handleDeadLetter(job domain.NotificationJob, err error) {
 		d.deadLetterHandler(job, err)
 	}
 
-	// Publish to dead letter subject.
+	// Publish to dead letter subject. Durable so exhausted jobs are
+	// inspectable in the NOTIFICATIONS stream (24h retention) rather than
+	// dropped on the core-NATS floor.
 	type deadMsg struct {
 		Job   domain.NotificationJob `json:"job"`
 		Error string                 `json:"error"`
 	}
 	data, _ := json.Marshal(deadMsg{Job: job, Error: err.Error()})
-	_ = d.bus.Publish(context.Background(), subjectNotifyDead, data)
+	_ = d.bus.PublishDurable(context.Background(), subjectNotifyDead, data, job.ID)
 }
