@@ -41,6 +41,7 @@ type eventPayload struct {
 // alertTriggerEvent mirrors the JSON shape of checker.AlertEvent /
 // escalation.AlertTriggerEvent without importing those packages.
 type alertTriggerEvent struct {
+	OrgID       string             `json:"org_id"`
 	MonitorID   string             `json:"monitor_id"`
 	MonitorName string             `json:"monitor_name"`
 	Status      domain.CheckStatus `json:"status"`
@@ -137,6 +138,7 @@ func (h *EventsHandler) handleTrigger(w http.ResponseWriter, r *http.Request, re
 	}
 
 	evt := alertTriggerEvent{
+		OrgID:       monitor.OrgID,
 		MonitorID:   monitor.ID,
 		MonitorName: monitor.Name,
 		Status:      status,
@@ -169,15 +171,13 @@ func (h *EventsHandler) handleAcknowledge(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Find active alert for this monitor. The dedup_key is the alert ID.
-	alert, err := h.store.Alerts().GetByID(r.Context(), req.DedupKey)
-	if err != nil || alert.MonitorID != monitor.ID {
-		// Fall back to searching by active alert on this monitor.
-		alert, err = h.store.Alerts().GetActiveByMonitor(r.Context(), monitor.ID)
-		if err != nil {
-			errorResponse(w, http.StatusNotFound, "no active alert found")
-			return
-		}
+	// YipYap enforces one active alert per monitor, so the routing_key
+	// (integration key) already identifies the alert. dedup_key is echoed
+	// for PagerDuty compatibility but does not need to be correlated here.
+	alert, err := h.store.Alerts().GetActiveByMonitor(r.Context(), monitor.ID)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "no active alert found")
+		return
 	}
 
 	if alert.Status == domain.AlertResolved {
@@ -215,14 +215,12 @@ func (h *EventsHandler) handleResolve(w http.ResponseWriter, r *http.Request, re
 		return
 	}
 
-	// Find active alert for this monitor.
-	alert, err := h.store.Alerts().GetByID(r.Context(), req.DedupKey)
-	if err != nil || alert.MonitorID != monitor.ID {
-		alert, err = h.store.Alerts().GetActiveByMonitor(r.Context(), monitor.ID)
-		if err != nil {
-			errorResponse(w, http.StatusNotFound, "no active alert found")
-			return
-		}
+	// YipYap enforces one active alert per monitor, so the routing_key
+	// (integration key) already identifies the alert.
+	alert, err := h.store.Alerts().GetActiveByMonitor(r.Context(), monitor.ID)
+	if err != nil {
+		errorResponse(w, http.StatusNotFound, "no active alert found")
+		return
 	}
 
 	if alert.Status == domain.AlertResolved {

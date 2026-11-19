@@ -283,3 +283,67 @@ export function ToastContainer({ toasts }) {
     </div>
   );
 }
+
+// Shared incident/support pill primitives. These live here rather than being
+// copy-pasted across the incident and support list/detail pages.
+
+export const INCIDENT_SEVERITY_MAP = {
+  critical: 'critical',
+  major: 'warning',
+  minor: 'info',
+};
+
+export const INCIDENT_STATUS_COLORS = {
+  investigating: '#e67e22',
+  identified:    '#2980b9',
+  monitoring:    '#2980b9',
+  resolved:      '#27ae60',
+  maintenance:   '#2980b9',
+};
+
+export function IncidentStatusPill({ status }) {
+  const bg = INCIDENT_STATUS_COLORS[status] || 'var(--color-muted)';
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '3px 10px',
+      borderRadius: 9999,
+      background: bg,
+      color: '#fff',
+      fontSize: '0.6875rem',
+      fontWeight: 700,
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+    }}>{status?.toUpperCase() || 'UNKNOWN'}</span>
+  );
+}
+
+export const SUPPORT_STATUS_COLORS = {
+  open:    { bg: '#27ae60', label: 'OPEN' },
+  pending: { bg: '#f39c12', label: 'PENDING' },
+  closed:  { bg: '#6b7280', label: 'CLOSED' },
+};
+
+export const SUPPORT_PRIORITY_COLORS = {
+  low:    { bg: '#6b7280', label: 'LOW' },
+  normal: { bg: '#3b82f6', label: 'NORMAL' },
+  high:   { bg: '#e67e22', label: 'HIGH' },
+  urgent: { bg: '#e74c3c', label: 'URGENT' },
+};
+
+export function ConfigPill({ config, value }) {
+  const c = config[value] || { bg: 'var(--color-muted)', label: value?.toUpperCase() || 'UNKNOWN' };
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '3px 10px',
+      borderRadius: 9999,
+      background: c.bg,
+      color: '#fff',
+      fontSize: '0.6875rem',
+      fontWeight: 700,
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+    }}>{c.label}</span>
+  );
+}

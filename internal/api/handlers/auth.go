@@ -153,6 +153,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		log.Printf("register: transaction failed: %v", err)
 		errorResponse(w, http.StatusConflict, "org or user already exists")
 		return
 	}
@@ -221,7 +222,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.Users().GetByEmail(r.Context(), req.Email)
 	if err != nil {
 		// User not found  - still run bcrypt to prevent timing leak.
-		_ = auth.VerifyPassword("$2a$10$0000000000000000000000uKMCRsMNJOq3hGBEExGSm3LpaFGvleq", req.Password)
+		_ = auth.DummyVerify(req.Password)
 		errorResponse(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}

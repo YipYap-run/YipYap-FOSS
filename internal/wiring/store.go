@@ -1,4 +1,4 @@
-package main
+package wiring
 
 import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/config"
@@ -6,6 +6,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store/sqlite"
 )
 
-func openStore(cfg *config.Config) (store.Store, error) {
+// OpenStore connects to the SQLite backend (the only one in FOSS builds).
+func OpenStore(cfg *config.Config) (store.Store, error) {
 	return sqlite.New(cfg.DBDsn)
 }

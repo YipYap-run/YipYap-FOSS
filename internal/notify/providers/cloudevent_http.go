@@ -589,7 +589,7 @@ func validateCloudEventHTTPConfig(cfg *CloudEventHTTPConfig) error {
 	// isPrivateHost resolves DNS and rejects IPv4+IPv6 private ranges
 	// including IPv6 ULA fc00::/7 and link-local fe80::/10.
 	if !isLocalhost(u.Host) && !checker.AllowPrivateControlPlaneTargets {
-		if blocked, why := isPrivateHost(u.Hostname()); blocked {
+		if blocked, why := checker.IsPrivateHost(u.Hostname()); blocked {
 			return fmt.Errorf("cloudevent_http: sink_url host %q resolves to private range (%s)", u.Hostname(), why)
 		}
 	}

@@ -1,5 +1,5 @@
-// Command catalog-gen renders Go types, JSON Schemas, and TypeScript
-// types from the YAML event catalog in internal/cloudevents/catalog.
+// Command catalog-gen renders Go types and JSON Schemas from the YAML
+// event catalog in internal/cloudevents/catalog.
 //
 // It is invoked via `go generate ./internal/cloudevents/...`, which runs
 // the directive from the directory containing the file that declares it
@@ -37,7 +37,6 @@ func main() {
 	dir := flag.String("catalog", filepath.Join(root, "internal/cloudevents/catalog"), "catalog dir")
 	goOut := flag.String("go-out", filepath.Join(root, "internal/cloudevents/types/types.gen.go"), "go output path")
 	jsonOut := flag.String("json-out", filepath.Join(root, "internal/cloudevents/schema"), "json schema output dir")
-	tsOut := flag.String("ts-out", filepath.Join(root, "web/src/lib/cloudevents/types.gen.ts"), "ts output path")
 	flag.Parse()
 
 	cat, err := gen.ParseCatalog(*dir)
@@ -55,9 +54,6 @@ func main() {
 		if err := writeFile(filepath.Join(*jsonOut, name), b); err != nil {
 			log.Fatal(err)
 		}
-	}
-	if err := writeFile(*tsOut, mustRender(gen.RenderTSTypes(cat))); err != nil {
-		log.Fatal(err)
 	}
 }
 

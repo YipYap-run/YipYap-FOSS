@@ -6,4 +6,4 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-func registerTwilioRoutes(_ chi.Router, _ store.Store) {}
+func registerTwilioRoutes(_ chi.Router, _ store.Store, _, _ string) {}

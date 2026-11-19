@@ -212,7 +212,7 @@ export function ReplyActivityPage() {
               </thead>
               <tbody>
                 {entries.map((e) => {
-                  const short = e.reply_type.replace('run.yipyap.', '');
+                  const short = (e.reply_type || '').replace('run.yipyap.', '');
                   const active = selected && selected.id === e.id;
                   return (
                     <tr key={e.id}
