@@ -85,6 +85,21 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Role == "" {
 		req.Role = domain.RoleMember
 	}
+	switch req.Role {
+	case domain.RoleOwner:
+		errorResponse(w, http.StatusForbidden, "use ownership transfer to change org owner")
+		return
+	case domain.RoleAdmin:
+		if domain.UserRole(claims.Role) != domain.RoleOwner {
+			errorResponse(w, http.StatusForbidden, "only the org owner can create admins")
+			return
+		}
+	case domain.RoleMember, domain.RoleViewer:
+		// allowed
+	default:
+		errorResponse(w, http.StatusBadRequest, "invalid role")
+		return
+	}
 
 	// Free tier seat limit.
 	org, err := h.store.Orgs().GetByID(r.Context(), claims.OrgID)
@@ -172,6 +187,10 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 		if target == domain.RoleOwner {
 			errorResponse(w, http.StatusForbidden, "use ownership transfer to change org owner")
+			return
+		}
+		if target != domain.RoleAdmin && target != domain.RoleMember && target != domain.RoleViewer {
+			errorResponse(w, http.StatusBadRequest, "invalid role")
 			return
 		}
 		if user.Role == domain.RoleOwner {

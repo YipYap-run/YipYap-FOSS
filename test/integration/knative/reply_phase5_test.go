@@ -141,7 +141,7 @@ func seedChannelInOrg(t *testing.T, s *sqlite.SQLiteStore, orgID string) *domain
 // in primary's org, for the deduplicated handler's cross-alert dedup test.
 //
 // Alerts().Update does NOT touch org_id in any backend (see
-// sqlite/alerts.go, postgres/alerts.go, mariadb/alerts.go), so the secondary
+// sqlite/alerts.go and postgres/alerts.go), so the secondary
 // monitor+alert must be created in-org from the start rather than moved
 // via a post-hoc Update.
 func seedSecondaryAlertInSameOrg(t *testing.T, s *sqlite.SQLiteStore, primary *domain.Alert) *domain.Alert {

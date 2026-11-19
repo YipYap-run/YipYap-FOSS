@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -130,7 +131,7 @@ func validateHost(host string) error {
 
 	// Step 1: Try net.ParseIP (handles standard dotted-decimal and IPv6).
 	if ip := net.ParseIP(host); ip != nil {
-		if isPrivateIP(ip) {
+		if blocked, _ := IsPrivateAddr(ip); blocked {
 			return errPrivate
 		}
 		return nil
@@ -140,7 +141,7 @@ func validateHost(host string) error {
 	// doesn't handle: decimal (2130706433), hex (0x7f000001), octal
 	// (0177.0.0.1), short-form (127.1), and zero (0).
 	if ip := parseNonStandardIP(host); ip != nil {
-		if isPrivateIP(ip) {
+		if blocked, _ := IsPrivateAddr(ip); blocked {
 			return errPrivate
 		}
 		return nil
@@ -152,7 +153,7 @@ func validateHost(host string) error {
 		return nil // DNS failure at validation time; the checker will fail at runtime
 	}
 	for _, ip := range ips {
-		if isPrivateIP(ip) {
+		if blocked, _ := IsPrivateAddr(ip); blocked {
 			return fmt.Errorf("monitors cannot target private/internal IP addresses (%s resolves to %s)", host, ip)
 		}
 	}
@@ -222,18 +223,122 @@ func parseNonStandardIP(host string) net.IP {
 	return net.IPv4(octets[0], octets[1], octets[2], octets[3])
 }
 
-func isPrivateIP(ip net.IP) bool {
-	// Unwrap IPv4-compatible IPv6 (::a.b.c.d, RFC 4291 §2.5.5.1) before
-	// the net.IP property checks. Go's stdlib only normalises the
-	// IPv4-MAPPED form (::ffff:a.b.c.d) via To4(); the IPv4-COMPAT form
-	// is treated as a generic v6 address and slips past IsPrivate /
-	// IsLinkLocalUnicast for the metadata range. See R2-H4.
+// cgnatPrefix is RFC6598 carrier-grade NAT (100.64.0.0/10). Not caught by
+// net.IP.IsPrivate() but SSRF-relevant, increasingly used on corporate
+// networks where the Kubernetes pod CIDR overlaps.
+var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+// ipv6ULAPrefix is the IPv6 Unique Local Address range (fc00::/7), which
+// serves the same role as RFC1918 IPv4 private ranges.
+var ipv6ULAPrefix = netip.MustParsePrefix("fc00::/7")
+
+// IsPrivateAddr reports whether the given net.IP falls in a range we
+// consider SSRF-blocked. Returns a short why-string for error messages.
+//
+// Blocked ranges:
+//   - Loopback (127.0.0.0/8, ::1)
+//   - RFC1918 private (10/8, 172.16/12, 192.168/16)
+//   - Link-local unicast (169.254/16, fe80::/10)
+//   - Link-local multicast
+//   - Unspecified (0.0.0.0, ::)
+//   - CGNAT (100.64/10)
+//   - IPv6 ULA (fc00::/7)
+//   - Multicast (224/4, ff00::/8)
+//
+// IPv4-mapped IPv6 (::ffff:a.b.c.d) and IPv4-compatible IPv6 (::a.b.c.d)
+// are unwrapped before checking so both are blocked.
+func IsPrivateAddr(ip net.IP) (bool, string) {
+	if ip == nil {
+		return true, "nil address"
+	}
+	// Canonicalise: unwrap IPv4-mapped-in-IPv6 so ::ffff:10.0.0.1 is
+	// treated as 10.0.0.1.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	// Also unwrap IPv4-compatible IPv6 (::a.b.c.d, RFC 4291 §2.5.5.1).
+	// To4() does NOT cover this form, it's treated as a generic v6
+	// address and slips past IsPrivate/IsLinkLocalUnicast. Without this,
+	// ::169.254.169.254 / ::10.0.0.1 reach the EC2 metadata service. R2-H4.
 	if v4 := ipv4CompatToV4(ip); v4 != nil {
 		ip = v4
 	}
-	// Also catch 0.0.0.0 (unspecified) which binds to all interfaces.
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+
+	if ip.IsLoopback() {
+		return true, "loopback"
+	}
+	if ip.IsUnspecified() {
+		return true, "unspecified"
+	}
+	if ip.IsLinkLocalUnicast() {
+		return true, "link-local"
+	}
+	if ip.IsLinkLocalMulticast() {
+		return true, "link-local multicast"
+	}
+	if ip.IsMulticast() {
+		return true, "multicast"
+	}
+	if ip.IsPrivate() {
+		return true, "rfc1918 / rfc4193"
+	}
+
+	// net.IP → netip.Addr for prefix checks that net.IP doesn't cover.
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false, ""
+	}
+	// netip.AddrFromSlice wraps IPv4 as a 16-byte v4-in-v6 representation.
+	// Unwrap so CGNAT is recognised on real v4 addrs.
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
+	if addr.Is4() && cgnatPrefix.Contains(addr) {
+		return true, "cgnat"
+	}
+	if addr.Is6() && ipv6ULAPrefix.Contains(addr) {
+		return true, "ipv6 ula"
+	}
+	return false, ""
+}
+
+// IsPrivateHost resolves host (which may be a literal IP or a DNS name)
+// and reports whether ANY resolved address is in a blocked range. A host
+// resolving to a mix of public+private is blocked, the attacker's
+// malicious record is enough.
+//
+// A host of "localhost" returns (true, "loopback") deterministically
+// without DNS. A DNS resolution failure returns (false, ""), the caller
+// is expected to treat unresolvable hosts as "cannot evaluate" and allow
+// the send to reach the Dial path, which will re-resolve and surface a
+// real error there.
+func IsPrivateHost(host string) (bool, string) {
+	if host == "" {
+		return true, "empty host"
+	}
+	// Literal IP fast path.
+	if ip := net.ParseIP(host); ip != nil {
+		return IsPrivateAddr(ip)
+	}
+	// RFC 6761: "localhost" and any name ending in ".localhost" are
+	// reserved and MUST be treated as loopback regardless of what DNS or
+	// /etc/hosts says.
+	lower := strings.ToLower(host)
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return true, "loopback"
+	}
+	// Name resolution for everything else.
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// Can't evaluate; let Dial surface the real error.
+		return false, ""
+	}
+	for _, ip := range ips {
+		if blocked, why := IsPrivateAddr(ip); blocked {
+			return true, fmt.Sprintf("%s resolves to %s [%s]", host, ip, why)
+		}
+	}
+	return false, ""
 }
 
 // ipv4CompatToV4 returns the embedded IPv4 address from an IPv4-compatible

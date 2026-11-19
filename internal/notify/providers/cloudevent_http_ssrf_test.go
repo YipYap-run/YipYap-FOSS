@@ -128,7 +128,7 @@ func TestSSRFGuardedDialContext_BlocksPrivateAtDial(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected ErrSSRFBlocked, got nil")
 	}
-	if !errors.Is(err, ErrSSRFBlocked) {
+	if !errors.Is(err, checker.ErrSSRFBlocked) {
 		t.Fatalf("expected errors.Is(err, ErrSSRFBlocked); got %v", err)
 	}
 	if called {
@@ -137,13 +137,13 @@ func TestSSRFGuardedDialContext_BlocksPrivateAtDial(t *testing.T) {
 
 	// Also simulate the metadata endpoint.
 	_, err = guarded(context.Background(), "tcp", "169.254.169.254:80")
-	if !errors.Is(err, ErrSSRFBlocked) {
+	if !errors.Is(err, checker.ErrSSRFBlocked) {
 		t.Fatalf("metadata endpoint: expected ErrSSRFBlocked; got %v", err)
 	}
 
 	// IPv6 private must also trip.
 	_, err = guarded(context.Background(), "tcp", "[fd00::1]:443")
-	if !errors.Is(err, ErrSSRFBlocked) {
+	if !errors.Is(err, checker.ErrSSRFBlocked) {
 		t.Fatalf("IPv6 ULA: expected ErrSSRFBlocked; got %v", err)
 	}
 
@@ -221,7 +221,7 @@ func TestIsPrivateAddr_Matrix(t *testing.T) {
 		if ip == nil {
 			t.Fatalf("parse %q", tt.ip)
 		}
-		got, why := isPrivateAddr(ip)
+		got, why := checker.IsPrivateAddr(ip)
 		if got != tt.blocked {
 			t.Errorf("isPrivateAddr(%q) = (%v, %q); want blocked=%v", tt.ip, got, why, tt.blocked)
 			continue
@@ -259,7 +259,7 @@ func TestIsPrivateAddr_BlocksIPv4CompatV6(t *testing.T) {
 		if ip == nil {
 			t.Fatalf("parse %q", tt.ip)
 		}
-		got, why := isPrivateAddr(ip)
+		got, why := checker.IsPrivateAddr(ip)
 		if got != tt.blocked {
 			t.Errorf("isPrivateAddr(%q) = (%v, %q); want blocked=%v", tt.ip, got, why, tt.blocked)
 		}
@@ -288,7 +288,7 @@ func TestSSRFGuardedDialContext_BlocksIPv4CompatV6(t *testing.T) {
 		"[::127.0.0.1]:8080",
 	} {
 		_, err := guarded(context.Background(), "tcp", addr)
-		if !errors.Is(err, ErrSSRFBlocked) {
+		if !errors.Is(err, checker.ErrSSRFBlocked) {
 			t.Errorf("guarded(%q) = %v; want ErrSSRFBlocked", addr, err)
 		}
 	}

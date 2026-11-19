@@ -10,11 +10,7 @@ import (
 )
 
 // ErrSSRFBlocked is returned by SSRFGuardedDialContext when the resolved
-// peer address falls in a private/internal range. The notify/providers
-// package keeps its own ErrSSRFBlocked sentinel for backward compat with
-// callers that errors.Is() against it; this one is independent so
-// non-provider call sites (e.g. the OIDC verifier transport) can match
-// without importing the provider package.
+// peer address falls in a private/internal range.
 var ErrSSRFBlocked = errors.New("checker: resolved address is in a blocked range")
 
 // SSRFGuardedDialContext wraps a base DialContext with an SSRF check that

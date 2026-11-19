@@ -135,9 +135,10 @@ export function AlertListPage() {
     }
   }
 
-  // Load all alerts once for rollup stats.
+  // Load recent alerts across all statuses for rollup stats (MTTA/MTTR/7-day).
+  // limit=200 is the API max page; enough for a meaningful rollup window.
   useEffect(() => {
-    get('/alerts?status=firing').then(d => setAllAlerts(d.alerts || d || [])).catch(() => {});
+    get('/alerts?limit=200').then(d => setAllAlerts(d.alerts || d || [])).catch(() => {});
   }, []);
 
   useEffect(() => { load(); }, [tab]);

@@ -1,38 +1,7 @@
 import { useState, useEffect } from 'preact/hooks';
 import { get, post, patch, del } from '../../api/client';
 import { currentUser } from '../../state/auth';
-import { PageHeader, Card, SeverityIcon, LoadingPage, ErrorMessage, relativeTime, useToast, ToastContainer } from '../../components/ui';
-
-const SEVERITY_MAP = {
-  critical: 'critical',
-  major: 'warning',
-  minor: 'info',
-};
-
-const STATUS_COLORS = {
-  investigating: '#e67e22',
-  identified:    '#2980b9',
-  monitoring:    '#2980b9',
-  resolved:      '#27ae60',
-  maintenance:   '#2980b9',
-};
-
-function IncidentStatusPill({ status }) {
-  const bg = STATUS_COLORS[status] || 'var(--color-muted)';
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '3px 10px',
-      borderRadius: 9999,
-      background: bg,
-      color: 'white',
-      fontSize: '0.6875rem',
-      fontWeight: 700,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-    }}>{status?.toUpperCase() || 'UNKNOWN'}</span>
-  );
-}
+import { PageHeader, Card, SeverityIcon, LoadingPage, ErrorMessage, relativeTime, useToast, ToastContainer, IncidentStatusPill, INCIDENT_SEVERITY_MAP, INCIDENT_STATUS_COLORS } from '../../components/ui';
 
 export function IncidentDetailPage({ id }) {
   const [incident, setIncident] = useState(null);
@@ -237,7 +206,7 @@ export function IncidentDetailPage({ id }) {
           !editingMeta && (
             <span style="display: inline-flex; align-items: center; gap: 8px;">
               <IncidentStatusPill status={incident.status} />
-              <SeverityIcon severity={SEVERITY_MAP[incident.severity] || 'info'} size={18} />
+              <SeverityIcon severity={INCIDENT_SEVERITY_MAP[incident.severity] || 'info'} size={18} />
               <span style="color: var(--color-text-muted); font-size: 0.875rem;">{incident.severity}</span>
             </span>
           )
@@ -366,7 +335,7 @@ export function IncidentDetailPage({ id }) {
           ) : (
             <div class="incident-timeline">
               {updates.map((update, idx) => {
-                const borderColor = STATUS_COLORS[update.status] || 'var(--color-border)';
+                const borderColor = INCIDENT_STATUS_COLORS[update.status] || 'var(--color-border)';
                 const isOwn = update.user_email === userEmail;
                 const isEditing = editUpdateId === update.id;
 
@@ -459,7 +428,7 @@ export function IncidentDetailPage({ id }) {
               <dd><IncidentStatusPill status={incident.status} /></dd>
               <dt>Severity</dt>
               <dd style="display: flex; align-items: center; gap: 6px;">
-                <SeverityIcon severity={SEVERITY_MAP[incident.severity] || 'info'} size={16} />
+                <SeverityIcon severity={INCIDENT_SEVERITY_MAP[incident.severity] || 'info'} size={16} />
                 {incident.severity}
               </dd>
               <dt>Created</dt>

@@ -13,10 +13,6 @@ export function setToken(t) {
   token = t ?? null;
 }
 
-export function getToken() {
-  return token;
-}
-
 export async function api(path, options = {}) {
   const { noRedirect, ...fetchOpts } = options;
   const headers = { 'Content-Type': 'application/json', ...fetchOpts.headers };

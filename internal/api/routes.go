@@ -19,8 +19,11 @@ func registerProRoutes(r chi.Router, s store.Store, _ *auth.JWTIssuer, authMW fu
 	r.Group(func(r chi.Router) {
 		r.Use(authMW)
 		r.Use(middleware.RequireWriteAccess())
-		r.Get("/org/api-keys", orgH.ListAPIKeys)
-		r.Post("/org/api-keys", orgH.CreateAPIKey)
-		r.Delete("/org/api-keys/{id}", orgH.DeleteAPIKey)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireRole("owner", "admin"))
+			r.Get("/org/api-keys", orgH.ListAPIKeys)
+			r.Post("/org/api-keys", orgH.CreateAPIKey)
+			r.Delete("/org/api-keys/{id}", orgH.DeleteAPIKey)
+		})
 	})
 }

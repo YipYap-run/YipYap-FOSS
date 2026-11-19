@@ -9,7 +9,18 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 )
 
-const publicBaseURL = "https://console.yipyap.run"
+// publicBaseURL is the base URL stamped into emitted CloudEvent source
+// URIs. Override with SetPublicBaseURL (e.g. from YIPYAP_PUBLIC_BASE_URL);
+// the default is the SaaS console.
+var publicBaseURL = "https://console.yipyap.run"
+
+// SetPublicBaseURL overrides the base URL used in event source URIs.
+// Empty values are ignored so the default is preserved.
+func SetPublicBaseURL(u string) {
+	if u != "" {
+		publicBaseURL = u
+	}
+}
 
 // OrgSource returns the canonical event source URI for an org.
 func OrgSource(orgID string) string { return publicBaseURL + "/orgs/" + orgID }

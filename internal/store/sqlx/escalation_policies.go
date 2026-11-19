@@ -1,4 +1,4 @@
-package sqlite
+package sqlx
 
 import (
 	"context"
@@ -9,19 +9,29 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-type escalationPolicyStore struct{ q queryable }
+// EscalationPolicyStore implements store.EscalationPolicyStore across SQL
+// backends.
+type EscalationPolicyStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *escalationPolicyStore) Create(ctx context.Context, p *domain.EscalationPolicy) error {
+// NewEscalationPolicyStore returns an EscalationPolicyStore bound to q.
+func NewEscalationPolicyStore(q Queryable, d Dialect) *EscalationPolicyStore {
+	return &EscalationPolicyStore{q: q, d: d}
+}
+
+func (s *EscalationPolicyStore) Create(ctx context.Context, p *domain.EscalationPolicy) error {
 	_, err := s.q.ExecContext(ctx,
 		`INSERT INTO escalation_policies (id, org_id, name, loop, max_loops)
 		 VALUES (?, ?, ?, ?, ?)`,
-		p.ID, p.OrgID, p.Name, boolToInt(p.Loop), p.MaxLoops)
+		p.ID, p.OrgID, p.Name, s.d.BoolArg(p.Loop), p.MaxLoops)
 	return err
 }
 
-func (s *escalationPolicyStore) GetByID(ctx context.Context, id string) (*domain.EscalationPolicy, error) {
+func (s *EscalationPolicyStore) GetByID(ctx context.Context, id string) (*domain.EscalationPolicy, error) {
 	var p domain.EscalationPolicy
-	var loop int
+	var loop Bool
 	err := s.q.QueryRowContext(ctx,
 		`SELECT id, org_id, name, loop, max_loops FROM escalation_policies WHERE id = ?`, id).
 		Scan(&p.ID, &p.OrgID, &p.Name, &loop, &p.MaxLoops)
@@ -31,11 +41,11 @@ func (s *escalationPolicyStore) GetByID(ctx context.Context, id string) (*domain
 		}
 		return nil, err
 	}
-	p.Loop = loop != 0
+	p.Loop = bool(loop)
 	return &p, nil
 }
 
-func (s *escalationPolicyStore) ListByOrg(ctx context.Context, orgID string, params store.ListParams) ([]*domain.EscalationPolicy, error) {
+func (s *EscalationPolicyStore) ListByOrg(ctx context.Context, orgID string, params store.ListParams) ([]*domain.EscalationPolicy, error) {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 50
@@ -52,36 +62,35 @@ func (s *escalationPolicyStore) ListByOrg(ctx context.Context, orgID string, par
 	var out []*domain.EscalationPolicy
 	for rows.Next() {
 		var p domain.EscalationPolicy
-		var loop int
+		var loop Bool
 		if err := rows.Scan(&p.ID, &p.OrgID, &p.Name, &loop, &p.MaxLoops); err != nil {
 			return nil, err
 		}
-		p.Loop = loop != 0
+		p.Loop = bool(loop)
 		out = append(out, &p)
 	}
 	return out, rows.Err()
 }
 
-func (s *escalationPolicyStore) Update(ctx context.Context, p *domain.EscalationPolicy) error {
+func (s *EscalationPolicyStore) Update(ctx context.Context, p *domain.EscalationPolicy) error {
 	res, err := s.q.ExecContext(ctx,
 		`UPDATE escalation_policies SET name = ?, loop = ?, max_loops = ? WHERE id = ?`,
-		p.Name, boolToInt(p.Loop), p.MaxLoops, p.ID)
+		p.Name, s.d.BoolArg(p.Loop), p.MaxLoops, p.ID)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *escalationPolicyStore) Delete(ctx context.Context, id string) error {
+func (s *EscalationPolicyStore) Delete(ctx context.Context, id string) error {
 	res, err := s.q.ExecContext(ctx, `DELETE FROM escalation_policies WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *escalationPolicyStore) ReplaceSteps(ctx context.Context, policyID string, steps []domain.EscalationStep, targets map[string][]domain.StepTarget) error {
-	// Delete existing steps (cascades to targets).
+func (s *EscalationPolicyStore) ReplaceSteps(ctx context.Context, policyID string, steps []domain.EscalationStep, targets map[string][]domain.StepTarget) error {
 	if _, err := s.q.ExecContext(ctx, `DELETE FROM escalation_steps WHERE policy_id = ?`, policyID); err != nil {
 		return err
 	}
@@ -89,14 +98,14 @@ func (s *escalationPolicyStore) ReplaceSteps(ctx context.Context, policyID strin
 		if _, err := s.q.ExecContext(ctx,
 			`INSERT INTO escalation_steps (id, policy_id, position, wait_seconds, repeat_count, repeat_interval_seconds, is_terminal)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			step.ID, policyID, step.Position, step.WaitSeconds, step.RepeatCount, step.RepeatIntervalSeconds, boolToInt(step.IsTerminal)); err != nil {
+			step.ID, policyID, step.Position, step.WaitSeconds, step.RepeatCount, step.RepeatIntervalSeconds, s.d.BoolArg(step.IsTerminal)); err != nil {
 			return err
 		}
 		for _, t := range targets[step.ID] {
 			if _, err := s.q.ExecContext(ctx,
 				`INSERT INTO step_targets (id, step_id, target_type, target_id, channel_id, simultaneous)
 				 VALUES (?, ?, ?, ?, ?, ?)`,
-				t.ID, step.ID, string(t.TargetType), t.TargetID, t.ChannelID, boolToInt(t.Simultaneous)); err != nil {
+				t.ID, step.ID, string(t.TargetType), t.TargetID, t.ChannelID, s.d.BoolArg(t.Simultaneous)); err != nil {
 				return err
 			}
 		}
@@ -104,7 +113,7 @@ func (s *escalationPolicyStore) ReplaceSteps(ctx context.Context, policyID strin
 	return nil
 }
 
-func (s *escalationPolicyStore) GetSteps(ctx context.Context, policyID string) ([]domain.EscalationStep, error) {
+func (s *EscalationPolicyStore) GetSteps(ctx context.Context, policyID string) ([]domain.EscalationStep, error) {
 	rows, err := s.q.QueryContext(ctx,
 		`SELECT id, policy_id, position, wait_seconds, repeat_count, repeat_interval_seconds, is_terminal
 		 FROM escalation_steps WHERE policy_id = ? ORDER BY position`, policyID)
@@ -116,17 +125,17 @@ func (s *escalationPolicyStore) GetSteps(ctx context.Context, policyID string) (
 	var out []domain.EscalationStep
 	for rows.Next() {
 		var st domain.EscalationStep
-		var isTerminal int
+		var isTerminal Bool
 		if err := rows.Scan(&st.ID, &st.PolicyID, &st.Position, &st.WaitSeconds, &st.RepeatCount, &st.RepeatIntervalSeconds, &isTerminal); err != nil {
 			return nil, err
 		}
-		st.IsTerminal = isTerminal != 0
+		st.IsTerminal = bool(isTerminal)
 		out = append(out, st)
 	}
 	return out, rows.Err()
 }
 
-func (s *escalationPolicyStore) GetTargets(ctx context.Context, stepID string) ([]domain.StepTarget, error) {
+func (s *EscalationPolicyStore) GetTargets(ctx context.Context, stepID string) ([]domain.StepTarget, error) {
 	rows, err := s.q.QueryContext(ctx,
 		`SELECT id, step_id, target_type, target_id, channel_id, simultaneous
 		 FROM step_targets WHERE step_id = ?`, stepID)
@@ -139,20 +148,20 @@ func (s *escalationPolicyStore) GetTargets(ctx context.Context, stepID string) (
 	for rows.Next() {
 		var t domain.StepTarget
 		var targetType string
-		var simultaneous int
+		var simultaneous Bool
 		if err := rows.Scan(&t.ID, &t.StepID, &targetType, &t.TargetID, &t.ChannelID, &simultaneous); err != nil {
 			return nil, err
 		}
 		t.TargetType = domain.TargetType(targetType)
-		t.Simultaneous = simultaneous != 0
+		t.Simultaneous = bool(simultaneous)
 		out = append(out, t)
 	}
 	return out, rows.Err()
 }
 
-func (s *escalationPolicyStore) GetNextStep(ctx context.Context, policyID string, currentPosition int) (*domain.EscalationStep, error) {
+func (s *EscalationPolicyStore) GetNextStep(ctx context.Context, policyID string, currentPosition int) (*domain.EscalationStep, error) {
 	var st domain.EscalationStep
-	var isTerminal int
+	var isTerminal Bool
 	err := s.q.QueryRowContext(ctx,
 		`SELECT id, policy_id, position, wait_seconds, repeat_count, repeat_interval_seconds, is_terminal
 		 FROM escalation_steps WHERE policy_id = ? AND position > ? ORDER BY position LIMIT 1`,
@@ -164,6 +173,6 @@ func (s *escalationPolicyStore) GetNextStep(ctx context.Context, policyID string
 		}
 		return nil, err
 	}
-	st.IsTerminal = isTerminal != 0
+	st.IsTerminal = bool(isTerminal)
 	return &st, nil
 }
