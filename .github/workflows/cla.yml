@@ -41,11 +41,11 @@ jobs:
           path-to-signatures: '.cla/signatures.json'
           path-to-document: 'https://github.com/YipYap-run/YipYap-FOSS/blob/main/CLA.md'
           branch: 'main'
-          # Bots that never sign and should be skipped.
-          # WaffleThief123 is the project maintainer and does not need to
-          # countersign their own CLA. Bots that will never sign (and whose
-          # actions belong to the maintainer anyway) are explicitly listed.
-          allowlist: 'WaffleThief123,dependabot[bot],renovate[bot],pre-commit-ci[bot]'
+          # Maintainers and automation that never sign. The YipYap team and
+          # the sync-bot identity are the project maintainers and do not
+          # countersign their own CLA; bots whose commits belong to the
+          # maintainer are also exempt.
+          allowlist: 'WaffleThief123,elyerinfox,imjustafox,Reiuiji,dependabot[bot],renovate[bot],pre-commit-ci[bot]'
           # Exact comment contributors must leave to sign.
           custom-pr-sign-comment: 'I have read the CLA and I hereby sign it.'
           # Message posted on a PR when a contributor has not signed yet.
