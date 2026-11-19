@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"time"
@@ -8,7 +9,7 @@ import (
 
 type Config struct {
 	ListenAddr         string
-	DBDsn              string // connection string  - file path for sqlite, DSN for postgres/mariadb
+	DBDsn              string // connection string  - file path for sqlite, DSN for postgres
 	JWTSecret          string
 	JWTExpiry          time.Duration
 	APIKeySecret       string // separate HMAC key for API key hashing; falls back to JWTSecret if empty
@@ -56,6 +57,7 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		if err == nil {
 			return d
 		}
+		log.Printf("config: %s=%q is not a valid duration (%v); using default %s", key, v, err, fallback)
 	}
 	return fallback
 }
@@ -66,6 +68,7 @@ func envBool(key string, fallback bool) bool {
 		if err == nil {
 			return b
 		}
+		log.Printf("config: %s=%q is not a valid bool (%v); using default %v", key, v, err, fallback)
 	}
 	return fallback
 }

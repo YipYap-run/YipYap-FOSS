@@ -165,7 +165,7 @@ func WithClock(fn func() time.Time) Option {
 // still lands.
 //
 // Outcome strings follow the existing handler-layer convention (≤32
-// chars to fit MariaDB's outcome column), prefixed with "rejected:":
+// chars to fit the outcome column), prefixed with "rejected:"
 //
 //	rejected:org_mismatch
 //	rejected:channel_mismatch
@@ -335,8 +335,8 @@ var trustRequiredReplyTypes = map[string]struct {
 }
 
 // Canonical dispatcher-level rejection outcome strings. Kept ≤32 chars so
-// MariaDB's outcome VARCHAR(32) (round-1 L6) does not truncate them, and
-// prefixed with "rejected:" to match the handler-layer convention.
+// the outcome VARCHAR(32) column does not truncate them, and prefixed
+// with "rejected:" to match the handler-layer convention.
 const (
 	rejectOrgMismatch     = "rejected:org_mismatch"     // 21
 	rejectChannelMismatch = "rejected:channel_mismatch" // 25

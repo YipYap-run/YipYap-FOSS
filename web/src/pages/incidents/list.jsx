@@ -3,38 +3,8 @@ import { get, post } from '../../api/client';
 import { currentUser } from '../../state/auth';
 import {
   PageHeader, Tabs, SearchInput, SeverityIcon, LoadingPage, ErrorMessage, EmptyState, Modal, relativeTime,
+  IncidentStatusPill, INCIDENT_SEVERITY_MAP,
 } from '../../components/ui';
-
-const SEVERITY_MAP = {
-  critical: 'critical',
-  major: 'warning',
-  minor: 'info',
-};
-
-const STATUS_CONFIG = {
-  investigating: { bg: '#e67e22', label: 'INVESTIGATING' },
-  identified:    { bg: '#2980b9', label: 'IDENTIFIED' },
-  monitoring:    { bg: '#2980b9', label: 'MONITORING' },
-  resolved:      { bg: '#27ae60', label: 'RESOLVED' },
-  maintenance:   { bg: '#2980b9', label: 'MAINTENANCE' },
-};
-
-function IncidentStatusPill({ status }) {
-  const c = STATUS_CONFIG[status] || { bg: 'var(--color-muted)', label: status?.toUpperCase() || 'UNKNOWN' };
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '3px 10px',
-      borderRadius: 9999,
-      background: c.bg,
-      color: 'white',
-      fontSize: '0.6875rem',
-      fontWeight: 700,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-    }}>{c.label}</span>
-  );
-}
 
 const DEFAULT_FORM = {
   title: '',
@@ -164,7 +134,7 @@ export function IncidentListPage() {
             filtered.map(inc => (
               <a key={inc.id} href={`/incidents/${inc.id}`} class="alert-card">
                 <div class="alert-card-left">
-                  <SeverityIcon severity={SEVERITY_MAP[inc.severity] || 'info'} />
+                  <SeverityIcon severity={INCIDENT_SEVERITY_MAP[inc.severity] || 'info'} />
                   <div class="alert-card-info">
                     <h4>{inc.title}</h4>
                     {inc.monitor_ids && inc.monitor_ids.length > 0 && (

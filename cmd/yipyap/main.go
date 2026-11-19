@@ -25,6 +25,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 	"github.com/YipYap-run/YipYap-FOSS/internal/seed"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/YipYap-run/YipYap-FOSS/internal/wiring"
 )
 
 func main() {
@@ -36,6 +37,7 @@ func main() {
 
 func run() error {
 	cfg := config.Load()
+	cloudevents.SetPublicBaseURL(cfg.PublicBaseURL)
 
 	// Validate required config.
 	if cfg.JWTSecret == "" {
@@ -58,7 +60,7 @@ func run() error {
 	ctx := context.Background()
 
 	// 1. Database.
-	db, err := openStore(cfg)
+	db, err := wiring.OpenStore(cfg)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
@@ -84,9 +86,10 @@ func run() error {
 		log.Println("WARNING: YIPYAP_API_KEY_SECRET is not set; falling back to JWT secret for API key HMAC. Set a dedicated secret for better key isolation.")
 	}
 	apiKeyHasher := auth.NewAPIKeyHasher([]byte(apiKeySecret))
+	setupMFA([]byte(apiKeySecret))
 
 	// 3. Message bus.
-	msgBus, err := openBus(cfg)
+	msgBus, err := wiring.OpenBus(cfg)
 	if err != nil {
 		return fmt.Errorf("bus: %w", err)
 	}
@@ -174,7 +177,7 @@ func run() error {
 		Password: cfg.SMTPPass,
 		From:     cfg.SMTPFrom,
 	})
-	billingClient, billingWebhookSecret := initBilling(cfg)
+	billingClient, billingWebhookSecret := wiring.InitBilling(cfg)
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv := api.NewServer(db, jwt, msgBus, wsHub, billingClient, billingWebhookSecret, cfg.PublicBaseURL, api.ServerOptions{
@@ -188,6 +191,7 @@ func run() error {
 		SlackSigningSecret:    cfg.SlackSigningSecret,
 		TelegramWebhookSecret: cfg.TelegramWebhookSecret,
 		TelegramBotToken:      cfg.TelegramBotToken,
+		TwilioAuthToken:       cfg.TwilioAuthToken,
 		TrustedProxyNets:      api.ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs),
 		LifecycleCtx:          runCtx,
 	})

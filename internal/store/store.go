@@ -9,9 +9,8 @@ import (
 
 // ListParams provides common pagination parameters.
 type ListParams struct {
-	Limit  int    `json:"limit"`
-	Offset int    `json:"offset"`
-	Sort   string `json:"sort"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
 }
 
 // MonitorFilter extends ListParams with monitor-specific filters.

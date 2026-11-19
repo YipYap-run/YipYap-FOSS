@@ -3,11 +3,10 @@ package providers
 import (
 	"context"
 	"fmt"
-	"net/smtp"
 	"strings"
-	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 )
 
@@ -45,8 +44,6 @@ func (s *SMTP) Send(ctx context.Context, job domain.NotificationJob) (string, er
 		return "", fmt.Errorf("resolve smtp config: %w", err)
 	}
 
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-
 	subject := fmt.Sprintf("[%s] %s: %s", job.Severity, job.MonitorName, job.Message)
 	body := fmt.Sprintf(
 		"Alert ID: %s\nMonitor: %s\nSeverity: %s\n\n%s\n\nAcknowledge: %s",
@@ -57,26 +54,20 @@ func (s *SMTP) Send(ctx context.Context, job domain.NotificationJob) (string, er
 		sanitizeHeader(cfg.From), sanitizeHeader(cfg.To), sanitizeHeader(subject), body,
 	)
 
-	var auth smtp.Auth
-	if cfg.Username != "" {
-		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
+	// Reuse the mailer's TLS-enforcing send (SMTPS on 465, required STARTTLS
+	// otherwise) so SMTP credentials never go out in cleartext.
+	m := mailer.New(mailer.Config{
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		Username: cfg.Username,
+		Password: cfg.Password,
+		From:     cfg.From,
+	})
+	if m == nil {
+		return "", fmt.Errorf("smtp: host is not configured")
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- smtp.SendMail(addr, auth, cfg.From, []string{cfg.To}, []byte(msg))
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			return "", fmt.Errorf("smtp send: %w", err)
-		}
-	case <-ctx.Done():
-		return "", fmt.Errorf("smtp send timed out")
+	if err := m.SendMessage(cfg.To, []byte(msg)); err != nil {
+		return "", fmt.Errorf("smtp send: %w", err)
 	}
 	return "smtp:ok", nil
 }

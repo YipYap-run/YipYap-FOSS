@@ -68,6 +68,12 @@ func TestValidateTarget_BlocksNonStandardIPs(t *testing.T) {
 		"172.16.0.1",
 		"169.254.169.254",
 		"::1",
+		"100.64.0.1",             // CGNAT
+		"100.127.255.254",        // CGNAT upper bound
+		"fd00::1",                // IPv6 ULA
+		"fe80::1",                // IPv6 link-local
+		"::ffff:169.254.169.254", // IPv4-mapped v6
+		"::169.254.169.254",      // IPv4-compatible v6
 	}
 	for _, host := range blocked {
 		if err := ValidateTarget(host); err == nil {

@@ -13,7 +13,7 @@ func jsonResponse(w http.ResponseWriter, status int, v interface{}) {
 		rv := reflect.ValueOf(v)
 		if rv.Kind() == reflect.Slice && rv.IsNil() {
 			v = []struct{}{}
-		} else if rv.Kind() == reflect.Ptr && rv.IsNil() {
+		} else if rv.Kind() == reflect.Pointer && rv.IsNil() {
 			v = []struct{}{}
 		}
 	}

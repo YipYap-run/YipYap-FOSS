@@ -2,8 +2,9 @@ package sqlite
 
 import (
 	"database/sql"
-	"fmt"
 	"time"
+
+	"github.com/YipYap-run/YipYap-FOSS/internal/store/sqlx"
 )
 
 const timeFormat = time.RFC3339
@@ -48,19 +49,9 @@ func boolToInt(b bool) int {
 }
 
 func nullString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: s, Valid: true}
+	return sqlx.NullString(s)
 }
 
 func expectOneRow(res sql.Result) error {
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return fmt.Errorf("not found")
-	}
-	return nil
+	return sqlx.ExpectOneRow(res)
 }
