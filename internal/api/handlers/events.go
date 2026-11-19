@@ -153,7 +153,7 @@ func (h *EventsHandler) handleTrigger(w http.ResponseWriter, r *http.Request, re
 		return
 	}
 
-	if err := h.bus.Publish(r.Context(), "alert.trigger", data); err != nil {
+	if err := h.bus.PublishAlert(r.Context(), "alert.trigger", data, ""); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to process event")
 		return
 	}
@@ -197,7 +197,7 @@ func (h *EventsHandler) handleAcknowledge(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.bus.Publish(r.Context(), "alert.ack", data); err != nil {
+	if err := h.bus.PublishAlert(r.Context(), "alert.ack", data, ""); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to process event")
 		return
 	}
@@ -242,7 +242,7 @@ func (h *EventsHandler) handleResolve(w http.ResponseWriter, r *http.Request, re
 		return
 	}
 
-	if err := h.bus.Publish(r.Context(), "alert.recover", data); err != nil {
+	if err := h.bus.PublishAlert(r.Context(), "alert.recover", data, ""); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to process event")
 		return
 	}

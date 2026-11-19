@@ -82,19 +82,18 @@ func (r *Router) SetMetrics(m *telemetry.Metrics) {
 }
 
 // Start subscribes the router to the CloudEvents egress subject tree.
-// The subscription is installed with a queue group so that multi-replica
-// notifier deployments fan out each event exactly once. Start returns as
-// soon as the subscription is registered; message handling runs in the
-// bus implementation's handler goroutines.
+// The subscription is a durable pull consumer so that multi-replica notifier
+// deployments fan out each event exactly once and a replica crash redelivers
+// the event rather than dropping it. Start returns as soon as the
+// subscription is registered; message handling runs in the bus
+// implementation's handler goroutines.
 func (r *Router) Start(ctx context.Context) error {
-	return r.bus.QueueSubscribe(routerSubject, routerQueueGroup, func(hctx context.Context, subject string, data []byte) error {
-		r.handle(hctx, subject, data)
-		// Never return an error from the handler: Router failures are
-		// logged and the message is considered delivered. In a durable
-		// NATS backend, returning nil lets the consumer progress rather
-		// than trigger redelivery, which a route failure cannot fix on
-		// its own (the fan-out job publish is best-effort per channel).
-		return nil
+	return r.bus.PullSubscribe(routerSubject, routerQueueGroup, func(hctx context.Context, msg *bus.Msg) error {
+		r.handle(hctx, msg.Subject, msg.Data)
+		// Always ack: router failures are logged and the message is
+		// considered delivered. The fan-out job publish is best-effort per
+		// channel, so a redelivery cannot fix a route failure on its own.
+		return msg.Ack()
 	})
 }
 
