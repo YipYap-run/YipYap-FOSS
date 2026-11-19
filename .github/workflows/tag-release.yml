@@ -1,0 +1,51 @@
+name: Tag release
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  tag:
+    # The FOSS sync opens a PR titled "Release vX.Y.Z". Tagging main after
+    # merge is what fires the `release` job in ci.yml (goreleaser builds the
+    # image and publishes the GitHub release). The tag must land on the merged
+    # commit, not the PR head, so it is created here rather than by the sync.
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.title, 'Release v')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Parse version from PR title
+        id: version
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          VERSION="${TITLE#Release }"
+          if ! printf '%s' "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::invalid version '$VERSION' parsed from PR title '$TITLE'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          # A PAT, not GITHUB_TOKEN. Pushes made with GITHUB_TOKEN do not
+          # create new workflow runs, so the release job in ci.yml would not
+          # fire. A PAT-driven tag push does trigger it.
+          token: ${{ secrets.FOSS_SYNC_TOKEN }}
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "tag $VERSION already exists on origin, skipping"
+            exit 0
+          fi
+          git config user.name "WaffleThief123"
+          git config user.email "26676249+WaffleThief123@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
