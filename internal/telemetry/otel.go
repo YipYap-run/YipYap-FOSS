@@ -142,9 +142,10 @@ func newResource(opts SetupOptions) (*resource.Resource, error) {
 		attrs = append(attrs, semconv.DeploymentEnvironmentName(opts.Environment))
 	}
 
+	def := resource.Default()
 	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(semconv.SchemaURL, attrs...),
+		def,
+		resource.NewWithAttributes(def.SchemaURL(), attrs...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: resource merge: %w", err)
