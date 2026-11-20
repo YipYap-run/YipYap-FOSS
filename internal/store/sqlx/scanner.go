@@ -93,3 +93,16 @@ func (b *Bool) Scan(src any) error {
 
 var _ sql.Scanner = (*Time)(nil)
 var _ sql.Scanner = (*Bool)(nil)
+
+// Scanner is satisfied by both *sql.Row and *sql.Rows, so shared scan helpers
+// can accept either without importing database/sql at every call site.
+type Scanner interface {
+	Scan(dest ...any) error
+}
+
+// Rows is satisfied by *sql.Rows for scan helpers that iterate a result set.
+type Rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
