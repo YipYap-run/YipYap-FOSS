@@ -2,8 +2,10 @@ import { useState, useEffect } from 'preact/hooks';
 import { currentUser, currentOrg, logout, billingStatus, appMeta, isPaidPlan } from '../state/auth';
 import { currentPath } from '../state/route';
 import { upgradePrompt, clearUpgradePrompt } from '../state/upgrade';
+import { staffReadonly, READONLY_TOAST_EVENT, notifyReadonly } from '../state/session';
 import { wsConnected } from '../api/ws';
 import { get } from '../api/client';
+import { ToastContainer } from './ui';
 import { SupportFAB } from './support-fab';
 import { theme, toggleTheme } from '../state/theme';
 
@@ -38,6 +40,29 @@ function isActive(href, path) {
   return path.startsWith(href);
 }
 
+// Listens for global toasts emitted by the API client (for example when a
+// read-only staff session tries to write) and renders them above the page.
+function GlobalToasts() {
+  const [toasts, setToasts] = useState([]);
+
+  useEffect(() => {
+    const handler = (ev) => {
+      const detail = ev.detail || {};
+      if (!detail.message) return;
+      const id = `${Date.now()}-${Math.random()}`;
+      setToasts((current) => {
+        if (current.some((t) => t.message === detail.message)) return current;
+        return [...current, { id, message: detail.message, type: detail.type || 'warning' }];
+      });
+      setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 4000);
+    };
+    window.addEventListener(READONLY_TOAST_EVENT, handler);
+    return () => window.removeEventListener(READONLY_TOAST_EVENT, handler);
+  }, []);
+
+  return <ToastContainer toasts={toasts} />;
+}
+
 export function Layout({ children }) {
   const user = currentUser.value;
   const org = currentOrg.value;
@@ -59,6 +84,22 @@ export function Layout({ children }) {
       .catch(() => {});
   }, []);
 
+  // Entry points that open an edit/create flow (rather than performing a write
+  // immediately) are marked with data-readonly-block so the click itself gives
+  // feedback in a read-only staff session.
+  useEffect(() => {
+    const handler = (ev) => {
+      if (!staffReadonly.value) return;
+      const target = ev.target.closest('[data-readonly-block]');
+      if (!target) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      notifyReadonly();
+    };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
+  }, []);
+
   return (
     <div class="app-layout">
       <aside class="sidebar">
@@ -67,7 +108,12 @@ export function Layout({ children }) {
           <span class={`ws-status ${wsConnected.value ? 'connected' : 'disconnected'}`}
                 title={wsConnected.value ? 'Connected' : 'Disconnected'} />
         </div>
-        {org && <div class="sidebar-org">{org.name}</div>}
+        {org && (
+          <div class="sidebar-org">
+            {org.name}
+            {staffReadonly.value && <span class="readonly-pill">read-only</span>}
+          </div>
+        )}
         <nav class="sidebar-nav">
           {items.map(item => (
             <a key={item.href} href={item.href}
@@ -113,6 +159,11 @@ export function Layout({ children }) {
       </nav>
 
       <main class="main-content">
+        {staffReadonly.value && (
+          <div class="readonly-banner">
+            Staff read-only session. Changes to this customer account are disabled.
+          </div>
+        )}
         {upgradePrompt.value && (
           <div class="payment-banner upgrade-banner">
             {upgradePrompt.value}
@@ -134,6 +185,7 @@ export function Layout({ children }) {
         {children}
         <SupportFAB />
       </main>
+      <GlobalToasts />
     </div>
   );
 }

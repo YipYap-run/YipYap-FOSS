@@ -27,6 +27,7 @@ import { ServiceDetailPage } from './pages/services/detail';
 import { IncidentListPage } from './pages/incidents/list';
 import { IncidentDetailPage } from './pages/incidents/detail';
 import { SupportListPage } from './pages/support/list';
+import { SupportFeedbackPage } from './pages/support/feedback';
 import { SupportDetailPage } from './pages/support/detail';
 import { ReplyActivityPage } from './pages/admin/reply-activity';
 
@@ -53,6 +54,13 @@ function handleRoute(e) {
 export function App() {
   useEffect(() => {
     loadUser();
+    // Handlers that do not await/catch a read-only rejection would otherwise
+    // log an unhandled rejection. The toast has already been shown.
+    const onRejection = (ev) => {
+      if (ev.reason?.readonly) ev.preventDefault();
+    };
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => window.removeEventListener('unhandledrejection', onRejection);
   }, []);
 
   return (
@@ -80,6 +88,7 @@ export function App() {
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/services/:id" component={ServiceDetailPage} />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/incidents" component={IncidentListPage} />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/incidents/:id" component={IncidentDetailPage} />}
+      {appMeta.value?.edition !== 'foss' && <SupportFeedbackPage path="/support/:id/feedback" />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/support" component={SupportListPage} />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/support/:id" component={SupportDetailPage} />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/admin/reply-activity" component={ReplyActivityPage} />}

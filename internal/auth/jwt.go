@@ -84,6 +84,51 @@ func (j *JWTIssuer) IssueMFA(userID, orgID, role string) (string, error) {
 	return token.SignedString(j.secret)
 }
 
+// SurveyAudience is the audience for the public support satisfaction survey.
+const SurveyAudience = "support-survey"
+
+// IssueSurvey creates a signed link token for one ticket's satisfaction survey.
+// The ticket ID is carried in the nonce and the token cannot be used as a
+// session because it has a restricted audience.
+func (j *JWTIssuer) IssueSurvey(ticketID, userID, orgID string, ttl time.Duration) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID: userID,
+		OrgID:  orgID,
+		Role:   SurveyAudience,
+		Nonce:  ticketID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			Audience:  jwt.ClaimStrings{SurveyAudience},
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(j.secret)
+}
+
+// ValidateSurvey parses a survey token and checks its audience, role, and
+// ticket nonce.
+func (j *JWTIssuer) ValidateSurvey(tokenStr string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return j.secret, nil
+	}, jwt.WithAudience(SurveyAudience))
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, fmt.Errorf("invalid survey token")
+	}
+	if claims.Role != SurveyAudience || claims.Nonce == "" || claims.UserID == "" {
+		return nil, fmt.Errorf("invalid survey claims")
+	}
+	return claims, nil
+}
+
 // ValidateMFA parses an MFA token, checking aud:"mfa" and expiry.
 func (j *JWTIssuer) ValidateMFA(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {

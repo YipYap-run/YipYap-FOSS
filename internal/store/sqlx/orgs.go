@@ -1,4 +1,4 @@
-package sqlite
+package sqlx
 
 import (
 	"context"
@@ -8,46 +8,55 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 )
 
-type orgStore struct{ q queryable }
+// OrgStore implements store.OrgStore across SQL backends.
+type OrgStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *orgStore) Create(ctx context.Context, org *domain.Org) error {
+// NewOrgStore returns an OrgStore bound to q.
+func NewOrgStore(q Queryable, d Dialect) *OrgStore {
+	return &OrgStore{q: q, d: d}
+}
+
+func (s *OrgStore) Create(ctx context.Context, org *domain.Org) error {
 	_, err := s.q.ExecContext(ctx,
 		`INSERT INTO orgs (id, name, slug, plan, oncall_display, mfa_required, mfa_grace_days, promo_expires_at, promo_grace_days, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		org.ID, org.Name, org.Slug, string(org.Plan), org.OncallDisplay,
-		org.MFARequired, org.MFAGraceDays,
-		nullString(org.PromoExpiresAt), org.PromoGraceDays,
-		org.CreatedAt.UTC().Format(timeFormat),
-		org.UpdatedAt.UTC().Format(timeFormat),
+		s.d.BoolArg(org.MFARequired), org.MFAGraceDays,
+		NullString(org.PromoExpiresAt), org.PromoGraceDays,
+		s.d.TimeArg(org.CreatedAt),
+		s.d.TimeArg(org.UpdatedAt),
 	)
 	return err
 }
 
-func (s *orgStore) GetByID(ctx context.Context, id string) (*domain.Org, error) {
+func (s *OrgStore) GetByID(ctx context.Context, id string) (*domain.Org, error) {
 	return s.scanOrg(s.q.QueryRowContext(ctx,
 		`SELECT id, name, slug, plan, oncall_display, mfa_required, mfa_grace_days, promo_expires_at, promo_grace_days, created_at, updated_at FROM orgs WHERE id = ?`, id))
 }
 
-func (s *orgStore) GetBySlug(ctx context.Context, slug string) (*domain.Org, error) {
+func (s *OrgStore) GetBySlug(ctx context.Context, slug string) (*domain.Org, error) {
 	return s.scanOrg(s.q.QueryRowContext(ctx,
 		`SELECT id, name, slug, plan, oncall_display, mfa_required, mfa_grace_days, promo_expires_at, promo_grace_days, created_at, updated_at FROM orgs WHERE slug = ?`, slug))
 }
 
-func (s *orgStore) Update(ctx context.Context, org *domain.Org) error {
+func (s *OrgStore) Update(ctx context.Context, org *domain.Org) error {
 	res, err := s.q.ExecContext(ctx,
 		`UPDATE orgs SET name = ?, slug = ?, plan = ?, oncall_display = ?, mfa_required = ?, mfa_grace_days = ?, promo_expires_at = ?, promo_grace_days = ?, updated_at = ? WHERE id = ?`,
 		org.Name, org.Slug, string(org.Plan), org.OncallDisplay,
-		org.MFARequired, org.MFAGraceDays,
-		nullString(org.PromoExpiresAt), org.PromoGraceDays,
-		org.UpdatedAt.UTC().Format(timeFormat), org.ID,
+		s.d.BoolArg(org.MFARequired), org.MFAGraceDays,
+		NullString(org.PromoExpiresAt), org.PromoGraceDays,
+		s.d.TimeArg(org.UpdatedAt), org.ID,
 	)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *orgStore) Delete(ctx context.Context, id string) error {
+func (s *OrgStore) Delete(ctx context.Context, id string) error {
 	// Clean up rows that reference a parent by id but declare neither
 	// org_id nor a foreign key, so ON DELETE CASCADE does not reach them.
 	_, _ = s.q.ExecContext(ctx,
@@ -88,21 +97,24 @@ func (s *orgStore) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *orgStore) scanOrg(row *sql.Row) (*domain.Org, error) {
+func (s *OrgStore) scanOrg(row Scanner) (*domain.Org, error) {
 	var o domain.Org
-	var plan, createdAt, updatedAt string
+	var plan string
+	var mfaRequired Bool
+	var createdAt, updatedAt Time
 	var promoExpiresAt sql.NullString
-	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &plan, &o.OncallDisplay, &o.MFARequired, &o.MFAGraceDays, &promoExpiresAt, &o.PromoGraceDays, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &plan, &o.OncallDisplay, &mfaRequired, &o.MFAGraceDays, &promoExpiresAt, &o.PromoGraceDays, &createdAt, &updatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("org not found")
 		}
 		return nil, err
 	}
+	o.MFARequired = bool(mfaRequired)
 	o.Plan = domain.OrgPlan(plan)
 	if promoExpiresAt.Valid {
 		o.PromoExpiresAt = promoExpiresAt.String
 	}
-	o.CreatedAt = mustParseTime(createdAt)
-	o.UpdatedAt = mustParseTime(updatedAt)
+	o.CreatedAt = createdAt.T
+	o.UpdatedAt = updatedAt.T
 	return &o, nil
 }

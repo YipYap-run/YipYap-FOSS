@@ -1,4 +1,4 @@
-package sqlite
+package sqlx
 
 import (
 	"context"
@@ -12,9 +12,18 @@ import (
 
 // ------------------------------- suppressions ----------------------------
 
-type alertSuppressionStore struct{ q queryable }
+// AlertSuppressionStore implements store.AlertSuppressionStore across SQL backends.
+type AlertSuppressionStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *alertSuppressionStore) Create(ctx context.Context, r *store.AlertSuppression) error {
+// NewAlertSuppressionStore returns an AlertSuppressionStore bound to q.
+func NewAlertSuppressionStore(q Queryable, d Dialect) *AlertSuppressionStore {
+	return &AlertSuppressionStore{q: q, d: d}
+}
+
+func (s *AlertSuppressionStore) Create(ctx context.Context, r *store.AlertSuppression) error {
 	filter := string(r.MatchFilter)
 	if filter == "" {
 		filter = "{}"
@@ -27,18 +36,17 @@ func (s *alertSuppressionStore) Create(ctx context.Context, r *store.AlertSuppre
         INSERT INTO alert_suppressions (id, org_id, alert_id, monitor_id, match_filter, expires_at, reason, source_reply_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.OrgID, r.AlertID, r.MonitorID, filter,
-		r.ExpiresAt.UTC().Format(sqliteCloudEventTimeFormat),
-		r.Reason, r.SourceReplyID,
-		createdAt.UTC().Format(sqliteCloudEventTimeFormat))
+		s.d.MillisTimeArg(r.ExpiresAt), r.Reason, r.SourceReplyID,
+		s.d.MillisTimeArg(createdAt))
 	return err
 }
 
-func (s *alertSuppressionStore) ListActiveForAlert(ctx context.Context, alertID string, at time.Time) ([]*store.AlertSuppression, error) {
+func (s *AlertSuppressionStore) ListActiveForAlert(ctx context.Context, alertID string, at time.Time) ([]*store.AlertSuppression, error) {
 	rows, err := s.q.QueryContext(ctx, `
         SELECT id, org_id, alert_id, monitor_id, match_filter, expires_at, reason, source_reply_id, created_at
         FROM alert_suppressions
         WHERE alert_id = ? AND expires_at > ?`,
-		alertID, at.UTC().Format(sqliteCloudEventTimeFormat))
+		alertID, s.d.MillisTimeArg(at))
 	if err != nil {
 		return nil, err
 	}
@@ -46,12 +54,12 @@ func (s *alertSuppressionStore) ListActiveForAlert(ctx context.Context, alertID 
 	return scanAlertSuppressions(rows)
 }
 
-func (s *alertSuppressionStore) ListActiveForOrg(ctx context.Context, orgID string, at time.Time) ([]*store.AlertSuppression, error) {
+func (s *AlertSuppressionStore) ListActiveForOrg(ctx context.Context, orgID string, at time.Time) ([]*store.AlertSuppression, error) {
 	rows, err := s.q.QueryContext(ctx, `
         SELECT id, org_id, alert_id, monitor_id, match_filter, expires_at, reason, source_reply_id, created_at
         FROM alert_suppressions
         WHERE org_id = ? AND expires_at > ?`,
-		orgID, at.UTC().Format(sqliteCloudEventTimeFormat))
+		orgID, s.d.MillisTimeArg(at))
 	if err != nil {
 		return nil, err
 	}
@@ -59,28 +67,28 @@ func (s *alertSuppressionStore) ListActiveForOrg(ctx context.Context, orgID stri
 	return scanAlertSuppressions(rows)
 }
 
-func (s *alertSuppressionStore) DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+func (s *AlertSuppressionStore) DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := s.q.ExecContext(ctx,
-		`DELETE FROM alert_suppressions WHERE expires_at < ?`,
-		cutoff.UTC().Format(sqliteCloudEventTimeFormat))
+		`DELETE FROM alert_suppressions WHERE expires_at < ?`, s.d.MillisTimeArg(cutoff))
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
 }
 
-func scanAlertSuppressions(rows *sql.Rows) ([]*store.AlertSuppression, error) {
+func scanAlertSuppressions(rows Rows) ([]*store.AlertSuppression, error) {
 	var out []*store.AlertSuppression
 	for rows.Next() {
 		var r store.AlertSuppression
-		var filter, expiresAt, createdAt string
+		var filter string
+		var expiresAt, createdAt Time
 		if err := rows.Scan(&r.ID, &r.OrgID, &r.AlertID, &r.MonitorID, &filter,
 			&expiresAt, &r.Reason, &r.SourceReplyID, &createdAt); err != nil {
 			return nil, err
 		}
 		r.MatchFilter = json.RawMessage(filter)
-		r.ExpiresAt = mustParseTime(expiresAt)
-		r.CreatedAt = mustParseTime(createdAt)
+		r.ExpiresAt = expiresAt.T
+		r.CreatedAt = createdAt.T
 		out = append(out, &r)
 	}
 	return out, rows.Err()
@@ -88,9 +96,18 @@ func scanAlertSuppressions(rows *sql.Rows) ([]*store.AlertSuppression, error) {
 
 // ------------------------------- remediations ----------------------------
 
-type alertRemediationStore struct{ q queryable }
+// AlertRemediationStore implements store.AlertRemediationStore across SQL backends.
+type AlertRemediationStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *alertRemediationStore) Create(ctx context.Context, r *store.AlertRemediation) error {
+// NewAlertRemediationStore returns an AlertRemediationStore bound to q.
+func NewAlertRemediationStore(q Queryable, d Dialect) *AlertRemediationStore {
+	return &AlertRemediationStore{q: q, d: d}
+}
+
+func (s *AlertRemediationStore) Create(ctx context.Context, r *store.AlertRemediation) error {
 	// org_id is denormalised from the parent alert. When the caller hasn't
 	// supplied one (older handlers) we look it up so the FK and the index
 	// on (org_id, alert_id) are always populated correctly.
@@ -105,9 +122,9 @@ func (s *alertRemediationStore) Create(ctx context.Context, r *store.AlertRemedi
         INSERT INTO alert_remediations (remediation_id, alert_id, org_id, status, started_at, completed_at, expires_at, description, message, artifact_url, source_reply_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.RemediationID, r.AlertID, orgID, string(r.Status),
-		r.StartedAt.UTC().Format(sqliteCloudEventTimeFormat),
-		formatOptionalTime(r.CompletedAt),
-		r.ExpiresAt.UTC().Format(sqliteCloudEventTimeFormat),
+		s.d.MillisTimeArg(r.StartedAt),
+		s.d.MillisOptionalTimeArg(r.CompletedAt),
+		s.d.MillisTimeArg(r.ExpiresAt),
 		r.Description, r.Message, r.ArtifactURL, r.SourceReplyID)
 	if err == nil {
 		r.OrgID = orgID
@@ -115,10 +132,11 @@ func (s *alertRemediationStore) Create(ctx context.Context, r *store.AlertRemedi
 	return err
 }
 
-func (s *alertRemediationStore) GetByID(ctx context.Context, remediationID string) (*store.AlertRemediation, error) {
+func (s *AlertRemediationStore) GetByID(ctx context.Context, remediationID string) (*store.AlertRemediation, error) {
 	var r store.AlertRemediation
-	var status, startedAt, expiresAt string
-	var completedAt *string
+	var status string
+	var startedAt, expiresAt Time
+	var completedAt Time
 	err := s.q.QueryRowContext(ctx, `
         SELECT remediation_id, alert_id, org_id, status, started_at, completed_at, expires_at, description, message, artifact_url, source_reply_id
         FROM alert_remediations WHERE remediation_id = ?`, remediationID).
@@ -131,14 +149,13 @@ func (s *alertRemediationStore) GetByID(ctx context.Context, remediationID strin
 		return nil, err
 	}
 	r.Status = store.RemediationStatus(status)
-	r.StartedAt = mustParseTime(startedAt)
-	r.ExpiresAt = mustParseTime(expiresAt)
-	r.CompletedAt = parseOptionalTime(completedAt)
+	r.StartedAt = startedAt.T
+	r.ExpiresAt = expiresAt.T
+	r.CompletedAt = completedAt.TimePtr()
 	return &r, nil
 }
 
-func (s *alertRemediationStore) Complete(ctx context.Context, remediationID string, status store.RemediationStatus, message, artifactURL string) error {
-	now := time.Now().UTC().Format(sqliteCloudEventTimeFormat)
+func (s *AlertRemediationStore) Complete(ctx context.Context, remediationID string, status store.RemediationStatus, message, artifactURL string) error {
 	// A3-NEW-M-2: CAS guard, only transition rows that are still
 	// in_progress. Without this, two concurrent remediation_result.v1
 	// replies for the same remediation_id could both succeed and the
@@ -149,7 +166,7 @@ func (s *alertRemediationStore) Complete(ctx context.Context, remediationID stri
         UPDATE alert_remediations
         SET status = ?, message = ?, artifact_url = ?, completed_at = ?
         WHERE remediation_id = ? AND status = 'in_progress'`,
-		string(status), message, artifactURL, now, remediationID)
+		string(status), message, artifactURL, s.d.MillisTimeArg(time.Now().UTC()), remediationID)
 	if err != nil {
 		return err
 	}
@@ -165,12 +182,12 @@ func (s *alertRemediationStore) Complete(ctx context.Context, remediationID stri
 	return nil
 }
 
-func (s *alertRemediationStore) ListActiveForAlert(ctx context.Context, alertID string, at time.Time) ([]*store.AlertRemediation, error) {
+func (s *AlertRemediationStore) ListActiveForAlert(ctx context.Context, alertID string, at time.Time) ([]*store.AlertRemediation, error) {
 	rows, err := s.q.QueryContext(ctx, `
         SELECT remediation_id, alert_id, org_id, status, started_at, completed_at, expires_at, description, message, artifact_url, source_reply_id
         FROM alert_remediations
         WHERE alert_id = ? AND status = 'in_progress' AND expires_at > ?`,
-		alertID, at.UTC().Format(sqliteCloudEventTimeFormat))
+		alertID, s.d.MillisTimeArg(at))
 	if err != nil {
 		return nil, err
 	}
@@ -178,28 +195,29 @@ func (s *alertRemediationStore) ListActiveForAlert(ctx context.Context, alertID 
 	var out []*store.AlertRemediation
 	for rows.Next() {
 		var r store.AlertRemediation
-		var status, startedAt, expiresAt string
-		var completedAt *string
+		var status string
+		var startedAt, expiresAt Time
+		var completedAt Time
 		if err := rows.Scan(&r.RemediationID, &r.AlertID, &r.OrgID, &status, &startedAt, &completedAt, &expiresAt,
 			&r.Description, &r.Message, &r.ArtifactURL, &r.SourceReplyID); err != nil {
 			return nil, err
 		}
 		r.Status = store.RemediationStatus(status)
-		r.StartedAt = mustParseTime(startedAt)
-		r.ExpiresAt = mustParseTime(expiresAt)
-		r.CompletedAt = parseOptionalTime(completedAt)
+		r.StartedAt = startedAt.T
+		r.ExpiresAt = expiresAt.T
+		r.CompletedAt = completedAt.TimePtr()
 		out = append(out, &r)
 	}
 	return out, rows.Err()
 }
 
-func (s *alertRemediationStore) ExpireStale(ctx context.Context, cutoff time.Time) (int64, error) {
+func (s *AlertRemediationStore) ExpireStale(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := s.q.ExecContext(ctx, `
         UPDATE alert_remediations
         SET status = 'failure', completed_at = ?, message = 'expired'
         WHERE status = 'in_progress' AND expires_at < ?`,
-		cutoff.UTC().Format(sqliteCloudEventTimeFormat),
-		cutoff.UTC().Format(sqliteCloudEventTimeFormat))
+		s.d.MillisTimeArg(cutoff),
+		s.d.MillisTimeArg(cutoff))
 	if err != nil {
 		return 0, err
 	}
@@ -208,9 +226,18 @@ func (s *alertRemediationStore) ExpireStale(ctx context.Context, cutoff time.Tim
 
 // ------------------------------- routing rules ---------------------------
 
-type alertRoutingRuleStore struct{ q queryable }
+// AlertRoutingRuleStore implements store.AlertRoutingRuleStore across SQL backends.
+type AlertRoutingRuleStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *alertRoutingRuleStore) Create(ctx context.Context, r *store.AlertRoutingRule) error {
+// NewAlertRoutingRuleStore returns an AlertRoutingRuleStore bound to q.
+func NewAlertRoutingRuleStore(q Queryable, d Dialect) *AlertRoutingRuleStore {
+	return &AlertRoutingRuleStore{q: q, d: d}
+}
+
+func (s *AlertRoutingRuleStore) Create(ctx context.Context, r *store.AlertRoutingRule) error {
 	filter := string(r.MatchFilter)
 	if filter == "" {
 		filter = "{}"
@@ -223,14 +250,13 @@ func (s *alertRoutingRuleStore) Create(ctx context.Context, r *store.AlertRoutin
         INSERT INTO alert_routing_rules (id, org_id, target_channel_id, match_filter, expires_at, priority, reason, source_reply_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.OrgID, r.TargetChannelID, filter,
-		r.ExpiresAt.UTC().Format(sqliteCloudEventTimeFormat),
-		r.Priority,
+		s.d.MillisTimeArg(r.ExpiresAt), r.Priority,
 		r.Reason, r.SourceReplyID,
-		createdAt.UTC().Format(sqliteCloudEventTimeFormat))
+		s.d.MillisTimeArg(createdAt))
 	return err
 }
 
-func (s *alertRoutingRuleStore) ListActiveForOrg(ctx context.Context, orgID string, at time.Time) ([]*store.AlertRoutingRule, error) {
+func (s *AlertRoutingRuleStore) ListActiveForOrg(ctx context.Context, orgID string, at time.Time) ([]*store.AlertRoutingRule, error) {
 	// Phase-6 consumers want a deterministic order when several rules match
 	// the same alert; the (priority DESC, created_at DESC, id) tiebreak
 	// matches what the (org_id, priority DESC, expires_at) index supports.
@@ -239,7 +265,7 @@ func (s *alertRoutingRuleStore) ListActiveForOrg(ctx context.Context, orgID stri
         FROM alert_routing_rules
         WHERE org_id = ? AND expires_at > ?
         ORDER BY priority DESC, created_at DESC, id`,
-		orgID, at.UTC().Format(sqliteCloudEventTimeFormat))
+		orgID, s.d.MillisTimeArg(at))
 	if err != nil {
 		return nil, err
 	}
@@ -247,23 +273,23 @@ func (s *alertRoutingRuleStore) ListActiveForOrg(ctx context.Context, orgID stri
 	var out []*store.AlertRoutingRule
 	for rows.Next() {
 		var r store.AlertRoutingRule
-		var filter, expiresAt, createdAt string
+		var filter string
+		var expiresAt, createdAt Time
 		if err := rows.Scan(&r.ID, &r.OrgID, &r.TargetChannelID, &filter,
 			&expiresAt, &r.Priority, &r.Reason, &r.SourceReplyID, &createdAt); err != nil {
 			return nil, err
 		}
 		r.MatchFilter = json.RawMessage(filter)
-		r.ExpiresAt = mustParseTime(expiresAt)
-		r.CreatedAt = mustParseTime(createdAt)
+		r.ExpiresAt = expiresAt.T
+		r.CreatedAt = createdAt.T
 		out = append(out, &r)
 	}
 	return out, rows.Err()
 }
 
-func (s *alertRoutingRuleStore) DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+func (s *AlertRoutingRuleStore) DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := s.q.ExecContext(ctx,
-		`DELETE FROM alert_routing_rules WHERE expires_at < ?`,
-		cutoff.UTC().Format(sqliteCloudEventTimeFormat))
+		`DELETE FROM alert_routing_rules WHERE expires_at < ?`, s.d.MillisTimeArg(cutoff))
 	if err != nil {
 		return 0, err
 	}
@@ -272,19 +298,28 @@ func (s *alertRoutingRuleStore) DeleteExpiredBefore(ctx context.Context, cutoff 
 
 // ------------------------------- status page refs ------------------------
 
-type alertStatusPageRefStore struct{ q queryable }
+// AlertStatusPageRefStore implements store.AlertStatusPageRefStore across SQL backends.
+type AlertStatusPageRefStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *alertStatusPageRefStore) Create(ctx context.Context, r *store.AlertStatusPageRef) error {
+// NewAlertStatusPageRefStore returns an AlertStatusPageRefStore bound to q.
+func NewAlertStatusPageRefStore(q Queryable, d Dialect) *AlertStatusPageRefStore {
+	return &AlertStatusPageRefStore{q: q, d: d}
+}
+
+func (s *AlertStatusPageRefStore) Create(ctx context.Context, r *store.AlertStatusPageRef) error {
 	_, err := s.q.ExecContext(ctx, `
         INSERT INTO alert_status_page_refs (id, alert_id, provider, url, public_message, updated_at, source_reply_id)
         VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.AlertID, r.Provider, r.URL, r.PublicMessage,
-		r.UpdatedAt.UTC().Format(sqliteCloudEventTimeFormat),
+		s.d.MillisTimeArg(r.UpdatedAt),
 		r.SourceReplyID)
 	return err
 }
 
-func (s *alertStatusPageRefStore) ListByAlert(ctx context.Context, alertID string) ([]*store.AlertStatusPageRef, error) {
+func (s *AlertStatusPageRefStore) ListByAlert(ctx context.Context, alertID string) ([]*store.AlertStatusPageRef, error) {
 	rows, err := s.q.QueryContext(ctx, `
         SELECT id, alert_id, provider, url, public_message, updated_at, source_reply_id
         FROM alert_status_page_refs
@@ -297,12 +332,12 @@ func (s *alertStatusPageRefStore) ListByAlert(ctx context.Context, alertID strin
 	var out []*store.AlertStatusPageRef
 	for rows.Next() {
 		var r store.AlertStatusPageRef
-		var updatedAt string
+		var updatedAt Time
 		if err := rows.Scan(&r.ID, &r.AlertID, &r.Provider, &r.URL, &r.PublicMessage,
 			&updatedAt, &r.SourceReplyID); err != nil {
 			return nil, err
 		}
-		r.UpdatedAt = mustParseTime(updatedAt)
+		r.UpdatedAt = updatedAt.T
 		out = append(out, &r)
 	}
 	return out, rows.Err()

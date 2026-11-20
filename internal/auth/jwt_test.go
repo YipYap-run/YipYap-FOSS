@@ -170,3 +170,36 @@ func TestValidateAccountRecovery_RejectsOtherTokens(t *testing.T) {
 		t.Fatal("expected error validating session token as account-recover")
 	}
 }
+
+func TestSurveyToken(t *testing.T) {
+	issuer := NewJWTIssuer([]byte("survey-secret"), time.Hour)
+	tok, err := issuer.IssueSurvey("tkt_1", "user_1", "org_1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := issuer.ValidateSurvey(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Nonce != "tkt_1" || claims.UserID != "user_1" || claims.OrgID != "org_1" {
+		t.Errorf("claims = %+v", claims)
+	}
+
+	if _, err := issuer.Validate(tok); err == nil {
+		t.Error("survey token accepted as a session token")
+	}
+
+	mfa, _ := issuer.IssueMFA("user_1", "org_1", "owner")
+	if _, err := issuer.ValidateSurvey(mfa); err == nil {
+		t.Error("MFA token accepted as a survey token")
+	}
+
+	expired, _ := issuer.IssueSurvey("tkt_1", "user_1", "org_1", -time.Minute)
+	if _, err := issuer.ValidateSurvey(expired); err == nil {
+		t.Error("expired survey token accepted")
+	}
+
+	if _, err := NewJWTIssuer([]byte("other"), time.Hour).ValidateSurvey(tok); err == nil {
+		t.Error("survey token accepted with the wrong key")
+	}
+}

@@ -1,5 +1,6 @@
 /** Shared UI primitives. */
 import { useState, useCallback } from 'preact/hooks';
+import { readonlyMessage } from '../state/session';
 
 export function StatusBadge({ status, size = 'sm', stateName, stateColor }) {
   // If a custom state is provided, render with its color and name.
@@ -265,6 +266,9 @@ export function useToast() {
   const [toasts, setToasts] = useState([]);
 
   const toast = useCallback((message, type = 'success') => {
+    // The global toast host already shows the read-only warning when the API
+    // client blocks a write. Skip the duplicate from page-level catches.
+    if (message === readonlyMessage.value) return;
     const id = Date.now();
     setToasts(t => [...t, { id, message, type }]);
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000);

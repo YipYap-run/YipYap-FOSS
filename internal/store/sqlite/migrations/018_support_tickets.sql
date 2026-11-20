@@ -67,14 +67,3 @@ CREATE TABLE support_macros (
     sort_order INTEGER DEFAULT 0,
     created_at TEXT NOT NULL
 );
-
--- File attachments
-CREATE TABLE support_attachments (
-    id TEXT PRIMARY KEY,
-    message_id TEXT NOT NULL REFERENCES support_messages(id) ON DELETE CASCADE,
-    filename TEXT NOT NULL,
-    content_type TEXT NOT NULL,
-    size_bytes INTEGER NOT NULL,
-    storage_key TEXT NOT NULL,
-    created_at TEXT NOT NULL
-)
