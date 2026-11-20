@@ -62,6 +62,19 @@ var dialect = sqlx.Dialect{
 		return formatOptionalTime(t)
 	},
 	BoolArg: func(b bool) any { return boolToInt(b) },
+
+	MillisTimeArg: func(t time.Time) any {
+		return t.UTC().Format("2006-01-02T15:04:05.000Z")
+	},
+	MillisOptionalTimeArg: func(t *time.Time) any {
+		if t == nil {
+			return nil
+		}
+		return t.UTC().Format("2006-01-02T15:04:05.000Z")
+	},
+	// SQLite stores jsonb columns as plain TEXT.
+	JSONBArgSuffix: "",
+	JSONBColSuffix: "",
 }
 
 // Migrate runs all pending migrations against the database.
@@ -94,28 +107,31 @@ func (s *SQLiteStore) Close() error {
 
 // Sub-store accessors.
 
-func (s *SQLiteStore) Orgs() store.OrgStore                           { return &orgStore{q: s.q} }
-func (s *SQLiteStore) Users() store.UserStore                         { return &userStore{q: s.q} }
-func (s *SQLiteStore) OIDC() store.OIDCStore                          { return &oidcStore{q: s.q} }
-func (s *SQLiteStore) Monitors() store.MonitorStore                   { return &monitorStore{q: s.q} }
-func (s *SQLiteStore) Checks() store.CheckStore                       { return &checkStore{q: s.q} }
-func (s *SQLiteStore) Alerts() store.AlertStore                       { return &alertStore{q: s.q} }
+func (s *SQLiteStore) Orgs() store.OrgStore                           { return sqlx.NewOrgStore(s.q, dialect) }
+func (s *SQLiteStore) Users() store.UserStore                         { return sqlx.NewUserStore(s.q, dialect) }
+func (s *SQLiteStore) MonitorStates() store.MonitorStateStore          { return sqlx.NewMonitorStateStore(s.q, dialect) }
+func (s *SQLiteStore) MonitorMatchRules() store.MonitorMatchRuleStore  { return sqlx.NewMonitorMatchRuleStore(s.q, dialect) }
+func (s *SQLiteStore) OIDC() store.OIDCStore                          { return sqlx.NewOIDCStore(s.q, dialect) }
+func (s *SQLiteStore) Monitors() store.MonitorStore                   { return sqlx.NewMonitorStore(s.q, s.db, false, dialect) }
+func (s *SQLiteStore) Checks() store.CheckStore                       { return sqlx.NewCheckStore(s.q, s.db, false, dialect) }
+func (s *SQLiteStore) Alerts() store.AlertStore                       { return sqlx.NewAlertStore(s.q, dialect) }
 func (s *SQLiteStore) Teams() store.TeamStore                         { return sqlx.NewTeamStore(s.q, dialect) }
-func (s *SQLiteStore) Schedules() store.ScheduleStore                 { return &scheduleStore{q: s.q} }
+func (s *SQLiteStore) MonitorGroups() store.MonitorGroupStore          { return sqlx.NewMonitorGroupStore(s.q, dialect) }
+func (s *SQLiteStore) Schedules() store.ScheduleStore                 { return sqlx.NewScheduleStore(s.q, dialect) }
 func (s *SQLiteStore) EscalationPolicies() store.EscalationPolicyStore { return sqlx.NewEscalationPolicyStore(s.q, dialect) }
 func (s *SQLiteStore) NotificationChannels() store.NotificationChannelStore { return sqlx.NewNotificationChannelStore(s.q, dialect) }
 func (s *SQLiteStore) MaintenanceWindows() store.MaintenanceWindowStore { return sqlx.NewMaintenanceWindowStore(s.q, dialect) }
 func (s *SQLiteStore) APIKeys() store.APIKeyStore                      { return sqlx.NewAPIKeyStore(s.q, dialect) }
-func (s *SQLiteStore) Dedup() store.DedupStore                         { return &dedupStore{q: s.q} }
-func (s *SQLiteStore) Outbox() store.OutboxStore                       { return &outboxStore{q: s.q} }
-func (s *SQLiteStore) Billing() store.BillingStore                     { return &billingStore{q: s.q} }
+func (s *SQLiteStore) Dedup() store.DedupStore                         { return sqlx.NewDedupStore(s.q, dialect) }
+func (s *SQLiteStore) Outbox() store.OutboxStore                       { return sqlx.NewOutboxStore(s.q, dialect) }
+func (s *SQLiteStore) Billing() store.BillingStore                     { return sqlx.NewBillingStore(s.q, dialect) }
 func (s *SQLiteStore) Stats() store.StatsStore                         { return nil }
-func (s *SQLiteStore) MFA() store.MFAStore                             { return &mfaStore{q: s.q} }
-func (s *SQLiteStore) OrgSettings() store.OrgSettingsStore              { return &orgSettingsStore{q: s.q} }
-func (s *SQLiteStore) CloudEventIngest() store.CloudEventIngest          { return &cloudEventIngestStore{q: s.q} }
-func (s *SQLiteStore) CloudEventReplyAudit() store.CloudEventReplyAudit  { return &cloudEventReplyAuditStore{q: s.q} }
-func (s *SQLiteStore) AlertSuppressions() store.AlertSuppressionStore    { return &alertSuppressionStore{q: s.q} }
-func (s *SQLiteStore) AlertRemediations() store.AlertRemediationStore    { return &alertRemediationStore{q: s.q} }
-func (s *SQLiteStore) AlertRoutingRules() store.AlertRoutingRuleStore    { return &alertRoutingRuleStore{q: s.q} }
-func (s *SQLiteStore) AlertStatusPageRefs() store.AlertStatusPageRefStore { return &alertStatusPageRefStore{q: s.q} }
-func (s *SQLiteStore) OIDCSigningKeys() store.OIDCSigningKeyStore        { return &oidcSigningKeyStore{q: s.q} }
+func (s *SQLiteStore) MFA() store.MFAStore                             { return sqlx.NewMFAStore(s.q, dialect) }
+func (s *SQLiteStore) OrgSettings() store.OrgSettingsStore              { return sqlx.NewOrgSettingsStore(s.q, dialect) }
+func (s *SQLiteStore) CloudEventIngest() store.CloudEventIngest          { return sqlx.NewCloudEventIngestStore(s.q, dialect) }
+func (s *SQLiteStore) CloudEventReplyAudit() store.CloudEventReplyAudit  { return sqlx.NewCloudEventReplyAuditStore(s.q, dialect) }
+func (s *SQLiteStore) AlertSuppressions() store.AlertSuppressionStore    { return sqlx.NewAlertSuppressionStore(s.q, dialect) }
+func (s *SQLiteStore) AlertRemediations() store.AlertRemediationStore    { return sqlx.NewAlertRemediationStore(s.q, dialect) }
+func (s *SQLiteStore) AlertRoutingRules() store.AlertRoutingRuleStore    { return sqlx.NewAlertRoutingRuleStore(s.q, dialect) }
+func (s *SQLiteStore) AlertStatusPageRefs() store.AlertStatusPageRefStore { return sqlx.NewAlertStatusPageRefStore(s.q, dialect) }
+func (s *SQLiteStore) OIDCSigningKeys() store.OIDCSigningKeyStore        { return sqlx.NewOIDCSigningKeyStore(s.q, dialect) }

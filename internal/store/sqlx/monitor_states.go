@@ -1,4 +1,4 @@
-package sqlite
+package sqlx
 
 import (
 	"context"
@@ -6,45 +6,39 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
-	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/google/uuid"
 )
 
-type monitorStateStore struct{ q queryable }
-type monitorMatchRuleStore struct{ q queryable }
-
-// MonitorStates returns the monitor-state sub-store.
-func (s *SQLiteStore) MonitorStates() store.MonitorStateStore { return &monitorStateStore{q: s.q} }
-
-// MonitorMatchRules returns the match-rule sub-store.
-func (s *SQLiteStore) MonitorMatchRules() store.MonitorMatchRuleStore {
-	return &monitorMatchRuleStore{q: s.q}
+// MonitorStateStore implements store.MonitorStateStore across SQL backends.
+type MonitorStateStore struct {
+	q Queryable
+	d Dialect
 }
 
-// ---------------------------------------------------------------------------
-// MonitorStateStore
-// ---------------------------------------------------------------------------
+// NewMonitorStateStore returns a MonitorStateStore bound to q.
+func NewMonitorStateStore(q Queryable, d Dialect) *MonitorStateStore {
+	return &MonitorStateStore{q: q, d: d}
+}
 
-func (s *monitorStateStore) Create(ctx context.Context, st *domain.MonitorState) error {
+func (s *MonitorStateStore) Create(ctx context.Context, st *domain.MonitorState) error {
 	_, err := s.q.ExecContext(ctx,
 		`INSERT INTO org_monitor_states (id, org_id, name, slug, health_class, severity, color, position, is_builtin, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		st.ID, st.OrgID, st.Name, st.Slug, st.HealthClass, st.Severity,
-		st.Color, st.Position, boolToInt(st.IsBuiltin),
-		st.CreatedAt.UTC().Format(timeFormat),
+		st.Color, st.Position, s.d.BoolArg(st.IsBuiltin),
+		s.d.TimeArg(st.CreatedAt),
 	)
 	return err
 }
 
-func (s *monitorStateStore) GetByID(ctx context.Context, id string) (*domain.MonitorState, error) {
-	row := s.q.QueryRowContext(ctx,
+func (s *MonitorStateStore) GetByID(ctx context.Context, id string) (*domain.MonitorState, error) {
+	return scanMonitorState(s.q.QueryRowContext(ctx,
 		`SELECT id, org_id, name, slug, health_class, severity, color, position, is_builtin, created_at
-		 FROM org_monitor_states WHERE id = ?`, id)
-	return scanMonitorState(row)
+		 FROM org_monitor_states WHERE id = ?`, id))
 }
 
-func (s *monitorStateStore) ListByOrg(ctx context.Context, orgID string) ([]*domain.MonitorState, error) {
+func (s *MonitorStateStore) ListByOrg(ctx context.Context, orgID string) ([]*domain.MonitorState, error) {
 	rows, err := s.q.QueryContext(ctx,
 		`SELECT id, org_id, name, slug, health_class, severity, color, position, is_builtin, created_at
 		 FROM org_monitor_states WHERE org_id = ? ORDER BY position`, orgID)
@@ -64,7 +58,7 @@ func (s *monitorStateStore) ListByOrg(ctx context.Context, orgID string) ([]*dom
 	return out, rows.Err()
 }
 
-func (s *monitorStateStore) Update(ctx context.Context, st *domain.MonitorState) error {
+func (s *MonitorStateStore) Update(ctx context.Context, st *domain.MonitorState) error {
 	res, err := s.q.ExecContext(ctx,
 		`UPDATE org_monitor_states SET name = ?, slug = ?, health_class = ?, severity = ?, color = ?, position = ?
 		 WHERE id = ?`,
@@ -73,19 +67,19 @@ func (s *monitorStateStore) Update(ctx context.Context, st *domain.MonitorState)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *monitorStateStore) Delete(ctx context.Context, id string) error {
+func (s *MonitorStateStore) Delete(ctx context.Context, id string) error {
 	res, err := s.q.ExecContext(ctx, `DELETE FROM org_monitor_states WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	return ExpectOneRow(res)
 }
 
-func (s *monitorStateStore) SeedBuiltins(ctx context.Context, orgID string) error {
-	now := time.Now().UTC().Format(timeFormat)
+func (s *MonitorStateStore) SeedBuiltins(ctx context.Context, orgID string) error {
+	now := time.Now().UTC()
 	builtins := []struct {
 		slug        string
 		name        string
@@ -100,9 +94,11 @@ func (s *monitorStateStore) SeedBuiltins(ctx context.Context, orgID string) erro
 	}
 	for _, b := range builtins {
 		_, err := s.q.ExecContext(ctx,
-			`INSERT OR IGNORE INTO org_monitor_states (id, org_id, name, slug, health_class, severity, color, position, is_builtin, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-			uuid.New().String(), orgID, b.name, b.slug, b.healthClass, b.severity, b.color, b.position, now,
+			`INSERT INTO org_monitor_states (id, org_id, name, slug, health_class, severity, color, position, is_builtin, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT DO NOTHING`,
+			uuid.New().String(), orgID, b.name, b.slug, b.healthClass, b.severity, b.color, b.position,
+			s.d.BoolArg(true), s.d.TimeArg(now),
 		)
 		if err != nil {
 			return err
@@ -111,44 +107,51 @@ func (s *monitorStateStore) SeedBuiltins(ctx context.Context, orgID string) erro
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// scanners
-// ---------------------------------------------------------------------------
-
-func scanMonitorState(row *sql.Row) (*domain.MonitorState, error) {
-	var st domain.MonitorState
-	var isBuiltin int
-	var createdAt string
-	if err := row.Scan(&st.ID, &st.OrgID, &st.Name, &st.Slug, &st.HealthClass,
+func scanMonitorState(r Scanner) (*domain.MonitorState, error) {
+	var (
+		st        domain.MonitorState
+		isBuiltin Bool
+		createdAt Time
+	)
+	if err := r.Scan(&st.ID, &st.OrgID, &st.Name, &st.Slug, &st.HealthClass,
 		&st.Severity, &st.Color, &st.Position, &isBuiltin, &createdAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("monitor state not found")
 		}
 		return nil, err
 	}
-	st.IsBuiltin = isBuiltin != 0
-	st.CreatedAt = mustParseTime(createdAt)
+	st.IsBuiltin = bool(isBuiltin)
+	st.CreatedAt = createdAt.T
 	return &st, nil
 }
 
-func scanMonitorStateRow(rows *sql.Rows) (*domain.MonitorState, error) {
-	var st domain.MonitorState
-	var isBuiltin int
-	var createdAt string
-	if err := rows.Scan(&st.ID, &st.OrgID, &st.Name, &st.Slug, &st.HealthClass,
+func scanMonitorStateRow(r Scanner) (*domain.MonitorState, error) {
+	var (
+		st        domain.MonitorState
+		isBuiltin Bool
+		createdAt Time
+	)
+	if err := r.Scan(&st.ID, &st.OrgID, &st.Name, &st.Slug, &st.HealthClass,
 		&st.Severity, &st.Color, &st.Position, &isBuiltin, &createdAt); err != nil {
 		return nil, err
 	}
-	st.IsBuiltin = isBuiltin != 0
-	st.CreatedAt = mustParseTime(createdAt)
+	st.IsBuiltin = bool(isBuiltin)
+	st.CreatedAt = createdAt.T
 	return &st, nil
 }
 
-// ---------------------------------------------------------------------------
-// MonitorMatchRuleStore
-// ---------------------------------------------------------------------------
+// MonitorMatchRuleStore implements store.MonitorMatchRuleStore across SQL backends.
+type MonitorMatchRuleStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *monitorMatchRuleStore) ListByMonitor(ctx context.Context, monitorID string) ([]*domain.MonitorMatchRule, error) {
+// NewMonitorMatchRuleStore returns a MonitorMatchRuleStore bound to q.
+func NewMonitorMatchRuleStore(q Queryable, d Dialect) *MonitorMatchRuleStore {
+	return &MonitorMatchRuleStore{q: q, d: d}
+}
+
+func (s *MonitorMatchRuleStore) ListByMonitor(ctx context.Context, monitorID string) ([]*domain.MonitorMatchRule, error) {
 	rows, err := s.q.QueryContext(ctx,
 		`SELECT r.id, r.monitor_id, r.position, r.status_code, r.status_code_min, r.status_code_max,
 		        r.body_match, r.body_match_mode, r.header_match, r.header_value, r.header_match_mode, r.state_id,
@@ -199,7 +202,7 @@ func (s *monitorMatchRuleStore) ListByMonitor(ctx context.Context, monitorID str
 	return out, rows.Err()
 }
 
-func (s *monitorMatchRuleStore) ReplaceForMonitor(ctx context.Context, monitorID string, rules []*domain.MonitorMatchRule) error {
+func (s *MonitorMatchRuleStore) ReplaceForMonitor(ctx context.Context, monitorID string, rules []*domain.MonitorMatchRule) error {
 	if _, err := s.q.ExecContext(ctx, `DELETE FROM monitor_match_rules WHERE monitor_id = ?`, monitorID); err != nil {
 		return err
 	}
