@@ -1,4 +1,4 @@
-package sqlite
+package sqlx
 
 import (
 	"context"
@@ -11,9 +11,18 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-type oidcSigningKeyStore struct{ q queryable }
+// OIDCSigningKeyStore implements store.OIDCSigningKeyStore across SQL backends.
+type OIDCSigningKeyStore struct {
+	q Queryable
+	d Dialect
+}
 
-func (s *oidcSigningKeyStore) Create(ctx context.Context, k *store.OIDCSigningKey) error {
+// NewOIDCSigningKeyStore returns an OIDCSigningKeyStore bound to q.
+func NewOIDCSigningKeyStore(q Queryable, d Dialect) *OIDCSigningKeyStore {
+	return &OIDCSigningKeyStore{q: q, d: d}
+}
+
+func (s *OIDCSigningKeyStore) Create(ctx context.Context, k *store.OIDCSigningKey) error {
 	_, err := s.q.ExecContext(ctx, `
         INSERT INTO oidc_signing_keys
             (kid, algorithm, encrypted_private, public_jwk, status, created_at, activated_at, retired_at)
@@ -24,9 +33,9 @@ func (s *oidcSigningKeyStore) Create(ctx context.Context, k *store.OIDCSigningKe
 		k.EncryptedPrivate,
 		k.PublicJWK,
 		k.Status,
-		k.CreatedAt.UTC().Format(timeFormat),
-		formatOptionalTime(k.ActivatedAt),
-		formatOptionalTime(k.RetiredAt),
+		s.d.TimeArg(k.CreatedAt),
+		s.d.OptionalTimeArg(k.ActivatedAt),
+		s.d.OptionalTimeArg(k.RetiredAt),
 	)
 	if err != nil {
 		return fmt.Errorf("oidc_signing_keys insert: %w", err)
@@ -34,7 +43,7 @@ func (s *oidcSigningKeyStore) Create(ctx context.Context, k *store.OIDCSigningKe
 	return nil
 }
 
-func (s *oidcSigningKeyStore) GetByKID(ctx context.Context, kid string) (*store.OIDCSigningKey, error) {
+func (s *OIDCSigningKeyStore) GetByKID(ctx context.Context, kid string) (*store.OIDCSigningKey, error) {
 	row := s.q.QueryRowContext(ctx, `
         SELECT kid, algorithm, encrypted_private, public_jwk, status, created_at, activated_at, retired_at
         FROM oidc_signing_keys
@@ -43,7 +52,7 @@ func (s *oidcSigningKeyStore) GetByKID(ctx context.Context, kid string) (*store.
 	return scanOIDCSigningKey(row)
 }
 
-func (s *oidcSigningKeyStore) ListByStatus(ctx context.Context, statuses ...string) ([]*store.OIDCSigningKey, error) {
+func (s *OIDCSigningKeyStore) ListByStatus(ctx context.Context, statuses ...string) ([]*store.OIDCSigningKey, error) {
 	var (
 		rows *sql.Rows
 		err  error
@@ -87,12 +96,12 @@ func (s *oidcSigningKeyStore) ListByStatus(ctx context.Context, statuses ...stri
 	return out, nil
 }
 
-func (s *oidcSigningKeyStore) UpdateStatus(ctx context.Context, kid, status string, retiredAt *time.Time) error {
+func (s *OIDCSigningKeyStore) UpdateStatus(ctx context.Context, kid, status string, retiredAt *time.Time) error {
 	res, err := s.q.ExecContext(ctx, `
         UPDATE oidc_signing_keys
         SET status = ?, retired_at = ?
         WHERE kid = ?
-    `, status, formatOptionalTime(retiredAt), kid)
+    `, status, s.d.OptionalTimeArg(retiredAt), kid)
 	if err != nil {
 		return fmt.Errorf("oidc_signing_keys update status: %w", err)
 	}
@@ -106,28 +115,23 @@ func (s *oidcSigningKeyStore) UpdateStatus(ctx context.Context, kid, status stri
 	return nil
 }
 
-func (s *oidcSigningKeyStore) DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	cutoffStr := cutoff.UTC().Format(timeFormat)
+func (s *OIDCSigningKeyStore) DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := s.q.ExecContext(ctx, `
         DELETE FROM oidc_signing_keys
         WHERE status = 'expired' AND retired_at IS NOT NULL AND retired_at < ?
-    `, cutoffStr)
+    `, s.d.TimeArg(cutoff))
 	if err != nil {
 		return 0, fmt.Errorf("oidc_signing_keys delete expired: %w", err)
 	}
 	return res.RowsAffected()
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanOIDCSigningKey(r rowScanner) (*store.OIDCSigningKey, error) {
+func scanOIDCSigningKey(r Scanner) (*store.OIDCSigningKey, error) {
 	var (
-		k            store.OIDCSigningKey
-		createdAt    string
-		activatedAt  sql.NullString
-		retiredAt    sql.NullString
+		k           store.OIDCSigningKey
+		createdAt   Time
+		activatedAt Time
+		retiredAt   Time
 	)
 	err := r.Scan(
 		&k.Kid,
@@ -145,14 +149,8 @@ func scanOIDCSigningKey(r rowScanner) (*store.OIDCSigningKey, error) {
 		}
 		return nil, err
 	}
-	k.CreatedAt = mustParseTime(createdAt)
-	if activatedAt.Valid {
-		k.ActivatedAt = ptrTime(mustParseTime(activatedAt.String))
-	}
-	if retiredAt.Valid {
-		k.RetiredAt = ptrTime(mustParseTime(retiredAt.String))
-	}
+	k.CreatedAt = createdAt.T
+	k.ActivatedAt = activatedAt.TimePtr()
+	k.RetiredAt = retiredAt.TimePtr()
 	return &k, nil
 }
-
-func ptrTime(t time.Time) *time.Time { return &t }

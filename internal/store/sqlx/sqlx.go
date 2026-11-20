@@ -99,6 +99,24 @@ type Dialect struct {
 	TimeArg         func(t time.Time) any
 	OptionalTimeArg func(t *time.Time) any
 	BoolArg         func(b bool) any
+
+	// ForUpdateSkipLocked is appended after a LIMIT in a claim subquery to
+	// skip rows already locked by another worker. Postgres uses
+	// " FOR UPDATE SKIP LOCKED"; SQLite (single-writer) uses "".
+	ForUpdateSkipLocked string
+
+	// Millisecond time args for the cloud-event/reply tables, whose SQLite
+	// columns default to strftime('%Y-%m-%dT%H:%M:%fZ') and are compared
+	// lexicographically (e.g. `expires_at > ?`). SQLite formats a fixed
+	// "2006-01-02T15:04:05.000Z" string; Postgres passes time.Time natively.
+	MillisTimeArg         func(t time.Time) any
+	MillisOptionalTimeArg func(t *time.Time) any
+
+	// JSONB column casts for the reply-audit store. Postgres stores the
+	// before/after state as jsonb (write `?::jsonb`, read `col::text`);
+	// SQLite stores plain TEXT (no cast).
+	JSONBArgSuffix string
+	JSONBColSuffix string
 }
 
 // Migrate runs pending migrations from fsys/dir against db. Each migration is

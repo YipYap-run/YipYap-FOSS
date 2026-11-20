@@ -6,15 +6,15 @@ import (
 	"time"
 )
 
-// testInsertWithSeenAt is a test-only helper that inserts a row with a
-// controlled seen_at, sidestepping the TrySeen atomicity so we can
-// simulate aged rows without actually sleeping.
-func (s *cloudEventIngestStore) testInsertWithSeenAt(ctx context.Context, monitorID, eventID string, seenAt time.Time) error {
-	_, err := s.q.ExecContext(ctx,
+// seedIngestSeenAt inserts a row with a controlled seen_at, sidestepping the
+// TrySeen atomicity so we can simulate aged rows without actually sleeping.
+func seedIngestSeenAt(t *testing.T, s *SQLiteStore, monitorID, eventID string, seenAt time.Time) {
+	t.Helper()
+	if _, err := s.db.ExecContext(context.Background(),
 		`INSERT INTO cloudevent_ingest_idempotency (monitor_id, event_id, seen_at) VALUES (?, ?, ?)`,
-		monitorID, eventID, seenAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-	)
-	return err
+		monitorID, eventID, seenAt.UTC().Format("2006-01-02T15:04:05.000Z")); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
 }
 
 func TestTrySeen_Insert(t *testing.T) {
@@ -55,13 +55,11 @@ func TestTrySeen_RefreshesAfterTTL(t *testing.T) {
 	s := setupTestDB(t)
 	ctx := context.Background()
 
-	ingest := s.CloudEventIngest().(*cloudEventIngestStore)
+	ingest := s.CloudEventIngest()
 
 	// Seed a row with seen_at 2h ago.
 	old := time.Now().UTC().Add(-2 * time.Hour)
-	if err := ingest.testInsertWithSeenAt(ctx, "mon-1", "evt-1", old); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedIngestSeenAt(t, s, "mon-1", "evt-1", old)
 
 	// ttl=1h means the 2h-old row is stale; TrySeen should refresh and return true.
 	got, err := ingest.TrySeen(ctx, "mon-1", "evt-1", time.Hour)
@@ -86,7 +84,7 @@ func TestPruneOlderThan(t *testing.T) {
 	s := setupTestDB(t)
 	ctx := context.Background()
 
-	ingest := s.CloudEventIngest().(*cloudEventIngestStore)
+	ingest := s.CloudEventIngest()
 
 	// Two fresh rows.
 	if _, err := ingest.TrySeen(ctx, "mon-1", "evt-fresh-1", time.Hour); err != nil {
@@ -98,9 +96,7 @@ func TestPruneOlderThan(t *testing.T) {
 
 	// One stale row.
 	old := time.Now().UTC().Add(-2 * time.Hour)
-	if err := ingest.testInsertWithSeenAt(ctx, "mon-1", "evt-stale", old); err != nil {
-		t.Fatalf("seed stale: %v", err)
-	}
+	seedIngestSeenAt(t, s, "mon-1", "evt-stale", old)
 
 	deleted, err := ingest.PruneOlderThan(ctx, time.Hour)
 	if err != nil {
