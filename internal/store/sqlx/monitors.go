@@ -101,7 +101,7 @@ func (s *MonitorStore) ListByOrg(ctx context.Context, orgID string, filter store
 			return nil, err
 		}
 		defer func() { _ = tx.Commit() }()
-		q = tx
+		q = RebindingQueryable{Q: tx}
 	}
 
 	rows, err := q.QueryContext(ctx, query, args...)

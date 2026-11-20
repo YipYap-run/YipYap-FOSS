@@ -630,8 +630,8 @@ export function MonitorListPage() {
           appMeta.value?.billing_enabled && currentOrg.value?.plan === 'free' && monitors.length >= 10
             ? <a href="/settings/billing" class="btn btn-primary">Upgrade to add more monitors</a>
             : <div style="display: flex; gap: 8px;">
-                <button class="btn" onClick={openGroupCreate}>New Group</button>
-                <button class="btn btn-primary" onClick={openCreate}>New Monitor</button>
+                <button class="btn" data-readonly-block onClick={openGroupCreate}>New Group</button>
+                <button class="btn btn-primary" data-readonly-block onClick={openCreate}>New Monitor</button>
               </div>
         } />
 

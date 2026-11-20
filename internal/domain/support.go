@@ -21,6 +21,7 @@ type SupportTicket struct {
 	CSATRating        *int       `json:"csat_rating,omitempty"`
 	CSATComment       string     `json:"csat_comment,omitempty"`
 	CSATSubmittedAt   *time.Time `json:"csat_submitted_at,omitempty"`
+	SurveySentAt      *time.Time `json:"survey_sent_at,omitempty"`
 
 	// Populated by joins/enrichment, not stored:
 	UserEmail    string           `json:"user_email,omitempty"`
@@ -30,13 +31,13 @@ type SupportTicket struct {
 
 // SupportMessage represents a message within a support ticket.
 type SupportMessage struct {
-	ID         string    `json:"id"`
-	TicketID   string    `json:"ticket_id"`
-	SenderType string    `json:"sender_type"` // "user", "staff", or "system"
-	SenderID   string    `json:"sender_id"`
-	SenderEmail string   `json:"sender_email"`
-	Body       string    `json:"body"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	TicketID    string    `json:"ticket_id"`
+	SenderType  string    `json:"sender_type"` // "user", "staff", or "system"
+	SenderID    string    `json:"sender_id"`
+	SenderEmail string    `json:"sender_email"`
+	Body        string    `json:"body"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // SupportNotifyChannel represents a staff notification channel for support events.
@@ -64,17 +65,6 @@ type SupportMacro struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// SupportAttachment represents a file attached to a support message.
-type SupportAttachment struct {
-	ID          string    `json:"id"`
-	MessageID   string    `json:"message_id"`
-	Filename    string    `json:"filename"`
-	ContentType string    `json:"content_type"`
-	SizeBytes   int64     `json:"size_bytes"`
-	StorageKey  string    `json:"storage_key"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
 // SupportTicketPriority constants.
 const (
 	SupportPriorityLow    = "low"
@@ -95,6 +85,9 @@ const (
 	SupportSenderUser   = "user"
 	SupportSenderStaff  = "staff"
 	SupportSenderSystem = "system"
+	// SupportSenderNote is staff-only. Customer-facing ticket reads must filter
+	// these out.
+	SupportSenderNote = "note"
 )
 
 // SupportPriorityRank returns a numeric rank for priority comparison.

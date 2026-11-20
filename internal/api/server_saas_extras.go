@@ -9,3 +9,5 @@ import (
 func registerSaaSPreAuthRoutes(_ chi.Router, _ *handlers.AuthHandler) {}
 
 func applySaaSAuthExtras(_ chi.Router) {}
+
+func registerSaaSAuthRoutes(_ chi.Router) {}

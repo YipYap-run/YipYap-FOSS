@@ -70,7 +70,7 @@ func (s *CheckStore) ListByMonitor(ctx context.Context, monitorID string, filter
 			return nil, err
 		}
 		defer func() { _ = tx.Commit() }()
-		q = tx
+		q = RebindingQueryable{Q: tx}
 	}
 
 	rows, err := q.QueryContext(ctx, query, args...)
@@ -219,7 +219,7 @@ func (s *CheckStore) GetRollups(ctx context.Context, monitorID, period string) (
 			return nil, err
 		}
 		defer func() { _ = tx.Commit() }()
-		q = tx
+		q = RebindingQueryable{Q: tx}
 	}
 
 	rows, err := q.QueryContext(ctx,
@@ -268,7 +268,7 @@ func (s *CheckStore) CountByMonitor(ctx context.Context, monitorID string, filte
 			return 0, err
 		}
 		defer func() { _ = tx.Commit() }()
-		q = tx
+		q = RebindingQueryable{Q: tx}
 	}
 
 	var count int64
@@ -295,7 +295,7 @@ func (s *CheckStore) AggregateByOrg(ctx context.Context, monitorIDs []string) (*
 			return nil, err
 		}
 		defer func() { _ = tx.Commit() }()
-		q = tx
+		q = RebindingQueryable{Q: tx}
 	}
 
 	var total int64

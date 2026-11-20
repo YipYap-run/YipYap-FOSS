@@ -258,14 +258,15 @@ export function MonitorDetailPage({ id }) {
             }}>
               {monitor.muted ? 'Unmute' : 'Mute'}
             </button>
-            <a href={`/monitors?edit=${id}`} class="btn btn-sm">Edit</a>
+            <a href={`/monitors?edit=${id}`} class="btn btn-sm" data-readonly-block>Edit</a>
             <button class="btn btn-sm btn-danger" onClick={async () => {
               if (!confirm('Delete this monitor? This cannot be undone.')) return;
               try {
                 await del(`/monitors/${id}`);
                 window.location.href = '/monitors';
               } catch (err) {
-                alert(err.message || 'Failed to delete monitor');
+                // The API client already showed the read-only toast.
+                if (!err.readonly) alert(err.message || 'Failed to delete monitor');
               }
             }}>Delete</button>
           </div>

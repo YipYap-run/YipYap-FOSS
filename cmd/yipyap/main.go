@@ -25,6 +25,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 	"github.com/YipYap-run/YipYap-FOSS/internal/seed"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/YipYap-run/YipYap-FOSS/internal/support"
 	"github.com/YipYap-run/YipYap-FOSS/internal/wiring"
 )
 
@@ -186,6 +187,8 @@ func run() error {
 	billingClient, billingWebhookSecret := wiring.InitBilling(cfg)
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	support.StartEscalation(runCtx, db, msgBus, mail, cfg.PublicBaseURL, jwt)
+	support.StartSurveys(runCtx, db, msgBus, mail, cfg.PublicBaseURL, jwt)
 	srv := api.NewServer(db, jwt, msgBus, wsHub, billingClient, billingWebhookSecret, cfg.PublicBaseURL, api.ServerOptions{
 		TestSender:            dispatcher,
 		RegistrationEnabled:   cfg.RegistrationEnabled,

@@ -3,16 +3,17 @@ package api
 import (
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/handlers"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
 	"github.com/YipYap-run/YipYap-FOSS/internal/crypto"
+	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/go-chi/chi/v5"
 )
 
-func registerProRoutes(r chi.Router, s store.Store, _ *auth.JWTIssuer, authMW func(http.Handler) http.Handler, _ bus.Bus, _ interface{}, _ string, _ string, _ interface{}, _ *crypto.Envelope, _ string, _ chi.Router, hasher *auth.APIKeyHasher) {
+func registerProRoutes(r chi.Router, s store.Store, _ *auth.JWTIssuer, authMW func(http.Handler) http.Handler, _ bus.Bus, _ interface{}, _ string, _ string, _ interface{}, _ *crypto.Envelope, _ string, _ chi.Router, hasher *auth.APIKeyHasher, _ *mailer.Mailer) {
 	// FOSS: teams, schedules, OIDC, and billing are not available.
 	// API keys are shared across all editions.
 	orgH := handlers.NewOrgHandlerWithHasher(s, hasher)

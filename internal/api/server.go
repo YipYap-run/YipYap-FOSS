@@ -28,13 +28,13 @@ import (
 
 // ServerOptions holds optional configuration for the HTTP server.
 type ServerOptions struct {
-	TestSender            handlers.TestSender
-	RequestLatencyMS      metric.Float64Histogram
-	OnMonitorChange       func(kind handlers.MonitorChangeKind, monitorID string)
-	RegistrationEnabled   bool
-	Envelope              *crypto.Envelope
-	OpsToken              string
-	Mailer                *mailer.Mailer
+	TestSender          handlers.TestSender
+	RequestLatencyMS    metric.Float64Histogram
+	OnMonitorChange     func(kind handlers.MonitorChangeKind, monitorID string)
+	RegistrationEnabled bool
+	Envelope            *crypto.Envelope
+	OpsToken            string
+	Mailer              *mailer.Mailer
 	// APIKeyHasher is used to hash API key tokens for storage and lookup.
 	// When nil, plain SHA-256 is used for backward compatibility.
 	APIKeyHasher          *auth.APIKeyHasher
@@ -46,13 +46,13 @@ type ServerOptions struct {
 	// TrustedProxyNets lists CIDRs from which proxy headers (CF-Connecting-IP,
 	// X-Real-IP, X-Forwarded-For) are trusted. When empty, RemoteAddr is used
 	// as-is and proxy headers are ignored.
-	TrustedProxyNets      []*net.IPNet
+	TrustedProxyNets []*net.IPNet
 	// Metrics is the centralised OTEL metrics bundle. When non-nil it is
 	// wired into handlers that support SetMetrics (CloudEventHandler today).
-	Metrics               *telemetry.Metrics
+	Metrics *telemetry.Metrics
 	// JWKSHandler, when non-nil, is mounted at /.well-known/jwks.json in
 	// non-FOSS builds. FOSS builds ignore it.
-	JWKSHandler           http.Handler
+	JWKSHandler http.Handler
 	// LifecycleCtx, when non-nil, is observed by long-lived components
 	// (ceConsumerCache sweep loop, etc.) so they can release resources
 	// when the parent process is shutting down. main.go passes the same
@@ -248,6 +248,8 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			r.Use(middleware.MFAEnforce(s))
 			r.Use(middleware.PromoExpiry(s))
 
+			registerSaaSAuthRoutes(r)
+
 			// Auth.
 			r.Post("/auth/refresh", authH.Refresh)
 			r.Put("/auth/password", authH.ChangePassword)
@@ -391,7 +393,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		})
 
 		// Pro-only routes (teams, schedules, OIDC, API keys, billing).
-		registerProRoutes(r, s, jwt, authMiddleware, msgBus, billingClient, billingWebhookSecret, publicBaseURL, userH, opt.Envelope, opt.OpsToken, root, opt.APIKeyHasher)
+		registerProRoutes(r, s, jwt, authMiddleware, msgBus, billingClient, billingWebhookSecret, publicBaseURL, userH, opt.Envelope, opt.OpsToken, root, opt.APIKeyHasher, opt.Mailer)
 	})
 
 	// JWKS endpoint, mounted before the SPA catch-all so that
@@ -425,4 +427,3 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 
 	return r
 }
-
