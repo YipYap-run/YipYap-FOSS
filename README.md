@@ -2,6 +2,8 @@
 
 Free, self-hosted monitoring and alerting for small teams. One binary, zero external dependencies.
 
+![YipYap alerts dashboard](docs/screenshot-alerts.png)
+
 ## Features
 
 - **HTTP, TCP, DNS, Ping, Heartbeat** health checks on configurable intervals
