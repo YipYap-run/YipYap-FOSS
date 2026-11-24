@@ -98,8 +98,7 @@ const CHANNEL_TYPES = {
     { key: 'channel_id', label: 'Channel ID', type: 'text', placeholder: '1234567890', required: true, help: 'Enable Developer Mode \u2192 Right-click channel \u2192 Copy ID' },
   ]},
   telegram:     { label: 'Telegram', fields: [
-    { key: 'bot_token', label: 'Bot Token', type: 'secret', placeholder: '123456:ABC-DEF...', required: true, help: 'Message @BotFather \u2192 /newbot' },
-    { key: 'chat_id', label: 'Chat ID', type: 'text', placeholder: '-100123456789', required: true, help: 'Add bot to group, send message, check /getUpdates' },
+    { key: 'chat_id', label: 'Chat ID', type: 'text', placeholder: '-100123456789', required: true, help: 'Add the bot to the group, send /start, then paste the chat ID it replies with' },
   ]},
   smtp:         { label: 'Email (SMTP)', fields: [
     { key: 'host', label: 'SMTP Host', type: 'text', placeholder: 'smtp.gmail.com', required: true },
@@ -109,10 +108,16 @@ const CHANNEL_TYPES = {
     { key: 'from', label: 'From Address', type: 'text', placeholder: 'alerts@company.com', required: true },
     { key: 'to', label: 'To Address', type: 'text', placeholder: 'oncall@company.com', required: true },
   ]},
-  twilio_sms:   { label: 'SMS', fields: [
+  telnyx_sms:   { label: 'SMS (Telnyx)', fields: [
     { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
   ]},
-  twilio_voice: { label: 'Voice Call', fields: [
+  telnyx_voice: { label: 'Voice Call (Telnyx)', fields: [
+    { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
+  ]},
+  twilio_sms:   { label: 'SMS (Twilio legacy)', legacy: true, fields: [
+    { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
+  ]},
+  twilio_voice: { label: 'Voice Call (Twilio legacy)', legacy: true, fields: [
     { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
   ]},
   ntfy: { label: 'ntfy.sh', fields: [
@@ -164,6 +169,8 @@ function getConfigSummary(type, config) {
     case 'discord': return config.channel_id ? 'Channel: ' + config.channel_id : '';
     case 'telegram': return config.chat_id ? 'Chat: ' + config.chat_id : '';
     case 'smtp': return config.host ? config.host + ' \u2192 ' + (config.to || '') : '';
+    case 'telnyx_sms': return config.to || '';
+    case 'telnyx_voice': return config.to || '';
     case 'twilio_sms': return config.to || '';
     case 'twilio_voice': return config.to || '';
     default: return '';
@@ -263,6 +270,7 @@ function ChannelsTab() {
         catch (_) { cfgToSend.headers = {}; }
       }
       delete cfgToSend._formatManual;
+      if (type === 'telegram') delete cfgToSend.bot_token;
       const body = { name, type, config: cfgToSend, enabled };
       if (editId) {
         await patch('/notification-channels/' + editId, body);
@@ -390,13 +398,22 @@ function ChannelsTab() {
             <label class="required">Type</label>
             <select value={type} onChange={e => handleTypeChange(e.target.value)}>
               {Object.entries(CHANNEL_TYPES)
-                .filter(([k]) => appMeta.value?.edition !== 'foss' || !['twilio_sms', 'twilio_voice'].includes(k))
-                .filter(([k]) => isPaidPlan.value || !['telegram', 'twilio_sms', 'twilio_voice', 'cloudevent_http'].includes(k))
+                .filter(([k]) => appMeta.value?.edition !== 'foss' || !['twilio_sms', 'twilio_voice', 'telnyx_sms', 'telnyx_voice'].includes(k))
+                .filter(([k]) => isPaidPlan.value || !['telegram', 'twilio_sms', 'twilio_voice', 'telnyx_sms', 'telnyx_voice', 'cloudevent_http'].includes(k))
+                .filter(([k, v]) => editId || !v.legacy)
                 .map(([k, v]) => (
                 <option key={k} value={k}>{v.label}</option>
               ))}
             </select>
           </div>
+
+          {type === 'telegram' && (
+            <p class="form-help" style="margin-top:-8px; margin-bottom:12px">
+              Add {appMeta.value?.telegram_bot_username
+                ? <a href={`https://t.me/${appMeta.value.telegram_bot_username}`} target="_blank" rel="noopener">@{appMeta.value.telegram_bot_username}</a>
+                : 'the YipYap Telegram bot'} to the chat, send /start, then paste the chat ID it replies with.
+            </p>
+          )}
 
           {typeDef && typeDef.fields.map(f => (
             <div key={f.key} class={'form-group' + (errors[f.key] ? ' has-error' : '')}>

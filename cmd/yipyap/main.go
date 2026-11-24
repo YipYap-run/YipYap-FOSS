@@ -200,7 +200,9 @@ func run() error {
 		SlackSigningSecret:    cfg.SlackSigningSecret,
 		TelegramWebhookSecret: cfg.TelegramWebhookSecret,
 		TelegramBotToken:      cfg.TelegramBotToken,
+		TelegramBotUsername:   cfg.TelegramBotUsername,
 		TwilioAuthToken:       cfg.TwilioAuthToken,
+		TelnyxWebhookSecret:   cfg.TelnyxWebhookSecret,
 		TrustedProxyNets:      api.ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs),
 		LifecycleCtx:          runCtx,
 	})

@@ -41,8 +41,10 @@ type ServerOptions struct {
 	DiscordPublicKey      string // hex-encoded Ed25519 public key for Discord webhook verification
 	SlackSigningSecret    string // Slack app signing secret for request verification
 	TelegramWebhookSecret string // secret token for Telegram webhook verification
-	TelegramBotToken      string // Telegram Bot API token for editing messages on ack/resolve
+	TelegramBotToken      string // platform Telegram bot API token for editing messages on ack/resolve
+	TelegramBotUsername   string // public bot username for UI help
 	TwilioAuthToken       string // Twilio account auth token for voice callback signature verification
+	TelnyxWebhookSecret   string // HMAC secret for Telnyx TeXML callback URLs
 	// TrustedProxyNets lists CIDRs from which proxy headers (CF-Connecting-IP,
 	// X-Real-IP, X-Forwarded-For) are trusted. When empty, RemoteAddr is used
 	// as-is and proxy headers are ignored.
@@ -121,7 +123,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public routes (no auth).
-		r.Get("/meta", handlers.MetaGet(opt.RegistrationEnabled, s))
+		r.Get("/meta", handlers.MetaGet(opt.RegistrationEnabled, s, opt.TelegramBotUsername))
 
 		// Rate-limited public auth routes.
 		r.Group(func(r chi.Router) {
@@ -228,8 +230,9 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		discordInteractivityH := handlers.NewDiscordInteractivityHandler(s, msgBus, opt.DiscordPublicKey)
 		r.Post("/webhooks/discord", discordInteractivityH.Handle)
 
-		// Pro-only voice callback routes (registered by build-tagged helper).
+		// Pro-only voice callback routes (registered by build-tagged helpers).
 		registerTwilioRoutes(r, s, publicBaseURL, opt.TwilioAuthToken)
+		registerTelnyxRoutes(r, s, publicBaseURL, opt.TelnyxWebhookSecret)
 
 		telegramInteractivityH := handlers.NewTelegramInteractivityHandler(s, msgBus, opt.TelegramWebhookSecret, opt.TelegramBotToken)
 		r.Post("/webhooks/telegram", telegramInteractivityH.Handle)

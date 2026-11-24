@@ -887,6 +887,36 @@ label.required::after {
   color: var(--color-text-secondary);
 }
 
+.auth-footer-secondary {
+  margin-top: 8px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--color-border);
+}
+
+.alt-logins {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alt-logins .divider {
+  margin-bottom: 8px;
+}
+
 /* ─── Dashboard ─── */
 .stat-grid {
   display: grid;

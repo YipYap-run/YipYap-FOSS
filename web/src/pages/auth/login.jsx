@@ -90,6 +90,8 @@ export function LoginPage() {
     }
   }
 
+  const showPasskey = appMeta.value?.edition !== 'foss';
+
   return (
     <div class="auth-page">
       <div class="auth-card">
@@ -109,33 +111,30 @@ export function LoginPage() {
             <input id="password" type="password" value={password} required autocomplete="current-password"
                    onInput={e => setPassword(e.target.value)} placeholder="Your password" />
           </div>
-          <div style="text-align: right; margin-top: -4px; margin-bottom: 8px">
-            <a href="/forgot-password" class="text-link-sm">Forgot password?</a>
-          </div>
           <button type="submit" class="btn btn-primary btn-full" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
-        {ssoProviders.length > 0 && (
-          <div class="sso-section">
+        {(ssoProviders.length > 0 || showPasskey) && (
+          <div class="alt-logins">
             <div class="divider"><span>or</span></div>
             {ssoProviders.map(p => (
               <a key={p.id} href={`/api/v1/auth/oidc/${p.id}`} class="btn btn-outline btn-full sso-btn">
                 Sign in with {p.provider}
               </a>
             ))}
+            {showPasskey && (
+              <button type="button" class="btn btn-outline btn-full" onClick={passkeyLogin}>
+                Sign in with passkey
+              </button>
+            )}
           </div>
-        )}
-        {appMeta.value?.edition !== 'foss' && (
-          <>
-            <div class="divider"><span>or</span></div>
-            <button type="button" class="btn btn-outline btn-full" onClick={passkeyLogin}>
-              Sign in with passkey
-            </button>
-          </>
         )}
         <p class="auth-footer">
           Don't have an account? <a href="/register">Create one</a>
+        </p>
+        <p class="auth-footer auth-footer-secondary">
+          <a href="/forgot-password">Forgot password?</a>
         </p>
       </div>
     </div>
