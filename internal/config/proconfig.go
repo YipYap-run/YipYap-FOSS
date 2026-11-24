@@ -5,11 +5,14 @@ package config
 type ProConfig struct {
 	DBDriver      string
 	PublicBaseURL string
-	OpsToken string
+	OpsToken      string
 
 	// TwilioAuthToken is SaaS-only and always empty in FOSS. Present so
 	// shared wiring (ServerOptions) can reference it in both builds.
 	TwilioAuthToken string
+	// TelnyxWebhookSecret is SaaS-only and always empty in FOSS. Present so
+	// shared wiring (ServerOptions) can reference it in both builds.
+	TelnyxWebhookSecret string
 
 	CheckerWorkers           int
 	CheckerChannelSize       int

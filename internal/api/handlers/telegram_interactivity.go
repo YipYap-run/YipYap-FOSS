@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,8 @@ type TelegramInteractivityHandler struct {
 	bus         bus.Bus
 	secretToken string
 	botToken    string
+	apiBase     string
+	client      *http.Client
 }
 
 // NewTelegramInteractivityHandler creates a new TelegramInteractivityHandler.
@@ -31,13 +34,34 @@ type TelegramInteractivityHandler struct {
 // botToken is the Telegram Bot API token used to edit messages after
 // ack/resolve actions. If empty, messages will not be updated.
 func NewTelegramInteractivityHandler(s store.Store, b bus.Bus, secretToken, botToken string) *TelegramInteractivityHandler {
-	return &TelegramInteractivityHandler{store: s, bus: b, secretToken: secretToken, botToken: botToken}
+	return &TelegramInteractivityHandler{
+		store:       s,
+		bus:         b,
+		secretToken: secretToken,
+		botToken:    botToken,
+		apiBase:     "https://api.telegram.org",
+		client:      &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 // telegramWebhookUpdate mirrors the relevant fields of a Telegram webhook update.
 type telegramWebhookUpdate struct {
 	UpdateID      int                           `json:"update_id"`
 	CallbackQuery *telegramWebhookCallbackQuery `json:"callback_query"`
+	Message       *telegramWebhookMessage       `json:"message"`
+}
+
+type telegramWebhookMessage struct {
+	MessageID int `json:"message_id"`
+	From      struct {
+		ID       int    `json:"id"`
+		Username string `json:"username"`
+	} `json:"from"`
+	Chat struct {
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
+	} `json:"chat"`
+	Text string `json:"text"`
 }
 
 type telegramWebhookCallbackQuery struct {
@@ -54,6 +78,32 @@ type telegramWebhookCallbackQuery struct {
 		Text string `json:"text"`
 	} `json:"message"`
 	Data string `json:"data"`
+}
+
+func isTelegramChatIDCommand(text string) bool {
+	text = strings.TrimSpace(text)
+	return text == "/start" || text == "/chatid" || strings.HasPrefix(text, "/start@") || strings.HasPrefix(text, "/chatid@")
+}
+
+func (h *TelegramInteractivityHandler) sendChatID(ctx context.Context, chatID int64) error {
+	body, _ := json.Marshal(map[string]any{
+		"chat_id": chatID,
+		"text":    fmt.Sprintf("Chat ID: %d\n\nUse this in YipYap Settings → Channels → Telegram.", chatID),
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.apiBase+"/bot"+h.botToken+"/sendMessage", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("telegram sendMessage status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // Handle processes POST /webhooks/telegram.
@@ -89,8 +139,15 @@ func (h *TelegramInteractivityHandler) Handle(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Ignore non-callback_query updates.
+	// A /start or /chatid message lets the user discover the group chat ID
+	// without a second bot or getUpdates (which is unavailable once a webhook
+	// is set).
 	if update.CallbackQuery == nil {
+		if update.Message != nil && isTelegramChatIDCommand(update.Message.Text) && h.botToken != "" {
+			if err := h.sendChatID(r.Context(), update.Message.Chat.ID); err != nil {
+				slog.Warn("telegram interactivity: send chat id", "error", err)
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}

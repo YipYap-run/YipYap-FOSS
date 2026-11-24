@@ -73,7 +73,7 @@ All channels are configured through the web UI under Settings → Notification C
 | **Webhook** | URL, method, custom headers |
 | **Slack** | Bot token + channel ID |
 | **Discord** | Bot token + channel ID (webhook URL supported as fallback) |
-| **Telegram** | Bot token + chat ID |
+| **Telegram** | Platform bot token (`YIPYAP_TELEGRAM_BOT_TOKEN`) + chat ID per channel (send `/start` to the bot) |
 | **ntfy.sh** | Server URL + topic |
 | **Pushover** | API token + user key |
 
