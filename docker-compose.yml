@@ -7,7 +7,8 @@ services:
       - yipyap-data:/data
     environment:
       YIPYAP_DB_DSN: /data/yipyap.db
-      YIPYAP_JWT_SECRET: ${YIPYAP_JWT_SECRET:-change-me-in-production}
+      # Leave unset to have YipYap generate a secret and keep it in /data/jwt_secret.
+      YIPYAP_JWT_SECRET: ${YIPYAP_JWT_SECRET:-}
       YIPYAP_DEV_SEED: "${YIPYAP_DEV_SEED:-false}"
     restart: unless-stopped
 

@@ -21,10 +21,16 @@
   --color-warning-bg: #fffbeb;
   --color-down: #ef4444;
   --color-down-bg: #fef2f2;
+  /* Error text. --color-down is too light for small text on light surfaces. */
+  --color-down-text: #b91c1c;
   --color-info: #F19030;
   --color-info-bg: #fef3e2;
   --color-muted: #94a3b8;
   --color-muted-bg: #f1f5f9;
+  --color-up-text: #047857;
+  --color-warning-text: #92400e;
+  --color-muted-text: #475569;
+  --color-focus-ring: #1d4ed8;
 
   --sidebar-width: 240px;
   --header-height: 0px;
@@ -52,8 +58,13 @@
   --color-up-bg: #064e3b;
   --color-warning-bg: #451a03;
   --color-down-bg: #450a0a;
+  --color-down-text: #fca5a5;
   --color-info-bg: #3d2810;
   --color-muted-bg: #1e293b;
+  --color-up-text: #34d399;
+  --color-warning-text: #fbbf24;
+  --color-muted-text: #cbd5e1;
+  --color-focus-ring: #93c5fd;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
@@ -72,8 +83,13 @@
   --color-up-bg: #021a10;
   --color-warning-bg: #1a0a00;
   --color-down-bg: #1a0505;
+  --color-down-text: #fca5a5;
   --color-info-bg: #1a1000;
   --color-muted-bg: #0a0a0a;
+  --color-up-text: #34d399;
+  --color-warning-text: #fbbf24;
+  --color-muted-text: #cbd5e1;
+  --color-focus-ring: #93c5fd;
   --shadow: none;
   --shadow-lg: none;
 }
@@ -181,6 +197,18 @@ a:hover {
 
 .ws-status.disconnected {
   background: var(--color-muted);
+}
+
+.ws-status-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ws-status-text {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
 }
 
 .sidebar-org {
@@ -627,9 +655,14 @@ a:hover {
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
-  outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.form-group input:focus-visible,
+.form-group select:focus-visible,
+.form-group textarea:focus-visible {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 .form-group textarea {
@@ -664,7 +697,7 @@ label.required::after {
 .form-error {
   padding: 8px 12px;
   background: var(--color-down-bg);
-  color: var(--color-down);
+  color: var(--color-down-text);
   border-radius: var(--radius-sm);
   font-size: 0.875rem;
   margin-bottom: 16px;
@@ -743,8 +776,12 @@ label.required::after {
 }
 
 .search-input input:focus {
-  outline: none;
   border-color: var(--color-primary);
+}
+
+.search-input input:focus-visible {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 .filters-bar {
@@ -766,7 +803,11 @@ label.required::after {
 
 .filter-select:focus {
   border-color: var(--color-primary);
-  outline: none;
+}
+
+.filter-select:focus-visible {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 /* Ensure all selects in modals and layout editors are themed */
@@ -784,7 +825,12 @@ label.required::after {
 .modal select:focus,
 .sp-layout-monitor select:focus {
   border-color: var(--color-primary);
-  outline: none;
+}
+
+.modal select:focus-visible,
+.sp-layout-monitor select:focus-visible {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 /* ─── Loading / Error / Empty ─── */
@@ -872,6 +918,13 @@ label.required::after {
 
 .auth-header h2 {
   font-family: var(--font-display);
+}
+
+/* Page heading on auth steps that do not show the logo h1. */
+.auth-header .auth-title {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 700;
 }
 
 .auth-header p {
@@ -989,11 +1042,11 @@ label.required::after {
   text-decoration: none;
 }
 
-.monitor-tile.status-up { background: var(--color-up-bg); color: var(--color-up); }
-.monitor-tile.status-down { background: var(--color-down-bg); color: var(--color-down); }
-.monitor-tile.status-degraded { background: var(--color-warning-bg); color: var(--color-warning); }
-.monitor-tile.status-paused { background: var(--color-muted-bg); color: var(--color-muted); }
-.monitor-tile.status-unknown { background: var(--color-muted-bg); color: var(--color-muted); }
+.monitor-tile.status-up { background: var(--color-up-bg); color: var(--color-up-text); }
+.monitor-tile.status-down { background: var(--color-down-bg); color: var(--color-down-text); }
+.monitor-tile.status-degraded { background: var(--color-warning-bg); color: var(--color-warning-text); }
+.monitor-tile.status-paused { background: var(--color-muted-bg); color: var(--color-muted-text); }
+.monitor-tile.status-unknown { background: var(--color-muted-bg); color: var(--color-muted-text); }
 
 .monitor-tile-name {
   font-size: 0.8125rem;
@@ -1005,7 +1058,6 @@ label.required::after {
 
 .monitor-tile-type {
   font-size: 0.6875rem;
-  opacity: 0.7;
 }
 
 .alert-list-compact, .oncall-compact {
@@ -1295,7 +1347,11 @@ label.required::after {
 
 .data-table select:focus {
   border-color: var(--color-primary);
-  outline: none;
+}
+
+.data-table select:focus-visible {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 .data-table tr:last-child td {
@@ -1608,6 +1664,23 @@ label.required::after {
   border: 2px solid var(--color-surface);
 }
 
+/* Failed delivery (notification_failed). Text stays --color-text so the
+   contrast holds in every theme; the red border and dot carry the state. */
+.timeline-event-failed .timeline-dot {
+  background: var(--color-down);
+}
+
+.timeline-event-failed .timeline-pill {
+  display: inline-flex;
+  padding: 1px 8px;
+  border: 1px solid var(--color-down);
+  border-radius: 9999px;
+  background: var(--color-down-bg);
+  color: var(--color-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .timeline-action {
   font-size: 0.875rem;
   font-weight: 500;
@@ -1616,6 +1689,39 @@ label.required::after {
 .timeline-meta {
   font-size: 0.75rem;
   color: var(--color-text-muted);
+}
+
+/* Paging held by a maintenance window or a suppression reply. */
+.timeline-event-held .timeline-dot {
+  background: var(--color-text-muted);
+}
+
+/* Escalation could not page a target (notify_failed event). */
+.timeline-event-failed .timeline-dot {
+  background: var(--color-down);
+}
+
+.timeline-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-muted-bg);
+  color: var(--color-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.timeline-event-failed .timeline-pill {
+  border-color: var(--color-down);
+  background: var(--color-down-bg);
+}
+
+.timeline-note {
+  font-size: 0.8125rem;
+  color: var(--color-text);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
 }
 
 /* ─── Escalation Info ─── */
@@ -1861,6 +1967,168 @@ label.required::after {
   margin-left: 8px;
 }
 
+/* ─── Maintenance windows ─── */
+.mw-intro {
+  font-size: 0.875rem;
+  margin: -8px 0 16px;
+}
+
+.mw-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mw-item {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.mw-item-main {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.mw-item-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mw-item-title strong {
+  overflow-wrap: anywhere;
+}
+
+.mw-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 0.8125rem;
+  margin: 4px 0 0;
+}
+
+.mw-item-meta > div {
+  min-width: 0;
+}
+
+/* Labels are for screen readers; the values read clearly on their own. */
+.mw-item-meta dt {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mw-item-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mw-item-desc {
+  font-size: 0.8125rem;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.mw-item-actions {
+  flex-shrink: 0;
+}
+
+/* The window an alert timeline linked to. */
+.mw-item-linked {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
+/* Text color keeps the focus ring above 3:1 in every theme. */
+.mw-item-linked:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.mw-linked-missing {
+  margin: -8px 0 16px;
+}
+
+.mw-when {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 12px 0;
+  margin: 0 0 16px;
+  min-width: 0;
+}
+
+.mw-when legend {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text);
+  padding: 0 4px;
+}
+
+.mw-when .mw-tz {
+  margin-bottom: 12px;
+}
+
+.mw-tz-hint {
+  font-size: 0.75rem;
+  margin: 4px 0 0;
+}
+
+.mw-time-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 0 12px;
+}
+
+.mw-days {
+  border: 0;
+  padding: 0;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.mw-days legend {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.mw-days-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.mw-days .mw-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  margin-bottom: 0;
+  color: var(--color-text);
+}
+
+.mw-confirm-text {
+  font-size: 0.875rem;
+  margin: 0 0 16px;
+}
+
+.mw-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .steps-builder {
   display: flex;
   flex-direction: column;
@@ -1902,8 +2170,95 @@ label.required::after {
 
 .steps-builder-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+.step-item-header h4 {
+  margin: 0;
+}
+
+.step-targets-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.step-fields,
+.target-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0 12px;
+}
+
+/* Help text in the steps editor explains paging behavior, so it uses the
+   secondary text color for AA contrast on the step background. */
+.steps-builder .form-help {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+.step-targets-help {
+  margin: 0 0 8px;
+}
+
+/* A target paged one wait after the target above it. */
+.target-item-later {
+  border-left: 4px solid var(--color-primary);
+}
+
+.target-timing {
+  margin-bottom: 8px;
+}
+
+.step-terminal {
+  margin-top: 12px;
+}
+
+/* Plain-language timing for a step. Body color keeps it readable. */
+.step-summary {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--color-text);
+}
+
+.steps-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+/* Non-blocking caution inside forms. Text stays at body color for contrast;
+   the warning hue only marks the edge. */
+.form-warning {
+  padding: 8px 12px;
+  background: var(--color-warning-bg);
+  border-left: 4px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  margin-bottom: 4px;
+}
+
+.form-warning .btn {
+  margin-left: 4px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .api-key-display {
@@ -1965,6 +2320,10 @@ label.required::after {
   color: var(--color-text-muted);
   cursor: pointer;
   padding: 4px;
+  min-width: 24px;
+  min-height: 24px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
 }
 
 .modal-body {
@@ -2066,8 +2425,8 @@ label.required::after {
 }
 
 .field-error {
-  font-size: 0.6875rem;
-  color: var(--color-down);
+  font-size: 0.75rem;
+  color: var(--color-down-text);
   margin-top: 2px;
 }
 
@@ -2083,7 +2442,16 @@ label.required::after {
   pointer-events: none;
 }
 
+.toast-region {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   padding: 10px 16px;
   border-radius: var(--radius-sm);
   font-size: 0.8125rem;
@@ -2094,13 +2462,16 @@ label.required::after {
   pointer-events: auto;
 }
 
+/* Toast text is small (13px), so it needs 4.5:1 against its background.
+   White on the status colors (--color-up, --color-down) falls short, so
+   toasts use darker shades: #047857 is 5.5:1, #b91c1c is 6.5:1. */
 .toast-success {
-  background: var(--color-up);
+  background: #047857;
   color: #fff;
 }
 
 .toast-error {
-  background: var(--color-down);
+  background: #b91c1c;
   color: #fff;
 }
 
@@ -2110,6 +2481,70 @@ label.required::after {
   border: 1px solid #f59e0b;
   font-weight: 600;
 }
+
+.toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+  /* 24x24 minimum target (WCAG 2.5.8). */
+  min-width: 24px;
+  min-height: 24px;
+  margin: -4px -8px -4px 0;
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+}
+
+.toast-dismiss:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.toast-dismiss:focus-visible,
+.modal-close:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.modal:focus {
+  outline: none;
+}
+
+.modal:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
+/* On a phone the toasts span the width inside the 16px gutter instead of
+   overflowing a 360px column. */
+@media (max-width: 480px) {
+  .toast-container {
+    left: 16px;
+    right: 16px;
+  }
+
+  .toast {
+    max-width: none;
+  }
+}
+
+/* Headings that take focus from script (after a dialog closes or a card is
+   replaced) do not need a ring; focus there only sets the reading point. */
+h1[tabindex="-1"]:focus,
+h2[tabindex="-1"]:focus,
+h3[tabindex="-1"]:focus { outline: none; }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(20px); }
@@ -2248,6 +2683,45 @@ label.required::after {
   font-size: 0.875rem;
 }
 
+/* Promo ending or in grace: warning tokens so it follows the theme. */
+.promo-banner {
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  border-bottom: 2px solid var(--color-warning);
+  padding: 0.5rem 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+}
+.promo-banner a {
+  color: inherit;
+  text-decoration: underline;
+  font-weight: 600;
+}
+.promo-banner a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.promo-note {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin: 0 0 8px;
+}
+
+.promo-dates {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+}
+.promo-dates dt {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+.promo-dates dd {
+  margin: 0;
+}
+
 .readonly-banner {
   background: #7c2d12;
   color: #ffedd5;
@@ -2256,6 +2730,62 @@ label.required::after {
   font-size: 0.875rem;
   font-weight: 600;
   border-bottom: 1px solid #c2410c;
+}
+
+.staff-session-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 1rem;
+  font-weight: 400;
+}
+
+.staff-session-banner .staff-session-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.staff-session-banner .staff-session-value {
+  font-weight: 600;
+}
+
+.staff-session-banner.staff-session-warn {
+  background: #991b1b;
+  border-bottom-color: #fecaca;
+}
+
+.btn-end-session {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid #ffedd5;
+  border-radius: var(--radius-sm, 4px);
+  background: #ffedd5;
+  color: #7c2d12;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-end-session:hover {
+  background: #ffffff;
+}
+
+.btn-end-session:focus-visible {
+  outline: 2px solid #ffedd5;
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .sidebar-org .readonly-pill {
@@ -2275,6 +2805,193 @@ label.required::after {
   color: white;
   text-decoration: underline;
   font-weight: 600;
+}
+
+/* Billing: status after returning from Stripe Checkout. */
+.checkout-status {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.checkout-status p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+.checkout-status .btn { margin-top: 8px; }
+
+/* Native <dialog> confirmation (Billing tab Enterprise add-on). */
+.confirm-dialog {
+  border: none;
+  padding: 0;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  width: calc(100% - 32px);
+  max-width: 480px;
+  box-shadow: var(--shadow-lg);
+}
+.confirm-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.confirm-dialog .modal-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.confirm-dialog-actions { margin-top: 16px; justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 480px) {
+  .confirm-dialog-actions { flex-direction: column-reverse; align-items: stretch; }
+}
+
+/* Billing tab: plan facts as a definition list, and wrapping actions. */
+.billing-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 24px;
+  margin: 0 0 16px;
+}
+.billing-facts dt {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.billing-facts dd { margin: 0; overflow-wrap: anywhere; }
+.billing-facts dd .promo-note { margin: 4px 0 0; }
+@media (max-width: 480px) {
+  .billing-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .billing-facts dd { margin-bottom: 10px; }
+}
+.billing-actions { margin-top: 0.5rem; flex-wrap: wrap; }
+.billing-email-error { font-size: 0.8125rem; margin: 4px 0 0; }
+#billing-ent-status:focus { outline: none; }
+.checkout-status a { color: inherit; text-decoration: underline; }
+.checkout-status .spinner { flex: none; width: 20px; height: 20px; margin: 2px 0 0; }
+.checkout-status-pending { border-left-color: var(--color-primary); background: var(--color-primary-bg); }
+.checkout-status-slow { border-left-color: var(--color-warning); background: var(--color-warning-bg); }
+.checkout-status-done { border-left-color: var(--color-up); background: var(--color-up-bg); }
+@media (prefers-reduced-motion: reduce) {
+  .checkout-status .spinner { animation-duration: 2s; }
+}
+
+/* Billing: SMS and voice usage against the plan quota (bill-6). The count
+   text carries the meaning; the bar is a role=meter with aria-valuetext. */
+.usage-section { margin: 0.5rem 0 1rem; }
+.usage-section h4 { margin: 0 0 0.5rem; font-size: 0.875rem; scroll-margin-top: 16px; }
+.usage-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.usage-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 0.875rem;
+}
+.usage-label { font-weight: 500; }
+.usage-count { font-variant-numeric: tabular-nums; color: var(--color-text-secondary); }
+.usage-warn .usage-count,
+.usage-full .usage-count { color: var(--color-text); font-weight: 600; }
+.usage-bar {
+  margin-top: 6px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--color-surface);
+  /* The outline gives the meter a 3:1 boundary; amber and orange fills alone
+     are too light against a pale track (WCAG 1.4.11). */
+  border: 1px solid var(--color-text-secondary);
+  overflow: hidden;
+}
+.usage-bar-fill { display: block; height: 100%; background: var(--color-primary); }
+.usage-warn .usage-bar-fill { background: var(--color-warning); }
+.usage-full .usage-bar-fill { background: var(--color-down); }
+.usage-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.usage-warn .usage-flag { background: var(--color-warning-bg); border: 1px solid var(--color-warning); }
+.usage-full .usage-flag { background: var(--color-down-bg); border: 1px solid var(--color-down); }
+.usage-note {
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  border-left: 4px solid var(--color-down);
+  border-radius: var(--radius-sm);
+  background: var(--color-down-bg);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+}
+.usage-note-warn {
+  border-left-color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+@media (forced-colors: active) {
+  .usage-bar { border: 1px solid CanvasText; }
+  .usage-bar-fill { background: Highlight; }
+}
+.usage-section .form-help { margin-top: 8px; }
+/* Links inside running text are underlined so they do not rely on color
+   alone (WCAG 1.4.1). The note sits on a tinted background, so use text color. */
+.usage-note a { color: var(--color-text); text-decoration: underline; }
+.timeline-event-skipped .timeline-detail a { text-decoration: underline; }
+
+/* Alert timeline: a channel the engine skipped (quota reached). */
+.timeline-event-skipped .timeline-dot { background: var(--color-warning); }
+.timeline-event-skipped .timeline-pill {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--color-warning);
+  border-radius: 9999px;
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.timeline-detail {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Live updates stopped: the session was refused. Same amber as the upgrade
+   prompt (#856404 on #fef3cd is 5.9:1). */
+.live-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem 0.75rem;
+  background: #fef3cd;
+  color: #856404;
+  border-bottom: 1px solid #ffeaa7;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  text-align: center;
+}
+.live-banner a,
+.live-banner-action {
+  color: #856404;
+  font-weight: 600;
+  text-decoration: underline;
+}
+.live-banner-action {
+  background: none;
+  border: none;
+  padding: 0.25rem 0;
+  min-height: 24px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.live-banner a:focus-visible,
+.live-banner-action:focus-visible {
+  outline: 2px solid #856404;
+  outline-offset: 2px;
 }
 
 /* Upgrade prompt: informational, not an error. Amber, matches promo banner. */
@@ -2352,7 +3069,16 @@ label.required::after {
 }
 
 /* ─── Public support survey ─── */
+/* Survey-only colour tokens. The brand orange (#F19030) is 2.4:1 on white, so
+   light mode uses a darker amber for text, icons, focus rings and the submit
+   button. Every pair here is at least 4.5:1 for text and 3:1 for icons and
+   borders in light, dark and oled. */
 .survey-page {
+  --survey-accent: #b45309;
+  --survey-accent-hover: #92400e;
+  --survey-on-accent: #ffffff;
+  --survey-star-off: #64748b;
+  --survey-error-text: #b91c1c;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -2360,6 +3086,14 @@ label.required::after {
   padding: 24px;
   background: var(--color-bg);
   color: var(--color-text);
+}
+[data-theme="dark"] .survey-page,
+[data-theme="oled"] .survey-page {
+  --survey-accent: #F19030;
+  --survey-accent-hover: #f5a65b;
+  --survey-on-accent: #0f172a;
+  --survey-star-off: #94a3b8;
+  --survey-error-text: #fca5a5;
 }
 .survey-card {
   width: 100%;
@@ -2380,7 +3114,7 @@ label.required::after {
   font-family: var(--font-display);
   font-size: 1.5rem;
   font-weight: 800;
-  color: var(--color-primary);
+  color: var(--survey-accent);
 }
 .survey-badge {
   font-size: 0.6875rem;
@@ -2389,7 +3123,7 @@ label.required::after {
   padding: 2px 8px;
   border-radius: 9999px;
   background: var(--color-primary-bg);
-  color: var(--color-primary);
+  color: var(--survey-accent);
   font-weight: 700;
 }
 .survey-title {
@@ -2402,29 +3136,132 @@ label.required::after {
   font-size: 0.9375rem;
   margin: 0 0 20px;
 }
+.survey-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 8px;
+  min-width: 0;
+}
+.survey-hint {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  margin: 0 0 8px;
+}
+.survey-optional {
+  font-weight: 400;
+}
+.survey-count {
+  text-align: right;
+  margin-top: 4px;
+}
+.survey-notice {
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  margin: 12px 0 0;
+  min-height: 1.4em;
+}
+.survey-expiry {
+  text-align: center;
+  margin: 12px 0 0;
+}
+.survey-subject strong {
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.survey-card a {
+  color: var(--survey-accent);
+  text-decoration: underline;
+}
+.survey-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .survey-stars {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(44px, 1fr));
   gap: 8px;
   margin: 8px 0;
-  flex-wrap: wrap;
 }
 .survey-star {
-  font-size: 2rem;
-  line-height: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
   background: none;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--survey-star-off);
   border-radius: 8px;
-  color: var(--color-text-muted);
-  padding: 6px 10px;
+  color: var(--survey-star-off);
+  padding: 6px 4px;
+  cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
-button.survey-star {
-  cursor: pointer;
+.survey-star-icon {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+.survey-star-num {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.survey-star:hover {
+  border-color: var(--survey-accent);
+}
+/* Filled stars switch glyph (outline to solid) as well as colour. The chosen
+   star also gets a thicker border and an underlined number, so the selection
+   does not depend on colour. */
+.survey-star.filled {
+  color: var(--survey-accent);
 }
 .survey-star.selected {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
+  border-color: var(--survey-accent);
+  box-shadow: inset 0 0 0 1px var(--survey-accent);
   background: var(--color-primary-bg);
+}
+.survey-star.selected .survey-star-num {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+/* Ring the star only for keyboard focus, so a mouse click does not leave a
+   ring behind. Browsers without :has() fall back to :focus-within. */
+.survey-star:focus-within {
+  outline: 3px solid var(--survey-accent);
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  .survey-star:focus-within {
+    outline-color: Highlight;
+  }
+}
+@supports selector(:has(:focus-visible)) {
+  .survey-star:focus-within {
+    outline: none;
+  }
+  .survey-star:has(input:focus-visible) {
+    outline: 3px solid var(--survey-accent);
+    outline-offset: 2px;
+  }
+}
+@media (forced-colors: active) {
+  .survey-star.selected {
+    border: 3px solid Highlight;
+  }
+  .survey-star:has(input:focus-visible) {
+    outline: 3px solid Highlight;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .survey-star { transition: none; }
 }
 .survey-rating-label {
   font-size: 0.875rem;
@@ -2443,7 +3280,7 @@ button.survey-star {
   width: 100%;
   box-sizing: border-box;
   background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--survey-star-off);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   padding: 10px 12px;
@@ -2451,11 +3288,15 @@ button.survey-star {
   font-size: 0.9375rem;
   resize: vertical;
 }
+.survey-card textarea:focus-visible {
+  outline: 3px solid var(--survey-accent);
+  outline-offset: 1px;
+}
 .survey-submit {
   width: 100%;
   margin-top: 16px;
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--survey-accent);
+  color: var(--survey-on-accent);
   border: 0;
   border-radius: var(--radius-sm);
   padding: 12px 16px;
@@ -2464,7 +3305,11 @@ button.survey-star {
   cursor: pointer;
 }
 .survey-submit:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+  background: var(--survey-accent-hover);
+}
+.survey-submit:focus-visible {
+  outline: 3px solid var(--survey-accent);
+  outline-offset: 2px;
 }
 .survey-submit:disabled {
   opacity: 0.5;
@@ -2472,8 +3317,8 @@ button.survey-star {
 }
 .survey-error {
   background: var(--color-down-bg);
-  color: var(--color-down);
-  border: 1px solid var(--color-down);
+  color: var(--survey-error-text);
+  border: 1px solid var(--survey-error-text);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   font-size: 0.875rem;
@@ -2482,12 +3327,460 @@ button.survey-star {
 .survey-comment {
   font-style: italic;
   color: var(--color-text-secondary);
-  border-left: 3px solid var(--color-primary);
+  border-left: 3px solid var(--survey-accent);
   padding-left: 12px;
 }
 .survey-footer {
   margin-top: 24px;
   font-size: 0.75rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-align: center;
+}
+@media (max-width: 480px) {
+  .survey-page {
+    padding: 16px;
+    align-items: flex-start;
+  }
+  .survey-card {
+    padding: 20px 16px;
+  }
+  .survey-star-icon {
+    font-size: 1.5rem;
+  }
+}
+
+/* Account tab: unverified email notice. Text stays at body color for contrast;
+   the warning color is only used for the border. */
+.email-verify-notice {
+  border: 1px solid var(--color-warning);
+  border-left-width: 4px;
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  border-radius: 6px;
+  padding: 12px;
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+.checkout-status .checkout-status-note { font-weight: 600; color: var(--color-text); }
+
+/* Visually hidden text that screen readers still announce. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Explains missing write controls on a settings tab (viewers, non-admins on Members). */
+.settings-role-note {
+  padding: 10px 12px;
+  margin: 0 0 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+
+/* Shown in place of a settings tab the role cannot open. */
+.settings-denied {
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-primary);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.settings-denied h3 {
+  margin: 0 0 8px;
+}
+
+.settings-denied p {
+  margin: 0 0 12px;
+}
+
+.settings-denied .btn-group {
+  flex-wrap: wrap;
+}
+
+/* Explains why viewers see no create, edit or delete controls on a page. */
+.view-only-note {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-muted-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+
+/* What each org role can do, under the Members table. */
+.role-legend {
+  margin: 16px 0 0;
+  display: grid;
+  gap: 6px;
+  font-size: 0.875rem;
+}
+
+.role-legend > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.role-legend dt {
+  font-weight: 600;
+  min-width: 4.5rem;
+}
+
+.role-legend dd {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+/* ─── API keys (apikey-1, apikey-2, org-5) ─── */
+/* Status and error text use darker shades than the shared badge tokens so
+   small text keeps 4.5:1 contrast in every theme. */
+.api-keys-tab,
+.member-remove-form {
+  --apikey-danger-text: #b91c1c;
+  --apikey-warn-text: #92400e;
+  --apikey-ok-text: #334155;
+}
+[data-theme="dark"] .api-keys-tab, [data-theme="dark"] .member-remove-form,
+[data-theme="oled"] .api-keys-tab, [data-theme="oled"] .member-remove-form {
+  --apikey-danger-text: #fca5a5;
+  --apikey-warn-text: #fcd34d;
+  --apikey-ok-text: #cbd5e1;
+}
+.api-keys-tab .field-error,
+.member-remove-form .field-error { color: var(--apikey-danger-text); font-size: 0.8125rem; }
+.api-keys-tab .form-error,
+.member-remove-form .form-error { color: var(--apikey-danger-text); }
+.member-remove-form .form-error p { margin: 0 0 6px; }
+.api-keys-intro { margin: 0 0 12px; font-size: 0.875rem; }
+.api-keys-legacy-note,
+.api-key-warning {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+.api-key-warning { margin: 8px 0 0; }
+.api-keys-empty {
+  padding: 24px 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.api-keys-empty p { margin: 0 0 4px; }
+.api-key-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.api-key-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.api-key-item.is-expired { background: var(--color-muted-bg); }
+.api-key-main { min-width: 0; flex: 1; }
+.api-key-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.api-key-title strong { font-size: 0.9375rem; overflow-wrap: anywhere; }
+.api-key-prefix { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-secondary); }
+.api-key-item .badge { text-transform: none; letter-spacing: 0; }
+.api-key-item .badge-down { color: var(--apikey-danger-text); }
+.api-key-item .badge-warning { color: var(--apikey-warn-text); }
+.api-key-item .badge-muted,
+.api-key-item .badge-info { color: var(--apikey-ok-text); }
+.api-key-facts {
+  margin: 8px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px 16px;
+  font-size: 0.8125rem;
+}
+.api-key-facts dt { color: var(--color-text-secondary); font-weight: 500; }
+.api-key-facts dd { margin: 0; overflow-wrap: anywhere; }
+.api-key-fieldset { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.api-key-fieldset legend {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+  padding: 0;
+}
+.member-remove-form .api-key-fieldset legend { color: var(--color-text); font-size: 0.875rem; font-weight: 600; }
+.api-key-choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.api-key-choice:has(input:checked) { border-color: var(--color-primary); background: var(--color-primary-bg); }
+.api-key-choice input { width: auto; margin-top: 3px; flex-shrink: 0; }
+.api-key-choice > span { display: flex; flex-direction: column; gap: 2px; font-size: 0.875rem; color: var(--color-text); }
+.api-key-choice-help { font-size: 0.8125rem; color: var(--color-text-secondary); font-weight: 400; }
+.api-key-bulk { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.api-key-resource-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.api-key-resource {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+}
+.api-key-resource + .api-key-resource { border-top: 1px solid var(--color-border); }
+.api-key-resource-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.api-key-resource-name { font-size: 0.875rem; font-weight: 500; color: var(--color-text); }
+.api-key-resource-actions { display: flex; gap: 12px; flex-shrink: 0; align-items: center; }
+.api-key-resource-actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.api-key-resource-actions input { width: auto; }
+.api-key-readonly-tag { font-size: 0.75rem; color: var(--color-text-secondary); min-width: 3.5rem; }
+.api-key-date { margin-top: 8px; }
+.api-key-form .form-help,
+.api-keys-tab .form-help { font-size: 0.8125rem; color: var(--color-text-secondary); }
+.modal-actions { margin-top: 16px; flex-wrap: wrap; }
+.remove-member-keys { margin: 0 0 8px; padding-left: 18px; font-size: 0.875rem; }
+.remove-member-keys code { font-size: 0.75rem; }
+@media (max-width: 480px) {
+  .api-key-item { flex-direction: column; }
+  .api-key-resource { flex-direction: column; align-items: flex-start; }
+}
+.api-key-discard {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+.api-key-discard p { margin: 0; }
+.api-key-discard .modal-actions { margin-top: 10px; }
+@media (max-width: 480px) {
+  .api-key-item > .btn { align-self: flex-start; min-height: 32px; }
+  .api-key-resource-actions { gap: 16px; }
+  .api-key-resource-actions label { min-height: 32px; }
+}
+
+/* Member invites (org-6) */
+.invite-section { margin-top: 24px; }
+.invite-section h4 { font-size: 0.9375rem; margin: 0 0 8px; }
+.invite-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.invite-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
+.invite-item + .invite-item { border-top: 1px solid var(--color-border); }
+.invite-item-text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.invite-email { font-weight: 500; color: var(--color-text); overflow-wrap: anywhere; }
+.invite-meta { font-size: 0.8125rem; color: var(--color-text-secondary); }
+.invite-actions { flex-shrink: 0; }
+.invite-link { font-family: var(--font-mono); font-size: 0.8125rem; }
+.invite-form .form-help, .invite-result .form-help { font-size: 0.8125rem; color: var(--color-text-secondary); }
+.accept-invite .auth-message { color: var(--color-text-secondary); font-size: 0.875rem; margin: 0 0 16px; }
+.accept-invite-title { font-family: var(--font-display); font-size: 1.25rem; margin-top: 8px; }
+.accept-invite-title:focus { outline: none; }
+.accept-invite-title:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.accept-invite .form-error p, .accept-invite p.form-error { margin: 4px 0 0; }
+.invite-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.invite-expiry { font-size: 0.8125rem; color: var(--color-text-secondary); }
+.invite-seat-line {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-muted-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+.role-legend-title { font-size: 0.9375rem; margin: 24px 0 0; }
+.member-email { overflow-wrap: anywhere; }
+/* The shared table select drops its outline on focus; the orange border
+   alone is below 3:1 against the surface, so draw a text-colored ring. */
+.members-table select:focus-visible { outline: 2px solid var(--color-text); outline-offset: 1px; }
+
+/* Members table: stack each member into a card on narrow screens so the
+   role select and actions stay on screen instead of in a sideways scroll.
+   The explicit ARIA table roles in members.jsx keep table semantics when
+   display changes. */
+@media (max-width: 640px) {
+  .data-table.members-table,
+  .members-table tbody,
+  .members-table tr,
+  .members-table td { display: block; width: 100%; }
+  .data-table.members-table { overflow-x: visible; }
+  .members-table thead {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  .members-table tr {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    margin-bottom: 8px;
+  }
+  .members-table tr:last-child td, .members-table td { border: 0; padding: 4px 0; }
+  .members-table td[data-label]:not([data-label=""])::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+  .members-table select { width: 100%; min-height: 36px; }
+  .members-table .member-actions:empty { display: none; }
+  .members-table .member-actions .btn { min-height: 32px; }
+}
+@media (max-width: 480px) {
+  .invite-item { flex-direction: column; align-items: stretch; }
+  .invite-actions .btn { min-height: 32px; }
+}
+
+/* Members, Teams and ownership transfer (ux-3, org-3, ux-2). */
+.form-warning {
+  padding: 8px 12px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+}
+.members-search { max-width: 360px; margin-bottom: 4px; }
+.members-search input { width: 100%; }
+/* Member list pager wraps on narrow screens instead of overflowing. */
+.settings-list .checks-pagination { flex-wrap: wrap; gap: 8px; }
+
+/* ─── Personal contact methods and notification rules ─── */
+.cm-intro {
+  font-size: 0.875rem;
+  margin: -8px 0 16px;
+}
+
+.cm-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.cm-item {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cm-item-main {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.cm-item-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.cm-item-title strong,
+.cm-item-dest {
+  overflow-wrap: anywhere;
+}
+
+.cm-item-dest {
+  font-size: 0.8125rem;
+  margin: 4px 0 0;
+}
+
+.cm-skip {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.cm-item-actions {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.cm-coverage {
+  margin-bottom: 12px;
+}
+
+.cm-note {
+  font-size: 0.8125rem;
+  margin: 0 0 12px;
+}
+
+.cm-subheading {
+  font-size: 0.875rem;
+  margin: 16px 0 8px;
+}
+
+/* Inline result of a failed Ack/Resolve on the alert detail page. */
+.alert-action-notice {
+  margin-bottom: 1rem;
+}
+
+.alert-action-notice:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.alert-action-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.alert-action-notice-actions .btn {
+  margin-left: 0;
+}
+
+/* Self-hosted note in settings. Quiet by design: plain text, no color accent. */
+.hosted-note {
+  margin-top: 32px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.hosted-note p {
+  margin: 0;
+}
+
+.hosted-note strong {
+  color: var(--color-text);
+}
+
+.hosted-note a {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.hosted-note a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
 }

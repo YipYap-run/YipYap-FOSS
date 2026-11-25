@@ -75,7 +75,13 @@ func (p *Pushover) Send(ctx context.Context, job domain.NotificationJob) (string
 	form.Set("token", cfg.APIToken)
 	form.Set("user", cfg.UserKey)
 	form.Set("title", "YipYap: "+job.MonitorName)
-	form.Set("message", job.Message)
+	// Pushover carries one supplementary link. The ack link wins because it
+	// is the action on call needs; the runbook then goes in the text.
+	message := job.Message
+	if job.AckURL != "" && job.RunbookURL != "" {
+		message += "\n\nRunbook: " + job.RunbookURL
+	}
+	form.Set("message", message)
 	form.Set("priority", priority)
 
 	if cfg.Sound != "" {
@@ -84,12 +90,12 @@ func (p *Pushover) Send(ctx context.Context, job domain.NotificationJob) (string
 	if cfg.Device != "" {
 		form.Set("device", cfg.Device)
 	}
-	if job.RunbookURL != "" {
+	if job.AckURL != "" {
+		form.Set("url", job.AckURL)
+		form.Set("url_title", "Acknowledge")
+	} else if job.RunbookURL != "" {
 		form.Set("url", job.RunbookURL)
 		form.Set("url_title", "Runbook")
-	} else if job.AckURL != "" {
-		form.Set("url", job.AckURL)
-		form.Set("url_title", "View in YipYap")
 	}
 
 	// Emergency priority requires retry and expire parameters.

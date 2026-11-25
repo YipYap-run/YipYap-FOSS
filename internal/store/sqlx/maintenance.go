@@ -22,7 +22,7 @@ func NewMaintenanceWindowStore(q Queryable, d Dialect) *MaintenanceWindowStore {
 	return &MaintenanceWindowStore{q: q, d: d}
 }
 
-const mwCols = `id, org_id, monitor_id, name, description, start_at, end_at, public, suppress_alerts, recurrence_type, recurrence_end_at, days_of_week, day_of_month, created_at, created_by`
+const mwCols = `id, org_id, monitor_id, name, description, start_at, end_at, public, suppress_alerts, recurrence_type, recurrence_end_at, days_of_week, day_of_month, timezone, created_at, created_by`
 
 func (s *MaintenanceWindowStore) Create(ctx context.Context, mw *domain.MaintenanceWindow) error {
 	if mw.RecurrenceType == "" {
@@ -31,14 +31,17 @@ func (s *MaintenanceWindowStore) Create(ctx context.Context, mw *domain.Maintena
 	if mw.DaysOfWeek == "" {
 		mw.DaysOfWeek = "[]"
 	}
+	if mw.Timezone == "" {
+		mw.Timezone = domain.DefaultMaintenanceTimezone
+	}
 	_, err := s.q.ExecContext(ctx,
 		`INSERT INTO maintenance_windows (`+mwCols+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		mw.ID, mw.OrgID, mw.MonitorID, mw.Name, mw.Description,
 		s.d.TimeArg(mw.StartAt), s.d.TimeArg(mw.EndAt),
 		s.d.BoolArg(mw.Public), s.d.BoolArg(mw.SuppressAlerts),
 		mw.RecurrenceType, s.d.OptionalTimeArg(mw.RecurrenceEndAt), mw.DaysOfWeek, mw.DayOfMonth,
-		s.d.TimeArg(mw.CreatedAt), mw.CreatedBy)
+		mw.Timezone, s.d.TimeArg(mw.CreatedAt), mw.CreatedBy)
 	return err
 }
 
@@ -61,18 +64,23 @@ func (s *MaintenanceWindowStore) ListByOrg(ctx context.Context, orgID string, pa
 	return s.scanMWRows(rows)
 }
 
+// ListActiveByMonitor returns the windows active at `at` for monitorID:
+// windows on that monitor plus org-wide windows (empty monitor_id). Only
+// windows owned by the monitor's own org count, so a window another org
+// created can never suppress its alerts.
 func (s *MaintenanceWindowStore) ListActiveByMonitor(ctx context.Context, monitorID string, at time.Time) ([]*domain.MaintenanceWindow, error) {
 	atArg := s.d.TimeArg(at)
 	rows, err := s.q.QueryContext(ctx,
 		`SELECT `+mwCols+` FROM maintenance_windows
-		 WHERE monitor_id = ?
+		 WHERE (monitor_id = ? OR monitor_id = '')
+		   AND org_id = (SELECT m.org_id FROM monitors m WHERE m.id = ?)
 		   AND suppress_alerts = ?
 		   AND (
 		     (recurrence_type = 'none' AND start_at <= ? AND end_at >= ?)
 		     OR
 		     (recurrence_type != 'none' AND start_at <= ? AND (recurrence_end_at IS NULL OR recurrence_end_at >= ?))
 		   )`,
-		monitorID, s.d.BoolArg(true), atArg, atArg, atArg, atArg)
+		monitorID, monitorID, s.d.BoolArg(true), atArg, atArg, atArg, atArg)
 	if err != nil {
 		return nil, err
 	}
@@ -115,14 +123,17 @@ func (s *MaintenanceWindowStore) Update(ctx context.Context, mw *domain.Maintena
 	if mw.DaysOfWeek == "" {
 		mw.DaysOfWeek = "[]"
 	}
+	if mw.Timezone == "" {
+		mw.Timezone = domain.DefaultMaintenanceTimezone
+	}
 	res, err := s.q.ExecContext(ctx,
 		`UPDATE maintenance_windows SET name = ?, description = ?, start_at = ?, end_at = ?, public = ?, suppress_alerts = ?, monitor_id = ?,
-		 recurrence_type = ?, recurrence_end_at = ?, days_of_week = ?, day_of_month = ?
+		 recurrence_type = ?, recurrence_end_at = ?, days_of_week = ?, day_of_month = ?, timezone = ?
 		 WHERE id = ?`,
 		mw.Name, mw.Description,
 		s.d.TimeArg(mw.StartAt), s.d.TimeArg(mw.EndAt),
 		s.d.BoolArg(mw.Public), s.d.BoolArg(mw.SuppressAlerts), mw.MonitorID,
-		mw.RecurrenceType, s.d.OptionalTimeArg(mw.RecurrenceEndAt), mw.DaysOfWeek, mw.DayOfMonth, mw.ID)
+		mw.RecurrenceType, s.d.OptionalTimeArg(mw.RecurrenceEndAt), mw.DaysOfWeek, mw.DayOfMonth, mw.Timezone, mw.ID)
 	if err != nil {
 		return err
 	}
@@ -144,7 +155,7 @@ func (s *MaintenanceWindowStore) scanMW(row *sql.Row) (*domain.MaintenanceWindow
 	if err := row.Scan(&mw.ID, &mw.OrgID, &mw.MonitorID, &mw.Name, &mw.Description,
 		&startAt, &endAt, &pub, &suppress,
 		&mw.RecurrenceType, &recEnd, &mw.DaysOfWeek, &mw.DayOfMonth,
-		&createdAt, &mw.CreatedBy); err != nil {
+		&mw.Timezone, &createdAt, &mw.CreatedBy); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("maintenance window not found")
 		}
@@ -169,7 +180,7 @@ func (s *MaintenanceWindowStore) scanMWRows(rows *sql.Rows) ([]*domain.Maintenan
 		if err := rows.Scan(&mw.ID, &mw.OrgID, &mw.MonitorID, &mw.Name, &mw.Description,
 			&startAt, &endAt, &pub, &suppress,
 			&mw.RecurrenceType, &recEnd, &mw.DaysOfWeek, &mw.DayOfMonth,
-			&createdAt, &mw.CreatedBy); err != nil {
+			&mw.Timezone, &createdAt, &mw.CreatedBy); err != nil {
 			return nil, err
 		}
 		mw.StartAt = startAt.T

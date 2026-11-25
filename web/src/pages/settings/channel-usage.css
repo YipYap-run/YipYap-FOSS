@@ -1,0 +1,87 @@
+/* Channel usage by escalation policies (settings > channels) and the
+   step warning (settings > escalation). Text keeps 4.5:1 in every theme. */
+.channel-usage-line {
+  display: block;
+  padding-left: 16px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.channel-usage-details summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px; /* WCAG 2.5.8 target size */
+  cursor: pointer;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.channel-usage-details summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.channel-usage-details[open] summary { margin-bottom: 2px; }
+
+.channel-usage-list {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+.channel-usage-list li { margin: 2px 0; }
+.channel-usage-list a {
+  color: var(--color-text);
+  text-decoration: underline;
+  display: inline-block;
+  min-height: 24px;
+  line-height: 24px;
+}
+.channel-usage-steps { color: var(--color-text-secondary); }
+
+.channel-delete-blocked,
+.channel-confirm,
+.step-channel-warning {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning);
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.channel-confirm-danger {
+  border-color: var(--color-down);
+  background: var(--color-down-bg);
+}
+
+.channel-delete-blocked p,
+.channel-confirm p { margin: 0 0 6px; }
+.channel-delete-blocked .channel-usage-list { margin-bottom: 8px; }
+.channel-delete-blocked-title,
+.channel-confirm-title { font-weight: 700; }
+.channel-delete-blocked-title:focus,
+.channel-confirm-title:focus { outline: none; }
+.channel-delete-blocked-dirty { font-style: italic; }
+
+.channel-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.channel-confirm-actions .btn { min-height: 32px; }
+
+.step-channel-warning { margin: 0 0 8px; }
+
+.channel-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}

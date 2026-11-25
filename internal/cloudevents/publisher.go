@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	ce "github.com/cloudevents/sdk-go/v2"
@@ -27,6 +28,22 @@ const subjectPrefix = "events.cloudevents.out."
 // variant (e.g. "events.cloudevents.out.org-1.>") to subscribe.
 func SubjectFor(orgID, eventType string) string {
 	return subjectPrefix + orgID + "." + eventType
+}
+
+// fanoutSubjectPrefix is the root of the fan-out copy of the egress tree.
+// On JetStream the "out" tree lands in the CLOUDEVENTS work-queue stream,
+// which the notifier's cloudevent-router owns: a work-queue stream allows
+// only one consumer per subject, so poll and stream API clients cannot read
+// it. Every event is therefore also published under this prefix, which the
+// Limits-retention CLOUDEVENTS_FANOUT stream holds, so each client consumer
+// sees every event for its org. Must match bus.CloudEventsFanoutSubjects.
+const fanoutSubjectPrefix = "events.cloudevents.fanout."
+
+// FanoutSubjectFor returns the fan-out subject for an org's CloudEvent of
+// the given type. Poll and stream consumers subscribe to
+// FanoutSubjectFor(orgID, ">").
+func FanoutSubjectFor(orgID, eventType string) string {
+	return fanoutSubjectPrefix + orgID + "." + eventType
 }
 
 // Publisher wraps a bus.Bus with CloudEvents-aware semantics: subject
@@ -71,6 +88,12 @@ var tracer = otel.Tracer("github.com/YipYap-run/YipYap-FOSS/internal/cloudevents
 // (application/cloudevents+json), and publishes it durably onto the bus.
 // The dedup msgID is the CloudEvent's ID, so redelivery of the same event
 // is a no-op on JetStream-backed buses.
+//
+// The event is written twice: to the egress subject the cloudevent-router
+// consumes, then to the fan-out subject poll and stream clients consume.
+// Dedup is per stream and keyed on the event ID. A failed fan-out write is
+// logged and counted (result "fanout_failure") but not returned, since the
+// router copy already went out.
 func (p *Publisher) Publish(ctx context.Context, orgID string, ev ce.Event) error {
 	start := time.Now()
 
@@ -102,6 +125,16 @@ func (p *Publisher) Publish(ctx context.Context, orgID string, ev ce.Event) erro
 		span.RecordError(err)
 		p.recordEmit(ctx, ev.Type(), "failure", start)
 		return err
+	}
+	if err := p.bus.PublishDurable(ctx, FanoutSubjectFor(orgID, ev.Type()), payload, ev.ID()); err != nil {
+		// The router already has the event, so webhook and sink delivery
+		// go ahead; only poll/stream clients miss it. The fan-out stream
+		// is optional on JetStream, so this is not an emit failure.
+		span.RecordError(err)
+		slog.Warn("cloudevents: fan-out publish failed; poll/stream clients miss this event",
+			"type", ev.Type(), "id", ev.ID(), "org_id", orgID, "error", err)
+		p.recordEmit(ctx, ev.Type(), "fanout_failure", start)
+		return nil
 	}
 	p.recordEmit(ctx, ev.Type(), "success", start)
 	return nil

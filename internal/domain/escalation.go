@@ -1,11 +1,12 @@
 package domain
 
 type EscalationPolicy struct {
-	ID       string `json:"id"`
-	OrgID    string `json:"org_id"`
-	Name     string `json:"name"`
-	Loop     bool   `json:"loop"`
-	MaxLoops *int   `json:"max_loops,omitempty"`
+	ID          string `json:"id"`
+	OrgID       string `json:"org_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Loop        bool   `json:"loop"`
+	MaxLoops    *int   `json:"max_loops,omitempty"`
 }
 
 type EscalationStep struct {
@@ -35,4 +36,12 @@ type StepTarget struct {
 	TargetID     string     `json:"target_id,omitempty"`
 	ChannelID    string     `json:"channel_id"`
 	Simultaneous bool       `json:"simultaneous"`
+}
+
+// ChannelPolicyRef names an escalation policy whose steps send through a
+// notification channel. Steps lists the 1-based step numbers that use it.
+type ChannelPolicyRef struct {
+	PolicyID   string `json:"policy_id"`
+	PolicyName string `json:"policy_name"`
+	Steps      []int  `json:"steps"`
 }

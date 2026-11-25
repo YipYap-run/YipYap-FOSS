@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { post } from '../../api/client';
+import { currentUser } from '../../state/auth';
 
 export function ConfirmDeletePage() {
   const [status, setStatus] = useState('idle');
@@ -17,12 +18,22 @@ export function ConfirmDeletePage() {
     setStatus('loading');
     post('/auth/confirm-delete', { token })
       .then(() => {
+        // The server signed this browser out; drop the cached user too.
+        currentUser.value = null;
         setStatus('success');
-        setMessage('Your account has been disabled. It will be permanently deleted in 96 hours. If you change your mind, log in to recover your account.');
+        setMessage('Your account is disabled and will be deleted in 4 days. To keep it, sign in during that time and we will email you a link to restore it.');
       })
       .catch(err => {
         setStatus('error');
-        setMessage(err.message || 'Invalid or expired confirmation link.');
+        if (err?.status === 404 || err?.status === 410) {
+          setMessage('This account was already deleted.');
+        } else if (err?.status === 409) {
+          setMessage('You own this organization and it still has other members. Transfer ownership in Settings, then request deletion again.');
+        } else if (err?.status === 401) {
+          setMessage('This link has expired (links work for 1 hour), was already used, or your email or password changed since it was sent. Request deletion again from Settings.');
+        } else {
+          setMessage(err.message || 'Could not confirm the deletion. Try again.');
+        }
       });
   }
 
@@ -35,21 +46,21 @@ export function ConfirmDeletePage() {
         </div>
         {status === 'idle' && (
           <>
-            <p style="color: var(--color-text-secondary); font-size: 0.875rem">Click below to confirm account deletion. Your account will be disabled and permanently deleted after 96 hours.</p>
-            <button class="btn btn-primary" style="background: var(--color-down); border-color: var(--color-down); width: 100%" onClick={handleConfirm}>
+            <p style="color: var(--color-text-secondary); font-size: 0.875rem">Your account will be disabled right away and deleted after 4 days. To keep it, sign in during that time and we will email you a link to restore it.</p>
+            <button type="button" class="btn btn-primary" style="background: var(--color-down); border-color: var(--color-down); width: 100%" onClick={handleConfirm}>
               Confirm Deletion
             </button>
           </>
         )}
-        {status === 'loading' && <div class="spinner" />}
+        {status === 'loading' && <div class="spinner" role="status" aria-label="Confirming" />}
         {status === 'success' && (
-          <p style="color: var(--color-text-secondary); font-size: 0.875rem">{message}</p>
+          <p role="status" style="color: var(--color-text-secondary); font-size: 0.875rem">{message}</p>
         )}
         {status === 'error' && (
-          <div class="form-error">{message}</div>
+          <div class="form-error" role="alert">{message}</div>
         )}
         <p class="auth-footer" style="margin-top: 16px">
-          <a href="/login">Back to login</a>
+          <a href="/login">Back to sign in</a>
         </p>
       </div>
     </div>

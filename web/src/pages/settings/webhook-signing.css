@@ -1,0 +1,189 @@
+/* Webhook signing secret (create reveal, edit section, list tag). */
+
+:root {
+  --webhook-signing-warn-fg: #92400e;
+  --webhook-signing-warn-border: #f59e0b;
+  --webhook-signing-ok-fg: #065f46;
+  --webhook-signing-ok-border: #10b981;
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --webhook-signing-warn-fg: #fcd34d;
+  --webhook-signing-warn-border: #b45309;
+  --webhook-signing-ok-fg: #6ee7b7;
+  --webhook-signing-ok-border: #047857;
+}
+
+/* Text colors are darker (light mode) or lighter (dark modes) than the
+   stock status colors so the pills stay above 4.5:1 on their backgrounds. */
+.label-tag.tag-unsigned {
+  background: var(--color-warning-bg);
+  color: var(--webhook-signing-warn-fg);
+  border: 1px solid var(--webhook-signing-warn-border);
+  font-weight: 600;
+}
+
+.label-tag.tag-signed {
+  background: var(--color-up-bg);
+  color: var(--webhook-signing-ok-fg);
+  border: 1px solid var(--webhook-signing-ok-border);
+  font-weight: 600;
+}
+
+.webhook-signing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.webhook-signing.form-group {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.webhook-signing-reveal {
+  gap: 10px;
+}
+
+.webhook-signing-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.webhook-signing-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.webhook-signing-lead,
+.webhook-signing-text,
+.webhook-signing-confirm p {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.webhook-signing-text {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.webhook-signing code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.webhook-signing-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.webhook-signing-value {
+  flex: 1 1 24ch;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+/* Keep buttons at least 24px tall (WCAG 2.2 target size). */
+.webhook-signing .btn {
+  min-height: 32px;
+}
+
+.webhook-signing-value:focus-visible,
+.webhook-signing .btn:focus-visible,
+.webhook-signing-help summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.webhook-signing-status {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.webhook-signing-status:empty {
+  display: none;
+}
+
+.webhook-signing-warn,
+.webhook-signing-confirm {
+  padding: 10px 12px;
+  border: 1px solid var(--webhook-signing-warn-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.webhook-signing-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.webhook-signing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.webhook-signing-help {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.webhook-signing-help summary {
+  cursor: pointer;
+  color: var(--color-text);
+  font-weight: 500;
+  padding: 4px 0;
+}
+
+.webhook-signing-help ol {
+  margin: 6px 0 6px 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.5;
+}
+
+.webhook-signing-help p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.webhook-signing-note {
+  margin-top: -8px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 480px) {
+  .webhook-signing-row .btn,
+  .webhook-signing-actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* Also defined in phone-verify.css; repeated so this file stands alone. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

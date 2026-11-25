@@ -54,6 +54,7 @@ func streamDialFilters(t *testing.T, h *pollTestHarness, bearer string, filters 
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
+	req.Header.Set("X-YipYap-Source-ID", "stream-test-"+ulid.Make().String())
 	// Use a client with no timeout, the stream is long-lived.
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -306,6 +307,11 @@ func TestStream_SurvivesWriteTimeout(t *testing.T) {
 		t.Fatalf("generate api key: %v", err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
+	// The key's creator must exist: the CloudEvents routes run the
+	// full authenticated chain, which loads the creator (auth-16).
+	if err := s.Users().Create(ctx, &domain.User{ID: "user-wt", OrgID: org.ID, Email: "user-wt" + "@example.com", PasswordHash: "x", Role: domain.RoleOwner, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create key creator: %v", err)
+	}
 	apiKey := &domain.APIKey{
 		ID:        "key-wt-" + ulid.Make().String(),
 		OrgID:     org.ID,
@@ -355,6 +361,7 @@ func TestStream_SurvivesWriteTimeout(t *testing.T) {
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+plaintext)
+	req.Header.Set("X-YipYap-Source-ID", "write-timeout-stream")
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {

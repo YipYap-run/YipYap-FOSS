@@ -1,25 +1,10 @@
 import { signal } from '@preact/signals';
 
-// True when the current session is a read-only staff impersonation.
-export const staffReadonly = signal(false);
+// Set when the server rejects a request with code password_change_required
+// (an admin reset this user's password). The app then shows only the
+// change-password screen until the user picks a new password.
+export const passwordChangeRequired = signal(false);
 
-// Supplied by the SaaS session endpoint; the FOSS edition never sets it.
-export const readonlyMessage = signal('This is a read-only session.');
-
-export const READONLY_TOAST_EVENT = 'yipyap:toast';
-
-export function setStaffReadonly(value) {
-  staffReadonly.value = !!value;
-}
-
-export function setReadonlyMessage(message) {
-  if (message) readonlyMessage.value = message;
-}
-
-// Show the read-only warning through the global toast host.
-export function notifyReadonly(message) {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent(READONLY_TOAST_EVENT, {
-    detail: { message: message || readonlyMessage.value, type: 'warning' },
-  }));
+export function setPasswordChangeRequired(value) {
+  passwordChangeRequired.value = !!value;
 }

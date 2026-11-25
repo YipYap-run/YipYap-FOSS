@@ -67,7 +67,7 @@ func TestPushover_Send(t *testing.T) {
 		"sound":     "cosmic",
 		"device":    "iphone",
 		"url":       "https://example.com/ack/a1",
-		"url_title": "View in YipYap",
+		"url_title": "Acknowledge",
 	}
 	for k, want := range checks {
 		if got := gotForm[k]; got != want {
@@ -176,5 +176,35 @@ func TestPushover_SeverityMapping(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("severityToPriority(%q) = %q, want %q", tt.severity, got, tt.want)
 		}
+	}
+}
+
+// With both links, the ack link is the button and the runbook moves into
+// the message text.
+func TestPushover_AckLinkWinsOverRunbook(t *testing.T) {
+	var gotForm map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		gotForm = map[string]string{}
+		for k := range r.PostForm {
+			gotForm[k] = r.PostForm.Get(k)
+		}
+		_ = json.NewEncoder(w).Encode(pushoverResponse{Status: 1, Request: "r"})
+	}))
+	defer srv.Close()
+	p := NewPushover(PushoverConfig{APIToken: "t", UserKey: "u"}, nil)
+	p.apiURL = srv.URL
+	_, err := p.Send(context.Background(), domain.NotificationJob{
+		MonitorName: "api", Severity: "warning", Message: "down",
+		AckURL: "https://example.com/ack/tok", RunbookURL: "https://wiki.example.com/rb",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotForm["url"] != "https://example.com/ack/tok" || gotForm["url_title"] != "Acknowledge" {
+		t.Errorf("url = %q (%q)", gotForm["url"], gotForm["url_title"])
+	}
+	if gotForm["message"] != "down\n\nRunbook: https://wiki.example.com/rb" {
+		t.Errorf("message = %q", gotForm["message"])
 	}
 }

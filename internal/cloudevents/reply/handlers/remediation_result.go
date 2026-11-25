@@ -36,12 +36,13 @@ var allowedRemediationOutcomes = map[string]store.RemediationStatus{
 // completes a prior alert_remediations row and, when outcome=="success"
 // and the monitor's latest check is UP, auto-resolves the alert.
 type RemediationResultHandler struct {
-	store store.Store
+	store    store.Store
+	resolves ResolveFanout
 }
 
 // NewRemediationResultHandler returns a RemediationResultHandler backed by s.
-func NewRemediationResultHandler(s store.Store) *RemediationResultHandler {
-	return &RemediationResultHandler{store: s}
+func NewRemediationResultHandler(s store.Store, resolves ResolveFanout) *RemediationResultHandler {
+	return &RemediationResultHandler{store: s, resolves: resolves}
 }
 
 // Type returns the CE type this handler registers against.
@@ -135,7 +136,18 @@ func (h *RemediationResultHandler) Handle(ctx context.Context, ev ce.Event, entr
 				mutated.Status = domain.AlertResolved
 				t := now
 				mutated.ResolvedAt = &t
-				_ = h.store.Alerts().Update(ctx, &mutated)
+				if err := h.store.Alerts().Update(ctx, &mutated); err != nil {
+					slog.Warn("reply remediation_result: auto-resolve failed",
+						"alert_id", alertID, "error", err)
+				} else {
+					if h.resolves != nil {
+						h.resolves(ctx, &mutated)
+					}
+					if err := h.store.Alerts().DeleteEscalationState(ctx, alertID); err != nil {
+						slog.Warn("reply remediation_result: clear escalation state failed",
+							"alert_id", alertID, "error", err)
+					}
+				}
 			} else {
 				slog.Warn("reply remediation_result: latest UP check too stale; skipping auto-resolve",
 					"alert_id", alertID,

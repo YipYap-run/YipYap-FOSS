@@ -15,8 +15,23 @@ type Claims struct {
 	Role   string   `json:"role"`
 	Nonce  string   `json:"nonce,omitempty"`
 	Scopes []string `json:"scopes,omitempty"`
+	// AMR records how the session was authenticated (one of the AMR*
+	// constants). Empty on tokens issued before the claim existed.
+	AMR string `json:"amr,omitempty"`
+	// SID names the server-side session (user_sessions row). The session
+	// auth middleware rejects session tokens without one.
+	SID string `json:"sid,omitempty"`
+	// APIKeyID is set only when the request authenticated with an API key.
+	// It is the key's id, a stable per-key identity for metering.
+	APIKeyID string `json:"api_key_id,omitempty"`
 	jwt.RegisteredClaims
 }
+
+// Authentication method values for the session amr claim.
+const (
+	AMRPassword = "password" // password only
+	AMRSSO      = "sso"      // OIDC single sign-on
+)
 
 // JWTIssuer creates and validates HS256-signed JWTs.
 type JWTIssuer struct {
@@ -50,34 +65,23 @@ func (j *JWTIssuer) Issue(userID, orgID, role string) (string, error) {
 	return token.SignedString(j.secret)
 }
 
-// IssueWithTTL creates a signed JWT with a custom TTL instead of the default.
-func (j *JWTIssuer) IssueWithTTL(userID, orgID, role string, ttl time.Duration) (string, error) {
-	now := time.Now()
-	claims := Claims{
-		UserID: userID,
-		OrgID:  orgID,
-		Role:   role,
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
-		},
+// IssueSessionToken signs a session JWT bound to the server-side session
+// sid. Callers create the session row first (see internal/session); the
+// token expires with the row.
+func (j *JWTIssuer) IssueSessionToken(userID, orgID, role, amr, sid string, expiresAt time.Time) (string, error) {
+	if sid == "" {
+		return "", fmt.Errorf("session id is required")
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(j.secret)
-}
-
-// IssueMFA creates a short-lived token (5 min) with aud:"mfa" that can only
-// be used at the MFA challenge endpoint.
-func (j *JWTIssuer) IssueMFA(userID, orgID, role string) (string, error) {
-	now := time.Now()
 	claims := Claims{
 		UserID: userID,
 		OrgID:  orgID,
 		Role:   role,
+		AMR:    amr,
+		SID:    sid,
 		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
-			Audience:  jwt.ClaimStrings{"mfa"},
+			ID:        sid,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -125,24 +129,6 @@ func (j *JWTIssuer) ValidateSurvey(tokenStr string) (*Claims, error) {
 	}
 	if claims.Role != SurveyAudience || claims.Nonce == "" || claims.UserID == "" {
 		return nil, fmt.Errorf("invalid survey claims")
-	}
-	return claims, nil
-}
-
-// ValidateMFA parses an MFA token, checking aud:"mfa" and expiry.
-func (j *JWTIssuer) ValidateMFA(tokenString string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return j.secret, nil
-	}, jwt.WithAudience("mfa"))
-	if err != nil {
-		return nil, err
-	}
-	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
-		return nil, fmt.Errorf("invalid MFA token")
 	}
 	return claims, nil
 }

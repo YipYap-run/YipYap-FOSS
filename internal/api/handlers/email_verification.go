@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 	"time"
+
+	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 )
 
 // VerifyEmail handles POST /api/v1/auth/verify-email.
@@ -29,7 +31,7 @@ func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Email must match what the token was issued for (prevents reuse after email change).
-	if user.Email != claims.Role {
+	if user.Email != domain.NormalizeEmail(claims.Role) {
 		errorResponse(w, http.StatusUnauthorized, "verification token is no longer valid")
 		return
 	}
@@ -62,7 +64,12 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Email string `json:"email"`
 	}
-	if err := decodeBody(r, &req); err != nil || req.Email == "" {
+	if err := decodeBody(r, &req); err != nil {
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	req.Email = domain.NormalizeEmail(req.Email)
+	if req.Email == "" {
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}

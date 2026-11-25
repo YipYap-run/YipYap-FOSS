@@ -1,13 +1,24 @@
-import { useState, useEffect, useMemo } from 'preact/hooks';
+import { useState, useEffect, useMemo, useRef } from 'preact/hooks';
 import { get } from '../../api/client';
-import { PageHeader, Card, LoadingPage, ErrorMessage, formatTime } from '../../components/ui';
+import { PageHeader, Card, LoadingPage, formatTime } from '../../components/ui';
 import { currentUser } from '../../state/auth';
+import {
+  FILTER_DEBOUNCE_MS,
+  buildReplyQuery,
+  createLatestRequest,
+  debounce,
+  isAbortError,
+  outcomeClass,
+  statusText,
+} from './reply-activity-fetch.mjs';
+import '../../styles/reply-activity.css';
 
 // ReplyActivityPage renders a reverse-chronological feed of every
 // state-mutating reply the org's sinks have sent back, translated into
 // plain language: what happened, on which monitor, through which channel,
 // and whether it was accepted or rejected and why. Clicking a row opens
-// the before/after JSON for forensic detail.
+// the before/after JSON for forensic detail. Each row is a button that
+// expands its detail panel in place, so it works from the keyboard.
 //
 // Data source: GET /api/v1/admin/cloudevents/replies (owner/admin only).
 
@@ -51,19 +62,6 @@ const OUTCOME_LABELS = {
   'rejected:unknown_type': 'Rejected · unknown reply type',
 };
 
-function outcomeStyle(outcome) {
-  if (outcome === 'accepted') {
-    return { color: 'var(--color-up)', bg: 'var(--color-up-bg)' };
-  }
-  if (outcome.startsWith('handler_error:')) {
-    return { color: 'var(--color-down)', bg: 'var(--color-down-bg)' };
-  }
-  if (outcome.startsWith('rejected:')) {
-    return { color: 'var(--color-warning)', bg: 'var(--color-warning-bg)' };
-  }
-  return { color: 'var(--color-muted)', bg: 'var(--color-muted-bg)' };
-}
-
 function truncateID(id) {
   if (!id) return '';
   if (id.length <= 10) return id;
@@ -79,7 +77,7 @@ function replyLabel(type) {
 
 // outcomeLabel turns a raw outcome into human copy.
 function outcomeLabel(outcome) {
-  if (!outcome) return '—';
+  if (!outcome) return 'Unknown';
   return OUTCOME_LABELS[outcome] || outcome;
 }
 
@@ -94,9 +92,35 @@ export function ReplyActivityPage() {
   const [selected, setSelected] = useState(null);
 
   const [sinceKey, setSinceKey] = useState('24h');
+  // channelInput/alertInput follow the text boxes on every keystroke;
+  // channel/alert are the debounced values that drive requests.
+  const [channelInput, setChannelInput] = useState('');
+  const [alertInput, setAlertInput] = useState('');
   const [channel, setChannel] = useState('');
   const [alert, setAlert] = useState('');
   const [replyType, setReplyType] = useState('');
+
+  // One request at a time: a new load aborts the previous one and a late
+  // response for an old filter is dropped.
+  const latest = useMemo(() => createLatestRequest(), []);
+  // Values are trimmed before they become filters, so a stray space does not
+  // start a request for the same query.
+  const applyText = useMemo(() => debounce((c, a) => {
+    setChannel(c.trim());
+    setAlert(a.trim());
+  }, FILTER_DEBOUNCE_MS), []);
+  const rowRefs = useRef({});
+
+  useEffect(() => () => {
+    applyText.cancel();
+    latest.cancel();
+  }, []);
+
+  function onTextFilter(nextChannel, nextAlert) {
+    setChannelInput(nextChannel);
+    setAlertInput(nextAlert);
+    applyText(nextChannel, nextAlert);
+  }
 
   // ID -> name maps, populated once so rows show real names instead of UUIDs.
   const [monitorNames, setMonitorNames] = useState({});
@@ -126,27 +150,44 @@ export function ReplyActivityPage() {
     })();
   }, [isAdmin]);
 
-  async function load({ append = false, cursor = null } = {}) {
-    if (!isAdmin) return;
+  // fetchReplies runs one request through the latest-request guard and hands
+  // the response to apply only if no newer request has started since.
+  // A failed filter load (replace=true) clears the list so rows from the
+  // previous filter are never shown under the new one; a failed Load more
+  // keeps what is already on screen.
+  async function fetchReplies(filters, limit, apply, replace) {
+    const req = latest.start();
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      const since = cursor || new Date(Date.now() - sinceMs).toISOString();
-      params.set('since', since);
-      if (channel) params.set('channel', channel);
-      if (alert) params.set('alert', alert);
-      if (replyType) params.set('type', replyType);
-      params.set('limit', '100');
-      const data = await get('/admin/cloudevents/replies?' + params.toString());
-      const rows = data?.entries || [];
-      setEntries(append ? (prev) => [...prev, ...rows] : rows);
-      setHasMore(!!data?.has_more);
+      const qs = buildReplyQuery({
+        since: new Date(Date.now() - sinceMs).toISOString(),
+        channel: filters.channel,
+        alert: filters.alert,
+        replyType,
+        limit,
+      });
+      const data = await get('/admin/cloudevents/replies?' + qs, { signal: req.signal });
+      if (!req.isCurrent()) return;
+      apply(data?.entries || [], !!data?.has_more);
     } catch (e) {
+      if (isAbortError(e) || !req.isCurrent()) return;
+      if (replace) {
+        setEntries([]);
+        setHasMore(false);
+      }
       setError(e);
     } finally {
-      setLoading(false);
+      if (req.isCurrent()) setLoading(false);
     }
+  }
+
+  function load(filters = { channel, alert }) {
+    if (!isAdmin) return;
+    fetchReplies(filters, 100, (rows, more) => {
+      setEntries(rows);
+      setHasMore(more);
+    }, true);
   }
 
   useEffect(() => {
@@ -154,35 +195,42 @@ export function ReplyActivityPage() {
       setLoading(false);
       return;
     }
+    setSelected(null);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, sinceKey, channel, alert, replyType]);
 
+  // Refresh applies any text still waiting on the debounce right away.
+  function refresh() {
+    applyText.cancel();
+    if (channelInput.trim() !== channel || alertInput.trim() !== alert) {
+      setChannel(channelInput.trim());
+      setAlert(alertInput.trim());
+      return; // the filter effect loads
+    }
+    load();
+  }
+
   function loadMore() {
     if (entries.length === 0) return;
-    const oldest = entries[entries.length - 1];
-    const cursor = new Date(new Date(oldest.received_at).getTime() - 1).toISOString();
-    (async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams();
-        params.set('since', new Date(Date.now() - sinceMs).toISOString());
-        if (channel) params.set('channel', channel);
-        if (alert) params.set('alert', alert);
-        if (replyType) params.set('type', replyType);
-        params.set('limit', String(Math.min(500, entries.length + 100)));
-        const data = await get('/admin/cloudevents/replies?' + params.toString());
-        const rows = data?.entries || [];
-        const seen = new Set(entries.map((e) => e.id));
-        const fresh = rows.filter((e) => !seen.has(e.id));
-        setEntries([...entries, ...fresh]);
-        setHasMore(!!data?.has_more);
-      } catch (e) {
-        setError(e);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    const current = entries;
+    fetchReplies({ channel, alert }, Math.min(500, current.length + 100), (rows, more) => {
+      const seen = new Set(current.map((e) => e.id));
+      setEntries([...current, ...rows.filter((e) => !seen.has(e.id))]);
+      setHasMore(more);
+    }, false);
+  }
+
+  function toggle(e) {
+    setSelected(selected && selected.id === e.id ? null : e);
+  }
+
+  // closeDetail collapses the open row and puts focus back on its button so
+  // keyboard users do not lose their place.
+  function closeDetail() {
+    const id = selected && selected.id;
+    setSelected(null);
+    if (id && rowRefs.current[id]) rowRefs.current[id].focus();
   }
 
   // Resolve an entry's subject: the monitor name if present, else the
@@ -200,139 +248,168 @@ export function ReplyActivityPage() {
 
   if (!isAdmin) {
     return (
-      <div>
+      <div class="reply-activity">
         <PageHeader title="Reply Activity" />
         <Card>
-          <p>This dashboard is only visible to org admins and owners.</p>
+          <p>Only org owners and admins can see reply activity.</p>
         </Card>
       </div>
     );
   }
 
+  const textPending = channelInput.trim() !== channel || alertInput.trim() !== alert;
+
   return (
-    <div class="reply-activity-page">
+    <div class="reply-activity">
       <PageHeader
         title="Reply Activity"
-        subtitle="CloudEvent replies sent back by your connected sinks — the inbound half of yipyap's cloud-native eventing loop."
+        subtitle="CloudEvent replies sent back by your connected sinks, the inbound half of the YipYap eventing loop."
       />
 
       <Card>
-        <p class="text-muted" style="margin:0 0 14px 0;font-size:0.9em">
+        <p class="text-muted ra-intro">
           A <code>cloudevent_http</code> channel connects an alert to a downstream sink over the
           CNCF CloudEvents protocol. That sink can answer with its own CloudEvent, typed{' '}
           <code>run.yipyap.reply.*</code>. Each entry below is one such reply, with the action it
           took, the monitor it targeted, and whether it was accepted or rejected.
         </p>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px">
-          <label style="display:flex;flex-direction:column;gap:2px">
+        <div class="ra-filters" role="group" aria-label="Filter replies">
+          <label class="ra-filter">
             <span class="form-help">Since</span>
             <select value={sinceKey} onChange={(e) => setSinceKey(e.target.value)}>
               {SINCE_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
           </label>
-          <label style="display:flex;flex-direction:column;gap:2px">
-            <span class="form-help">CloudEvent type</span>
+          <label class="ra-filter">
+            <span class="form-help">Reply type</span>
             <select value={replyType} onChange={(e) => setReplyType(e.target.value)}>
-              <option value="">all</option>
+              <option value="">All types</option>
               {REPLY_TYPE_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
           </label>
-          <label style="display:flex;flex-direction:column;gap:2px">
+          <label class="ra-filter">
             <span class="form-help">Channel ID</span>
-            <input type="text" value={channel} onInput={(e) => setChannel(e.target.value)} placeholder="(all)" style="min-width:180px" />
+            <input
+              type="text"
+              value={channelInput}
+              onInput={(e) => onTextFilter(e.target.value, alertInput)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); refresh(); } }}
+              placeholder="All channels"
+              autocomplete="off"
+              spellcheck={false}
+            />
           </label>
-          <label style="display:flex;flex-direction:column;gap:2px">
+          <label class="ra-filter">
             <span class="form-help">Alert ID</span>
-            <input type="text" value={alert} onInput={(e) => setAlert(e.target.value)} placeholder="(all)" style="min-width:180px" />
+            <input
+              type="text"
+              value={alertInput}
+              onInput={(e) => onTextFilter(channelInput, e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); refresh(); } }}
+              placeholder="All alerts"
+              autocomplete="off"
+              spellcheck={false}
+            />
           </label>
-          <button class="btn btn-sm" onClick={() => load()} disabled={loading}>
+          <button type="button" class="btn btn-sm" onClick={refresh} disabled={loading && !textPending}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
 
-        {error && <ErrorMessage error={error} onRetry={() => load()} />}
+        {/* The count shows once rows are on screen; while loading or empty the
+            spinner and empty message cover it, so the region is for screen
+            readers only. */}
+        <p
+          class={'ra-status' + (entries.length > 0 && !loading ? '' : ' sr-only')}
+          role="status"
+          aria-live="polite"
+        >
+          {statusText({ loading, error, count: entries.length, hasMore })}
+        </p>
+
+        {error && (
+          <div class="ra-error" role="alert">
+            <p>Could not load replies. {error?.message || String(error)}</p>
+            <button type="button" class="btn btn-sm" onClick={() => load()}>Try again</button>
+          </div>
+        )}
         {loading && entries.length === 0 && <LoadingPage />}
 
         {!loading && entries.length === 0 && !error && (
           <p class="text-muted" style="margin-top:12px">
-            No CloudEvent replies in this window. Replies appear once a
-            connected sink answers an alert with a <code>run.yipyap.reply.*</code> CloudEvent.
+            {channel || alert || replyType
+              ? 'No replies match these filters in this time window. Clear a filter or pick a longer window.'
+              : <>No CloudEvent replies in this window. Replies appear once a
+                connected sink answers an alert with a <code>run.yipyap.reply.*</code> CloudEvent.</>}
           </p>
         )}
 
         {entries.length > 0 && (
-          <div style="display:flex;flex-direction:column;gap:8px">
+          <ul class="ra-list" aria-label="CloudEvent replies" aria-busy={loading ? 'true' : 'false'}>
             {entries.map((e) => {
               const active = selected && selected.id === e.id;
-              const badge = outcomeStyle(e.outcome);
+              const detailId = 'reply-detail-' + e.id;
               return (
-                <div
-                  key={e.id}
-                  onClick={() => setSelected(active ? null : e)}
-                  style={{
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                    background: active ? 'var(--color-surface-elevated)' : 'var(--color-surface)',
-                  }}
-                >
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      marginTop: 1,
-                      fontSize: '0.72em',
-                      fontWeight: 700,
-                      letterSpacing: '0.02em',
-                      padding: '3px 8px',
-                      borderRadius: 999,
-                      color: badge.color,
-                      background: badge.bg,
-                      whiteSpace: 'nowrap',
-                    }}
+                <li key={e.id}>
+                  <button
+                    type="button"
+                    ref={(el) => { if (el) rowRefs.current[e.id] = el; else delete rowRefs.current[e.id]; }}
+                    onClick={() => toggle(e)}
+                    onKeyDown={(ev) => { if (ev.key === 'Escape' && active) { ev.preventDefault(); closeDetail(); } }}
+                    aria-expanded={active ? 'true' : 'false'}
+                    aria-controls={detailId}
+                    class="reply-row"
                   >
-                    {outcomeLabel(e.outcome)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600 }}>
-                      {replyLabel(e.reply_type)}{' '}
-                      <span style="color:var(--color-text-muted, #94a3b8);font-weight:400">·</span>{' '}
-                      {subjectName(e)}
-                    </div>
-                    <div style="font-size:0.85em;color:var(--color-text-muted, #94a3b8);margin-top:2px">
-                      via {channelLabel(e)} · {formatTime(e.received_at)}
-                    </div>
+                    <span class={'ra-badge ' + outcomeClass(e.outcome)}>
+                      {outcomeLabel(e.outcome)}
+                    </span>
+                    <span class="ra-main">
+                      <span class="ra-title">
+                        {replyLabel(e.reply_type)}{' '}
+                        <span aria-hidden="true" class="ra-sep">·</span>{' '}
+                        {subjectName(e)}
+                      </span>
+                      <span class="ra-meta">
+                        via {channelLabel(e)} · {formatTime(e.received_at)}
+                      </span>
+                    </span>
+                    <span aria-hidden="true" class="ra-chevron">
+                      {active ? '×' : '›'}
+                    </span>
+                  </button>
+                  <div
+                    id={detailId}
+                    role="region"
+                    aria-label={'Reply detail: ' + replyLabel(e.reply_type)}
+                    hidden={!active}
+                    onKeyDown={(ev) => { if (ev.key === 'Escape') { ev.preventDefault(); closeDetail(); } }}
+                    class="ra-detail"
+                  >
+                    {active && (
+                      <>
+                        <div class="ra-detail-head">
+                          <h3>Reply detail</h3>
+                          <button type="button" class="btn btn-sm" onClick={closeDetail}>Close</button>
+                        </div>
+                        <ReplyDetail entry={e} />
+                      </>
+                    )}
                   </div>
-                  <span style="color:var(--color-text-muted, #94a3b8);font-size:1.2em;line-height:1;margin-top:2px">
-                    {active ? '×' : '›'}
-                  </span>
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
 
         {hasMore && (
-          <div style="margin-top:12px;text-align:center">
-            <button class="btn btn-sm" onClick={loadMore} disabled={loading}>
+          <div class="ra-more">
+            <button type="button" class="btn btn-sm" onClick={loadMore} disabled={loading}>
               {loading ? 'Loading…' : 'Load more'}
             </button>
           </div>
         )}
       </Card>
 
-      {selected && (
-        <Card style="margin-top:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <h3 style="margin:0">Reply detail</h3>
-            <button class="btn btn-sm" onClick={() => setSelected(null)}>Close</button>
-          </div>
-          <ReplyDetail entry={selected} />
-        </Card>
-      )}
     </div>
   );
 }
@@ -340,33 +417,32 @@ export function ReplyActivityPage() {
 function ReplyDetail({ entry }) {
   const before = formatJSON(entry.before);
   const after = formatJSON(entry.after);
-  const badge = outcomeStyle(entry.outcome);
   return (
     <div class="reply-detail">
       <p style="margin:0 0 12px 0">
         <strong>{replyLabel(entry.reply_type)}</strong> ·{' '}
-        <span style={`color:${badge.color};font-weight:600`}>{outcomeLabel(entry.outcome)}</span>
+        <span class={outcomeClass(entry.outcome)}>{outcomeLabel(entry.outcome)}</span>
       </p>
 
-      <dl style="display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0 0 12px 0;font-size:0.9em">
-        <dt class="text-muted">Reply ID</dt><dd><code>{entry.reply_id}</code></dd>
-        <dt class="text-muted">CloudEvent type</dt><dd><code>{entry.reply_type}</code></dd>
-        <dt class="text-muted">Source</dt><dd><code>{entry.reply_source}</code></dd>
-        <dt class="text-muted">Sub</dt><dd><code>{entry.reply_sub || '(none)'}</code></dd>
-        <dt class="text-muted">Alert</dt><dd><code>{entry.alert_id || '(none)'}</code></dd>
-        <dt class="text-muted">Monitor</dt><dd><code>{entry.monitor_id || '(none)'}</code></dd>
-        <dt class="text-muted">Channel</dt><dd><code>{entry.channel_id}</code></dd>
-        <dt class="text-muted">Received</dt><dd>{formatTime(entry.received_at)}</dd>
+      <dl class="ra-fields">
+        <dt>Reply ID</dt><dd><code>{entry.reply_id}</code></dd>
+        <dt>CloudEvent type</dt><dd><code>{entry.reply_type}</code></dd>
+        <dt>Source</dt><dd><code>{entry.reply_source}</code></dd>
+        <dt>Sender</dt><dd><code>{entry.reply_sub || '(none)'}</code></dd>
+        <dt>Alert</dt><dd><code>{entry.alert_id || '(none)'}</code></dd>
+        <dt>Monitor</dt><dd><code>{entry.monitor_id || '(none)'}</code></dd>
+        <dt>Channel</dt><dd><code>{entry.channel_id}</code></dd>
+        <dt>Received</dt><dd>{formatTime(entry.received_at)}</dd>
       </dl>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="ra-json">
         <div>
           <div class="form-help" style="margin-bottom:4px">Before</div>
-          <pre style="background:var(--color-surface-elevated);border:1px solid var(--color-border);padding:8px;border-radius:4px;font-size:0.8em;overflow:auto;max-height:260px;margin:0">{before}</pre>
+          <pre tabIndex={0} aria-label="State before the reply">{before}</pre>
         </div>
         <div>
           <div class="form-help" style="margin-bottom:4px">After</div>
-          <pre style="background:var(--color-surface-elevated);border:1px solid var(--color-border);padding:8px;border-radius:4px;font-size:0.8em;overflow:auto;max-height:260px;margin:0">{after}</pre>
+          <pre tabIndex={0} aria-label="State after the reply">{after}</pre>
         </div>
       </div>
     </div>

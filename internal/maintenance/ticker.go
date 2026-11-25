@@ -73,7 +73,7 @@ func (t *Ticker) Run(ctx context.Context) {
 
 	// Prime the state on startup so we don't emit an avalanche of "started"
 	// events for every currently-active window the moment we boot.
-	t.poll(ctx, time.Now().UTC())
+	t.prime(ctx, time.Now().UTC())
 
 	for {
 		select {
@@ -81,6 +81,24 @@ func (t *Ticker) Run(ctx context.Context) {
 			return
 		case now := <-ticker.C:
 			t.poll(ctx, now.UTC())
+		}
+	}
+}
+
+func (t *Ticker) prime(ctx context.Context, now time.Time) {
+	windows, err := t.store.MaintenanceWindows().ListAll(ctx)
+	if err != nil {
+		slog.Error("maintenance ticker: list all failed", "error", err)
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, mw := range windows {
+		t.active[mw.ID] = windowState{
+			active:    mw.IsActiveAt(now),
+			orgID:     mw.OrgID,
+			monitorID: mw.MonitorID,
 		}
 	}
 }

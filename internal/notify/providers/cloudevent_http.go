@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -159,29 +158,13 @@ func NewCloudEventHTTP(decrypt notify.DecryptFunc, opts ...CloudEventHTTPOption)
 	return p
 }
 
-// newSSRFGuardedHTTPClient returns an *http.Client whose Transport uses
-// ssrfGuardedDialContext to re-check the resolved peer address at every
-// TCP connect. Defeats DNS-rebinding between create-time validation and
-// send-time (H-4). Redirects follow the same DialContext, so a sink that
-// redirects to http://169.254.169.254 is also blocked.
+// newSSRFGuardedHTTPClient returns the shared guarded client
+// (checker.NewGuardedHTTPClient) under the control-plane toggle. Every
+// connect is checked on the resolved peer IP, which defeats DNS rebinding
+// between create-time validation and send-time (H-4), and redirects are
+// not followed, so a sink cannot bounce the request to 169.254.169.254.
 func newSSRFGuardedHTTPClient(timeout time.Duration) *http.Client {
-	baseDialer := &net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}
-	tr := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           ssrfGuardedDialContext(baseDialer.DialContext),
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: tr,
-	}
+	return checker.NewGuardedHTTPClient(timeout, checker.ControlPlanePolicy)
 }
 
 // SetTokenCache swaps the OIDC token cache used for outbound authenticated
@@ -337,7 +320,7 @@ func (p *CloudEventHTTP) Send(ctx context.Context, job domain.NotificationJob) (
 		span.SetStatus(codes.Error, "http do")
 		span.RecordError(err)
 		p.recordEmit(ctx, ev.Type(), "failure")
-		return "", fmt.Errorf("cloudevent_http: POST %s: %w", cfg.SinkURL, err)
+		return "", fmt.Errorf("cloudevent_http: POST: %w", stripURL(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -357,17 +340,17 @@ func (p *CloudEventHTTP) Send(ctx context.Context, job domain.NotificationJob) (
 		resp.StatusCode == http.StatusTooManyRequests,
 		resp.StatusCode >= 500:
 		p.recordEmit(ctx, ev.Type(), "failure")
-		err := fmt.Errorf("cloudevent_http: sink returned retryable status %d: %s", resp.StatusCode, truncate(bodyBytes, 256))
+		err := fmt.Errorf("cloudevent_http: sink returned retryable status: %w", &notify.StatusError{Provider: "cloudevent_http", StatusCode: resp.StatusCode, Detail: truncate(bodyBytes, 256)})
 		span.SetStatus(codes.Error, "retryable status")
 		return "", err
 	case resp.StatusCode >= 400:
 		p.recordEmit(ctx, ev.Type(), "failure")
-		err := fmt.Errorf("cloudevent_http: sink returned permanent status %d: %s", resp.StatusCode, truncate(bodyBytes, 256))
+		err := fmt.Errorf("cloudevent_http: sink returned permanent status: %w", &notify.StatusError{Provider: "cloudevent_http", StatusCode: resp.StatusCode, Detail: truncate(bodyBytes, 256)})
 		span.SetStatus(codes.Error, "permanent status")
 		return "", err
 	default:
 		p.recordEmit(ctx, ev.Type(), "failure")
-		err := fmt.Errorf("cloudevent_http: sink returned unexpected status %d: %s", resp.StatusCode, truncate(bodyBytes, 256))
+		err := fmt.Errorf("cloudevent_http: sink returned unexpected status: %w", &notify.StatusError{Provider: "cloudevent_http", StatusCode: resp.StatusCode, Detail: truncate(bodyBytes, 256)})
 		span.SetStatus(codes.Error, "unexpected status")
 		return "", err
 	}

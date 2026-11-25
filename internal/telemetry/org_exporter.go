@@ -2,8 +2,14 @@ package telemetry
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +17,8 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // OrgSettingsReader is the subset of store.OrgSettingsStore needed here.
@@ -27,15 +35,84 @@ type OrgExporterManager struct {
 	exporters map[string]*orgExporter // org_id -> exporter
 	settings  OrgSettingsReader
 	decrypt   func(ciphertext string) (string, error)
+
+	// validateHost and dial are the SSRF guards. telemetry cannot import
+	// internal/checker (checker imports telemetry), so the wiring code
+	// injects them with WithGuards. Both nil means no guard, which only
+	// tests should rely on.
+	validateHost func(host string) error
+	dial         func(ctx context.Context, addr string) (net.Conn, error)
 }
 
 type orgExporter struct {
 	provider *sdkmetric.MeterProvider
 	meter    metric.Meter
-	endpoint string
+	// fingerprint covers endpoint, TLS mode and headers so a change to any
+	// of them rebuilds the exporter, not only an endpoint change.
+	fingerprint string
+}
+
+// Org settings keys for per-org OTLP export.
+const (
+	SettingOTELEndpoint = "otel_endpoint"
+	SettingOTELHeaders  = "otel_headers"
+	// SettingOTELInsecure holds "true" when the org explicitly opted out of
+	// TLS. Absent or any other value means TLS.
+	SettingOTELInsecure = "otel_insecure"
+)
+
+// ParseOTLPEndpoint validates a gRPC OTLP endpoint in host:port form and
+// returns the host and port. It rejects schemes, paths, and ports outside
+// 1-65535. It does not check the host against SSRF rules; callers do that
+// with the checker package.
+func ParseOTLPEndpoint(raw string) (host, port string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", errors.New("endpoint is required")
+	}
+	if strings.Contains(raw, "://") || strings.ContainsAny(raw, "/?#@ ") {
+		return "", "", errors.New("endpoint must be in host:port format, without a scheme or path")
+	}
+	host, port, err = net.SplitHostPort(raw)
+	if err != nil || host == "" {
+		return "", "", errors.New("endpoint must be in host:port format")
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return "", "", errors.New("endpoint port must be between 1 and 65535")
+	}
+	return host, port, nil
+}
+
+// WithGuards installs the SSRF guards: validateHost runs on the configured
+// host before an exporter is built, and dial replaces the gRPC dialer so the
+// resolved address is checked again at connect time (DNS rebinding).
+func (m *OrgExporterManager) WithGuards(validateHost func(string) error, dial func(ctx context.Context, addr string) (net.Conn, error)) *OrgExporterManager {
+	m.validateHost = validateHost
+	m.dial = dial
+	return m
+}
+
+// TransportCredentials returns TLS credentials (TLS 1.2 minimum) unless
+// insecure is true. Shared by the exporter and the settings Test button so
+// both connect the same way.
+func TransportCredentials(insecure bool) credentials.TransportCredentials {
+	if insecure {
+		return nil
+	}
+	return credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+}
+
+func configFingerprint(endpoint string, insecure bool, headers string) string {
+	h := sha256.Sum256([]byte(endpoint + "\x00" + strconv.FormatBool(insecure) + "\x00" + headers))
+	return hex.EncodeToString(h[:])
 }
 
 const orgExportInterval = 60 * time.Second
+
+// replacedShutdownTimeout bounds the final flush of an exporter that a
+// config change replaced.
+const replacedShutdownTimeout = 10 * time.Second
 
 // NewOrgExporterManager creates a manager that maintains per-org OTEL exporters.
 // The decrypt function wraps crypto.Envelope.Decrypt for header values.
@@ -67,12 +144,12 @@ func (m *OrgExporterManager) SyncOrg(ctx context.Context, orgID string) error {
 		return err
 	}
 
-	endpoint := settings["otel_endpoint"]
+	endpoint := settings[SettingOTELEndpoint]
+	insecureTransport := settings[SettingOTELInsecure] == "true"
 
 	// Check current state under read lock.
 	m.mu.RLock()
 	existing, exists := m.exporters[orgID]
-	endpointChanged := !exists || existing.endpoint != endpoint
 	m.mu.RUnlock()
 
 	// No endpoint configured -- remove exporter if it exists.
@@ -95,14 +172,19 @@ func (m *OrgExporterManager) SyncOrg(ctx context.Context, orgID string) error {
 		return nil
 	}
 
-	// Endpoint unchanged -- nothing to do.
-	if !endpointChanged {
-		return nil
+	host, _, err := ParseOTLPEndpoint(endpoint)
+	if err != nil {
+		return fmt.Errorf("otel exporter for org %s: %w", orgID, err)
+	}
+	if m.validateHost != nil {
+		if err := m.validateHost(host); err != nil {
+			return fmt.Errorf("otel exporter for org %s: %w", orgID, err)
+		}
 	}
 
 	// Decrypt headers if present.
 	headers := ""
-	if raw, ok := settings["otel_headers"]; ok && raw != "" {
+	if raw, ok := settings[SettingOTELHeaders]; ok && raw != "" {
 		if m.decrypt != nil {
 			decrypted, err := m.decrypt(raw)
 			if err != nil {
@@ -113,10 +195,22 @@ func (m *OrgExporterManager) SyncOrg(ctx context.Context, orgID string) error {
 		}
 	}
 
+	// Nothing changed -- keep the running exporter.
+	fp := configFingerprint(endpoint, insecureTransport, headers)
+	if exists && existing.fingerprint == fp {
+		return nil
+	}
+
 	// Create OTLP exporter with org-specific endpoint OUTSIDE the lock.
-	opts := []otlpmetricgrpc.Option{
-		otlpmetricgrpc.WithEndpoint(endpoint),
-		otlpmetricgrpc.WithInsecure(), // TODO: configurable TLS
+	// TLS is the default; plaintext only when the org opted in.
+	opts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(endpoint)}
+	if insecureTransport {
+		opts = append(opts, otlpmetricgrpc.WithInsecure())
+	} else {
+		opts = append(opts, otlpmetricgrpc.WithTLSCredentials(TransportCredentials(false)))
+	}
+	if m.dial != nil {
+		opts = append(opts, otlpmetricgrpc.WithDialOption(grpc.WithContextDialer(m.dial)))
 	}
 	if headers != "" {
 		opts = append(opts, otlpmetricgrpc.WithHeaders(parseHeaders(headers)))
@@ -134,9 +228,9 @@ func (m *OrgExporterManager) SyncOrg(ctx context.Context, orgID string) error {
 	)
 
 	newExp := &orgExporter{
-		provider: provider,
-		meter:    provider.Meter("github.com/YipYap-run/YipYap-FOSS/org"),
-		endpoint: endpoint,
+		provider:    provider,
+		meter:       provider.Meter("github.com/YipYap-run/YipYap-FOSS/org"),
+		fingerprint: fp,
 	}
 
 	// Swap under write lock; shutdown old exporter outside lock.
@@ -146,12 +240,19 @@ func (m *OrgExporterManager) SyncOrg(ctx context.Context, orgID string) error {
 	m.mu.Unlock()
 
 	if hadOld {
-		if err := old.provider.Shutdown(ctx); err != nil {
-			slog.Warn("otel: shutdown error during sync", "org_id", orgID, "error", err)
-		}
+		// Flush and close the replaced exporter in the background with a
+		// bounded timeout. A slow or unreachable old collector must not
+		// stall the sync of every other org.
+		go func(p *sdkmetric.MeterProvider) {
+			sctx, cancel := context.WithTimeout(context.Background(), replacedShutdownTimeout)
+			defer cancel()
+			if err := p.Shutdown(sctx); err != nil {
+				slog.Warn("otel: shutdown error during sync", "org_id", orgID, "error", err)
+			}
+		}(old.provider)
 	}
 
-	slog.Info("otel: started per-org exporter", "org_id", orgID, "endpoint", endpoint)
+	slog.Info("otel: started per-org exporter", "org_id", orgID, "endpoint", endpoint, "tls", !insecureTransport)
 	return nil
 }
 

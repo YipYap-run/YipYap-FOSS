@@ -14,6 +14,23 @@ type Msg struct {
 	MsgID   string
 	Ack     func() error
 	Nak     func() error
+	// NakWithDelay asks the server to redeliver no sooner than the given
+	// delay. Nil on buses without delayed redelivery; use NakDelay, which
+	// falls back to Nak.
+	NakWithDelay func(time.Duration) error
+}
+
+// NakDelay negatively acknowledges the message with a redelivery delay when
+// the bus supports it, and falls back to a plain Nak otherwise. It is a
+// no-op when the message carries neither.
+func (m *Msg) NakDelay(d time.Duration) error {
+	if m.NakWithDelay != nil {
+		return m.NakWithDelay(d)
+	}
+	if m.Nak != nil {
+		return m.Nak()
+	}
+	return nil
 }
 
 // AckHandler is a callback for durable pull subscriptions. The handler
@@ -31,6 +48,13 @@ type PullConfig struct {
 	AckWait time.Duration
 	// BatchSize is the number of messages fetched per pull request.
 	BatchSize int
+	// DeliverNew starts a newly created durable consumer at the next
+	// message published instead of the oldest one retained by the stream.
+	// Only matters on Limits-retention streams, which keep acked messages.
+	DeliverNew bool
+	// InactiveThreshold lets the server delete a durable consumer that has
+	// seen no pull requests for this long. Zero keeps it until deleted.
+	InactiveThreshold time.Duration
 }
 
 // DefaultPullConfig returns a PullConfig with sensible defaults, modified
@@ -65,5 +89,39 @@ func WithAckWait(d time.Duration) PullOpt {
 func WithBatchSize(n int) PullOpt {
 	return func(c *PullConfig) {
 		c.BatchSize = n
+	}
+}
+
+// ConsumerStopper is implemented by buses whose pull consumers fetch in a
+// background loop (JetStream). StopConsuming stops those loops and waits
+// for the handlers they are running to return, while keeping the
+// connection open so messages handed to workers can still be acked or
+// naked. Durable consumer state is kept, so other replicas continue.
+type ConsumerStopper interface {
+	StopConsuming()
+}
+
+// StopConsuming stops pull-consumer fetch loops on b when it supports it.
+// It is a no-op for buses that deliver in-process (the outbox covers
+// anything published to them after shutdown begins).
+func StopConsuming(b Bus) {
+	if cs, ok := b.(ConsumerStopper); ok {
+		cs.StopConsuming()
+	}
+}
+
+// WithDeliverNew makes a newly created durable consumer start at new
+// messages rather than replaying the stream's retained history.
+func WithDeliverNew() PullOpt {
+	return func(c *PullConfig) {
+		c.DeliverNew = true
+	}
+}
+
+// WithInactiveThreshold lets the server reap the durable consumer after d
+// without pull requests, so a crashed process does not leave it behind.
+func WithInactiveThreshold(d time.Duration) PullOpt {
+	return func(c *PullConfig) {
+		c.InactiveThreshold = d
 	}
 }

@@ -2,15 +2,13 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-func validateEscalationPolicy(_ context.Context, _ store.Store, _ string, p *domain.EscalationPolicy) error {
-	if p.Loop {
-		return fmt.Errorf("escalation loops require Pro tier. Upgrade at /settings/billing")
-	}
+// validateEscalationPolicy has no plan gates in the self-hosted build:
+// looping policies are allowed, and the engine honors MaxLoops.
+func validateEscalationPolicy(_ context.Context, _ store.Store, _ string, _ *domain.EscalationPolicy) error {
 	return nil
 }

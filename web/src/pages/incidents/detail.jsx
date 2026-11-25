@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'preact/hooks';
 import { get, post, patch, del } from '../../api/client';
 import { currentUser } from '../../state/auth';
+import { canWrite, isOrgAdmin } from '../../state/permissions.mjs';
+import { ViewOnlyNote } from '../../components/view-only-note';
 import { PageHeader, Card, SeverityIcon, LoadingPage, ErrorMessage, relativeTime, useToast, ToastContainer, IncidentStatusPill, INCIDENT_SEVERITY_MAP, INCIDENT_STATUS_COLORS } from '../../components/ui';
+import { AuthorName } from '../../components/author-name';
 
 export function IncidentDetailPage({ id }) {
   const [incident, setIncident] = useState(null);
@@ -37,8 +40,11 @@ export function IncidentDetailPage({ id }) {
 
   const role = currentUser.value?.role;
   const userEmail = currentUser.value?.email;
-  const canEdit = role === 'owner' || role === 'admin' || role === 'member';
-  const canDelete = role === 'owner' || role === 'admin';
+  const canEdit = canWrite(role);
+  const canDelete = canWrite(role);
+  // Members edit and delete their own timeline updates; owners and admins
+  // can moderate any update. Mirrors the incident handler.
+  const canModerate = isOrgAdmin(role);
 
   async function load() {
     setLoading(true);
@@ -223,6 +229,7 @@ export function IncidentDetailPage({ id }) {
           </div>
         }
       />
+      <ViewOnlyNote />
 
       {/* Meta edit form */}
       {editingMeta && (
@@ -336,7 +343,9 @@ export function IncidentDetailPage({ id }) {
             <div class="incident-timeline">
               {updates.map((update, idx) => {
                 const borderColor = INCIDENT_STATUS_COLORS[update.status] || 'var(--color-border)';
-                const isOwn = update.user_email === userEmail;
+                const isOwn = !update.user_deleted && (update.user_id
+                  ? update.user_id === currentUser.value?.id
+                  : !!update.user_email && update.user_email === userEmail);
                 const isEditing = editUpdateId === update.id;
 
                 return (
@@ -351,7 +360,8 @@ export function IncidentDetailPage({ id }) {
                     }}
                   >
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
-                      <span style="font-weight: 600; font-size: 0.875rem;">{update.user_email || 'System'}</span>
+                      <AuthorName deleted={update.user_deleted} name={update.user_name}
+                        fallback={update.user_email || 'System'} style={{ fontSize: '0.875rem' }} />
                       <span style="color: var(--color-text-muted); font-size: 0.75rem;">{relativeTime(update.created_at)}</span>
                       {update.status && (
                         <IncidentStatusPill status={update.status} />
@@ -401,11 +411,9 @@ export function IncidentDetailPage({ id }) {
                       <p style="margin: 0; white-space: pre-wrap;">{update.body}</p>
                     )}
 
-                    {!isEditing && (canEdit && isOwn || canDelete) && (
+                    {!isEditing && canEdit && (isOwn || canModerate) && (
                       <div style="display: flex; gap: 8px; margin-top: 6px;">
-                        {canEdit && isOwn && (
-                          <button class="btn btn-xs" onClick={() => startEditUpdate(update)}>Edit</button>
-                        )}
+                        <button class="btn btn-xs" onClick={() => startEditUpdate(update)}>Edit</button>
                         {canDelete && (
                           <button class="btn btn-xs btn-danger" onClick={() => deleteUpdate(update.id)}>Delete</button>
                         )}

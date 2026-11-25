@@ -1,0 +1,125 @@
+/* Alerts list, alert detail and the dashboard alert widgets. */
+
+/* Severity badge. Text and fill pairs keep 4.5:1 or better for small bold
+   text; the lighter Tailwind 500 shades failed with white text. */
+.sev-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+  color: #fff;
+  background: #475569;
+  white-space: nowrap;
+}
+.sev-badge-critical { background: #b91c1c; }
+.sev-badge-warning { background: #fbbf24; color: #1f2937; }
+.sev-badge-info { background: #1d4ed8; }
+.sev-badge-lg { padding: 2px 10px; font-size: 0.75rem; }
+
+/* 7-day chart. The bars are decorative; the table below carries the data
+   for screen readers. */
+.alerts-chart {
+  margin: 0;
+}
+.alerts-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 84px;
+  width: 100%;
+}
+.alerts-chart-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.alerts-chart-count,
+.alerts-chart-day {
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.alerts-chart-bar {
+  width: 100%;
+  max-width: 32px;
+  border-radius: 3px 3px 0 0;
+  background: var(--color-border);
+}
+.alerts-chart-bar.has-alerts {
+  background: #6366f1;
+}
+.alerts-chart-caption {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+}
+
+/* Rollup tiles. */
+.alerts-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.alerts-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  border-radius: 8px;
+  text-align: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+.alerts-stat-value {
+  order: -1;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.alerts-stat-label,
+.alerts-stat-note {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+.alerts-stat-label { margin-top: 2px; }
+.alerts-stat-label abbr { text-decoration: none; }
+.alerts-stat-note { font-size: 0.6875rem; }
+
+/* Escalation card on the alert detail page. */
+.esc-progress {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 10px;
+  padding: 0;
+  list-style: none;
+  max-width: 320px;
+}
+.esc-progress li {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-border);
+}
+.esc-progress li.done { background: var(--color-text-secondary); }
+.esc-progress li.current { background: var(--color-primary); }
+.esc-when {
+  white-space: nowrap;
+}
+
+/* Dashboard "view all" link under the active alert rows. */
+.alert-list-more {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 480px) {
+  .alerts-chart-day { font-size: 0.625rem; }
+  .alerts-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .alerts-stat { padding: 8px 4px; }
+  .alerts-stat-value { font-size: 1.25rem; }
+}

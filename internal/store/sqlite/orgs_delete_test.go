@@ -64,6 +64,8 @@ func TestOrgDeleteCleansUpOrphans(t *testing.T) {
 	exec(`INSERT INTO services (id, org_id, name, slug) VALUES (?, ?, 'svc', 'svc')`,
 		uuid.New().String(), org.ID)
 	exec(`INSERT INTO billing (org_id) VALUES (?)`, org.ID)
+	exec(`INSERT INTO sms_voice_usage (org_id, period_key, sms_used) VALUES (?, 'm:2026-11', 3)`, org.ID)
+	exec(`INSERT INTO sms_voice_usage_warnings (org_id, period_key, kind, threshold, sent_at) VALUES (?, 'm:2026-11', 'sms', 80, ?)`, org.ID, now)
 	exec(`INSERT INTO support_tickets (id, org_id, user_id, subject, created_at, updated_at) VALUES (?, ?, ?, 'subj', ?, ?)`,
 		uuid.New().String(), org.ID, user.ID, now, now)
 	exec(`INSERT INTO incidents (id, org_id, title, started_at, created_by, created_at, updated_at) VALUES (?, ?, 'inc', ?, ?, ?, ?)`,
@@ -83,7 +85,7 @@ func TestOrgDeleteCleansUpOrphans(t *testing.T) {
 		"team_members", "schedules", "monitor_labels", "monitor_checks",
 		"alert_status_page_refs", "cloudevent_ingest_idempotency",
 		"services", "billing", "support_tickets", "incidents", "status_pages",
-		"monitor_groups",
+		"monitor_groups", "sms_voice_usage", "sms_voice_usage_warnings",
 	} {
 		if n := countRows(t, s, table); n != 0 {
 			t.Errorf("table %s still has %d rows after org delete", table, n)

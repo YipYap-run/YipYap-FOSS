@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'preact/hooks';
 import { get, post } from '../../api/client';
 import { currentUser } from '../../state/auth';
+import { canWrite } from '../../state/permissions.mjs';
+import { ViewOnlyNote } from '../../components/view-only-note';
 import {
   PageHeader, Tabs, SearchInput, SeverityIcon, LoadingPage, ErrorMessage, EmptyState, Modal, relativeTime,
   IncidentStatusPill, INCIDENT_SEVERITY_MAP,
@@ -28,7 +30,7 @@ export function IncidentListPage() {
   const [statusPages, setStatusPages] = useState([]);
 
   const role = currentUser.value?.role;
-  const canCreate = role === 'owner' || role === 'admin' || role === 'member';
+  const canCreate = canWrite(role);
 
   async function load() {
     setLoading(true);
@@ -116,6 +118,7 @@ export function IncidentListPage() {
           <button class="btn btn-primary" onClick={openCreate}>New Incident</button>
         )}
       />
+      <ViewOnlyNote />
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 

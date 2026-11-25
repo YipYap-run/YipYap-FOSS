@@ -2,15 +2,11 @@ package handlers
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
@@ -46,8 +42,8 @@ type slackActionPayload struct {
 		ActionID string `json:"action_id"`
 		Value    string `json:"value"`
 	} `json:"actions"`
-	ResponseURL string            `json:"response_url"`
-	Message     slackOriginalMsg  `json:"message"`
+	ResponseURL string           `json:"response_url"`
+	Message     slackOriginalMsg `json:"message"`
 }
 
 // slackOriginalMsg captures the blocks from the original Slack message so we
@@ -68,47 +64,14 @@ func (h *SlackInteractivityHandler) Handle(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Read raw body so we can verify the signature and also parse form values.
-	rawBody, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	rawBody, err := readVerifiedSlackRequest(r, h.signingSecret, time.Now())
 	if err != nil {
-		slog.Warn("slack interactivity: read body", "error", err)
-		w.WriteHeader(http.StatusBadRequest)
+		slog.Warn("slack interactivity: rejected request", "error", err)
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 	// Restore body for form parsing.
 	r.Body = io.NopCloser(bytes.NewReader(rawBody))
-
-	// Verify timestamp to prevent replay attacks.
-	tsStr := r.Header.Get("X-Slack-Request-Timestamp")
-	if tsStr == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	ts, err := strconv.ParseInt(tsStr, 10, 64)
-	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	if time.Since(time.Unix(ts, 0)).Abs() > 5*time.Minute {
-		slog.Warn("slack interactivity: request timestamp too old")
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-
-	// Verify HMAC-SHA256 signature.
-	sigHeader := r.Header.Get("X-Slack-Signature")
-	if sigHeader == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	mac := hmac.New(sha256.New, []byte(h.signingSecret))
-	mac.Write([]byte("v0:" + tsStr + ":"))
-	mac.Write(rawBody)
-	expected := "v0=" + hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(expected), []byte(sigHeader)) {
-		slog.Warn("slack interactivity: signature mismatch")
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
 
 	payloadStr := r.FormValue("payload")
 	if payloadStr == "" {

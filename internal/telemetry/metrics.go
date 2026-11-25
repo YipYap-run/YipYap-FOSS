@@ -16,6 +16,10 @@ type Metrics struct {
 	BusConsumeLatencyMS metric.Float64Histogram
 	BusNackCount        metric.Int64Counter
 
+	// CheckRequestStale counts check.request messages the checker skipped
+	// because they were older than about one monitor interval. (core-11)
+	CheckRequestStale metric.Int64Counter
+
 	// HTTP metrics.
 	HTTPRequestLatencyMS metric.Float64Histogram
 
@@ -64,13 +68,13 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 	}
 
 	m.NotificationSent, err = meter.Int64Counter("yipyap.notification.sent",
-		metric.WithDescription("Total notifications sent successfully"))
+		metric.WithDescription("Notifications the provider accepted (not proof the recipient got them)"))
 	if err != nil {
 		return nil, err
 	}
 
 	m.NotificationFail, err = meter.Int64Counter("yipyap.notification.fail",
-		metric.WithDescription("Total notification send failures"))
+		metric.WithDescription("Notifications that failed after every retry"))
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +106,12 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 
 	m.BusNackCount, err = meter.Int64Counter("yipyap.bus.nack.count",
 		metric.WithDescription("Messages nacked for redelivery"))
+	if err != nil {
+		return nil, err
+	}
+
+	m.CheckRequestStale, err = meter.Int64Counter("yipyap.checker.request_stale.count",
+		metric.WithDescription("check.request messages skipped because they were older than one monitor interval"))
 	if err != nil {
 		return nil, err
 	}

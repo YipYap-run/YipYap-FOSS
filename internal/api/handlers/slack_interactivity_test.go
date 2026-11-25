@@ -1,3 +1,6 @@
+// The hosted build serves /integrations/slack/actions with the platform
+// Slack app handler; these tests cover the self-hosted handler.
+
 package handlers_test
 
 import (

@@ -1,0 +1,103 @@
+/* Channel permissions (settings > organization) and the access note on the
+   Channels tab. Help text uses the secondary text color, which meets 4.5:1
+   on the card surface in both themes. */
+.chanperm-intro,
+.chanperm-help {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  margin: 0 0 12px;
+}
+
+.chanperm-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px 24px;
+}
+
+.chanperm-group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin: 0;
+  min-width: 0;
+}
+
+.chanperm-group legend {
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0 4px;
+}
+
+.chanperm-roles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chanperm-roles li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  /* 24px minimum target height (WCAG 2.2 2.5.8). */
+  min-height: 28px;
+}
+
+.chanperm-roles input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.chanperm-roles label {
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.chanperm-roles input:disabled + label {
+  cursor: default;
+}
+
+.chanperm-reason {
+  grid-column: 2;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+.chanperm-warning {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-degraded, #d97706);
+  background: var(--color-surface-elevated, transparent);
+  font-size: 0.8125rem;
+}
+
+.chanperm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.channels-access-note {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  margin: -8px 0 12px;
+}
+
+/* Notice in the channel failure email card when the server cannot send
+   email. Main text color on the warning tint for 4.5:1 in every theme. */
+.chanperm-warning {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  border-radius: 4px;
+}

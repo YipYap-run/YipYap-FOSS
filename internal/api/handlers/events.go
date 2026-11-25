@@ -49,6 +49,11 @@ type alertTriggerEvent struct {
 	StatusCode  int                `json:"status_code,omitempty"`
 	Error       string             `json:"error,omitempty"`
 	CheckedAt   time.Time          `json:"checked_at"`
+	// AlertID, ResolvedBy and Channel are set on a recover sent from a chat
+	// button, so the engine resolves only that alert and records who did.
+	AlertID    string `json:"alert_id,omitempty"`
+	ResolvedBy string `json:"resolved_by,omitempty"`
+	Channel    string `json:"channel,omitempty"`
 }
 
 type eventResponse struct {

@@ -22,9 +22,10 @@ type DiscordConfig struct {
 
 // Discord delivers notifications via the Discord bot API.
 type Discord struct {
-	fallback DiscordConfig
-	decrypt  notify.DecryptFunc
-	client   *http.Client
+	fallback   DiscordConfig
+	decrypt    notify.DecryptFunc
+	client     *http.Client
+	consoleURL string
 }
 
 // NewDiscord creates a Discord notifier.
@@ -34,6 +35,14 @@ func NewDiscord(fallback DiscordConfig, decrypt notify.DecryptFunc) *Discord {
 		decrypt:  decrypt,
 		client:   &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// WithConsoleURL sets the public YipYap base URL used for the "Open in
+// YipYap" link on each message. Empty leaves the link out unless the job
+// carries its own AckURL.
+func (d *Discord) WithConsoleURL(base string) *Discord {
+	d.consoleURL = strings.TrimRight(base, "/")
+	return d
 }
 
 func (d *Discord) Channel() string    { return "discord" }
@@ -47,6 +56,45 @@ func (d *Discord) Send(ctx context.Context, job domain.NotificationJob) (string,
 
 	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", cfg.ChannelID)
 
+	payload := discordMessagePayload(job, d.consoleURL)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal discord payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build discord request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bot "+cfg.BotToken)
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("discord POST: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("discord returned status %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result struct {
+		ID string `json:"id"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	return result.ID, nil
+}
+
+// discordMessagePayload builds the message body for an alert.
+//
+// Channels on this provider post with the org's own bot, so Discord sends
+// button clicks to that bot's interactions endpoint, not to YipYap. Ack and
+// Resolve buttons would look live but do nothing, so the message carries an
+// "Open in YipYap" link instead (notif-12).
+func discordMessagePayload(job domain.NotificationJob, consoleURL string) map[string]any {
 	content := fmt.Sprintf("**[%s] %s**\n%s", job.Severity, job.MonitorName, job.Message)
 	if job.RunbookURL != "" {
 		content += fmt.Sprintf("\n:clipboard: [Runbook](%s)", job.RunbookURL)
@@ -85,57 +133,11 @@ func (d *Discord) Send(ctx context.Context, job domain.NotificationJob) (string,
 		}
 	}
 
-	payload := map[string]any{
-		"content": content,
-		"components": []map[string]any{
-			{
-				"type": 1, // action row
-				"components": []map[string]any{
-					{
-						"type":      2, // button
-						"style":     1, // primary
-						"label":     "Acknowledge",
-						"custom_id": fmt.Sprintf("ack:%s", job.AlertID),
-					},
-					{
-						"type":      2, // button
-						"style":     4, // danger (red)
-						"label":     "Resolve",
-						"custom_id": fmt.Sprintf("resolve:%s", job.AlertID),
-					},
-				},
-			},
-		},
+	if link := alertConsoleLink(consoleURL, job); link != "" {
+		content += fmt.Sprintf("\n[Open in YipYap](%s)", link)
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal discord payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("build discord request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bot "+cfg.BotToken)
-
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("discord POST: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("discord returned status %d: %s", resp.StatusCode, respBody)
-	}
-
-	var result struct {
-		ID string `json:"id"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&result)
-	return result.ID, nil
+	return map[string]any{"content": content}
 }
 
 // discordInteractionPayload represents a Discord interaction callback.

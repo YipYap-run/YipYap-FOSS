@@ -3,6 +3,8 @@ package cloudevents
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -93,6 +95,10 @@ type recordingBus struct {
 	data     []byte
 	msgID    string
 	durables int
+	subjects []string
+	msgIDs   []string
+	// failPrefix makes PublishDurable fail for subjects with this prefix.
+	failPrefix string
 }
 
 func (r *recordingBus) Publish(_ context.Context, subject string, data []byte) error {
@@ -106,10 +112,15 @@ func (r *recordingBus) Publish(_ context.Context, subject string, data []byte) e
 func (r *recordingBus) PublishDurable(_ context.Context, subject string, data []byte, msgID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.failPrefix != "" && strings.HasPrefix(subject, r.failPrefix) {
+		return errors.New("nats: no responders available for request")
+	}
 	r.subject = subject
 	r.data = data
 	r.msgID = msgID
 	r.durables++
+	r.subjects = append(r.subjects, subject)
+	r.msgIDs = append(r.msgIDs, msgID)
 	return nil
 }
 
@@ -144,13 +155,68 @@ func TestPublisher_UsesEventIDForDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if r.durables != 1 {
-		t.Fatalf("expected one PublishDurable call, got %d", r.durables)
+	// One durable write to the router's egress subject and one to the
+	// fan-out subject poll/stream clients read (core-1).
+	if r.durables != 2 {
+		t.Fatalf("expected two PublishDurable calls, got %d", r.durables)
 	}
-	if r.msgID != ev.ID() {
-		t.Errorf("dedup msgID = %q, want event ID %q", r.msgID, ev.ID())
+	for i, id := range r.msgIDs {
+		if id != ev.ID() {
+			t.Errorf("publish %d dedup msgID = %q, want event ID %q", i, id, ev.ID())
+		}
 	}
-	if r.subject != "events.cloudevents.out.org-1."+types.TypeAlertFiredV1 {
-		t.Errorf("subject = %q", r.subject)
+	wantSubjects := []string{
+		"events.cloudevents.out.org-1." + types.TypeAlertFiredV1,
+		"events.cloudevents.fanout.org-1." + types.TypeAlertFiredV1,
+	}
+	for i, want := range wantSubjects {
+		if r.subjects[i] != want {
+			t.Errorf("publish %d subject = %q, want %q", i, r.subjects[i], want)
+		}
+	}
+}
+
+func TestFanoutSubjectFor(t *testing.T) {
+	got := FanoutSubjectFor("org-1", ">")
+	if got != "events.cloudevents.fanout.org-1.>" {
+		t.Fatalf("FanoutSubjectFor = %q", got)
+	}
+}
+
+// A failed fan-out write (for example a missing optional CLOUDEVENTS_FANOUT
+// stream) must not report the emit as failed: the router copy already went
+// out, so webhooks and sinks still get the event (core-1).
+func TestPublisher_FanoutFailureIsNotFatal(t *testing.T) {
+	r := &recordingBus{failPrefix: "events.cloudevents.fanout."}
+	pub := NewPublisher(r)
+	ev, err := NewAlertFiredV1(OrgSource("org-1"), types.AlertFiredV1Data{
+		AlertID: "a", MonitorID: "m", Severity: "critical", Reason: "x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pub.Publish(context.Background(), "org-1", ev); err != nil {
+		t.Fatalf("Publish with a failing fan-out write: %v", err)
+	}
+	if len(r.subjects) != 1 || r.subjects[0] != "events.cloudevents.out.org-1."+types.TypeAlertFiredV1 {
+		t.Fatalf("published subjects = %v, want only the egress subject", r.subjects)
+	}
+}
+
+// The egress write is the one the router needs, so its failure is returned.
+func TestPublisher_EgressFailureIsReturned(t *testing.T) {
+	r := &recordingBus{failPrefix: "events.cloudevents.out."}
+	pub := NewPublisher(r)
+	ev, err := NewAlertFiredV1(OrgSource("org-1"), types.AlertFiredV1Data{
+		AlertID: "a", MonitorID: "m", Severity: "critical", Reason: "x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pub.Publish(context.Background(), "org-1", ev); err == nil {
+		t.Fatal("Publish succeeded although the egress write failed")
+	}
+	if len(r.subjects) != 0 {
+		t.Fatalf("fan-out written after a failed egress write: %v", r.subjects)
 	}
 }

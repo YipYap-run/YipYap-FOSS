@@ -114,7 +114,6 @@ func collectMetricNames(fake *fakeMetricsService, initialWait time.Duration) map
 	return names
 }
 
-
 func TestOrgExporterIsolation(t *testing.T) {
 	ctx := context.Background()
 
@@ -129,6 +128,7 @@ func TestOrgExporterIsolation(t *testing.T) {
 
 	// 3. Configure "test-org" with the fake server endpoint.
 	settings.set("test-org", "otel_endpoint", endpoint)
+	settings.set("test-org", telemetry.SettingOTELInsecure, "true") // fake collector is plaintext
 
 	// 4. SyncOrg("test-org") -- creates exporter.
 	if err := manager.SyncOrg(ctx, "test-org"); err != nil {
@@ -177,6 +177,7 @@ func TestOrgExporterRemoval(t *testing.T) {
 
 	// Set up and sync.
 	settings.set("test-org", "otel_endpoint", endpoint)
+	settings.set("test-org", telemetry.SettingOTELInsecure, "true") // fake collector is plaintext
 	if err := manager.SyncOrg(ctx, "test-org"); err != nil {
 		t.Fatalf("SyncOrg: %v", err)
 	}
@@ -210,7 +211,9 @@ func TestOrgExporterCrossOrgIsolation(t *testing.T) {
 
 	// Configure two orgs pointing at different servers.
 	settings.set("org-a", "otel_endpoint", endpointA)
+	settings.set("org-a", telemetry.SettingOTELInsecure, "true")
 	settings.set("org-b", "otel_endpoint", endpointB)
+	settings.set("org-b", telemetry.SettingOTELInsecure, "true")
 
 	if err := manager.SyncOrg(ctx, "org-a"); err != nil {
 		t.Fatalf("SyncOrg(org-a): %v", err)

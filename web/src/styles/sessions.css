@@ -1,0 +1,185 @@
+/* Settings > Sessions: list and revoke the user's own sessions. */
+
+:root {
+  --sessions-ok-bg: #ecfdf5;
+  --sessions-ok-text: #064e3b;
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --sessions-ok-bg: #064e3b;
+  --sessions-ok-text: #d1fae5;
+}
+
+.sessions-tab .card {
+  overflow-wrap: anywhere;
+}
+
+.sessions-header {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sessions-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.sessions-muted {
+  color: var(--color-text-secondary);
+  margin: 12px 0;
+}
+
+.sessions-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sessions-success {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--sessions-ok-bg);
+  color: var(--sessions-ok-text);
+  font-size: 0.875rem;
+  margin-bottom: 12px;
+}
+
+.sessions-table-wrap {
+  overflow-x: auto;
+}
+
+.sessions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.sessions-caption {
+  text-align: left;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  padding-bottom: 8px;
+}
+
+.sessions-table th,
+.sessions-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sessions-table thead th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.sessions-table tbody th {
+  font-weight: normal;
+}
+
+.sessions-row-current {
+  background: var(--color-primary-bg);
+}
+
+.sessions-device {
+  min-width: 180px;
+}
+
+.sessions-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.sessions-action-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sessions-badge {
+  background: var(--color-primary-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-primary);
+}
+
+
+.sessions-ua {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+}
+
+.sessions-action {
+  flex: 0 0 auto;
+  min-height: 32px;
+}
+
+/* Narrow screens: one card per session, each cell labeled. */
+@media (max-width: 640px) {
+  .sessions-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .sessions-table,
+  .sessions-table tbody,
+  .sessions-table tr,
+  .sessions-table th,
+  .sessions-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .sessions-table tr {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    padding: 4px 0;
+  }
+
+  .sessions-table th,
+  .sessions-table td {
+    border-bottom: 0;
+    padding: 4px 12px;
+  }
+
+  .sessions-table td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--color-text-secondary);
+  }
+
+  .sessions-action-cell {
+    text-align: left;
+  }
+
+  .sessions-action {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+/* Busy rows keep focus on the pressed button, so it is aria-disabled
+   rather than disabled. Match the look of a disabled button. */
+.sessions-action[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sessions-only {
+  margin-top: 0;
+}

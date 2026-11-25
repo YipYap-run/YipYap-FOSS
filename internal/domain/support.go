@@ -22,22 +22,42 @@ type SupportTicket struct {
 	CSATComment       string     `json:"csat_comment,omitempty"`
 	CSATSubmittedAt   *time.Time `json:"csat_submitted_at,omitempty"`
 	SurveySentAt      *time.Time `json:"survey_sent_at,omitempty"`
+	// Impact is what the customer picked when opening the ticket (for example
+	// alerts_not_delivered). Priority is derived from it on the server.
+	Impact string `json:"impact,omitempty"`
+	// AwaitingStaffSince is the time of the oldest customer message with no
+	// staff reply after it. Nil when staff spoke last. Escalation times out
+	// on it.
+	AwaitingStaffSince *time.Time `json:"awaiting_staff_since,omitempty"`
+	// RelatedTicketID links a follow-up ticket to the closed ticket it
+	// continues, once that ticket can no longer be reopened by reply.
+	RelatedTicketID string `json:"related_ticket_id,omitempty"`
 
 	// Populated by joins/enrichment, not stored:
-	UserEmail    string           `json:"user_email,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
+	// UserDeleted is true when the ticket owner's account was deleted.
+	// UserEmail is then empty and UserName is DeletedUserName.
+	UserDeleted  bool             `json:"user_deleted,omitempty"`
+	UserName     string           `json:"user_name,omitempty"`
 	Messages     []SupportMessage `json:"messages,omitempty"`
 	MessageCount int              `json:"message_count,omitempty"`
 }
 
 // SupportMessage represents a message within a support ticket.
 type SupportMessage struct {
-	ID          string    `json:"id"`
-	TicketID    string    `json:"ticket_id"`
-	SenderType  string    `json:"sender_type"` // "user", "staff", or "system"
-	SenderID    string    `json:"sender_id"`
-	SenderEmail string    `json:"sender_email"`
-	Body        string    `json:"body"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string `json:"id"`
+	TicketID    string `json:"ticket_id"`
+	SenderType  string `json:"sender_type"` // "user", "staff", or "system"
+	SenderID    string `json:"sender_id"`
+	SenderEmail string `json:"sender_email"`
+	// SenderName is the author name captured at write time: the staff first
+	// name for staff replies, the user's name or email for customer messages.
+	SenderName string `json:"sender_name,omitempty"`
+	// SenderDeleted is true when the sender's account was deleted.
+	// SenderName is then DeletedUserName.
+	SenderDeleted bool      `json:"sender_deleted,omitempty"`
+	Body          string    `json:"body"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // SupportNotifyChannel represents a staff notification channel for support events.

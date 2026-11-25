@@ -1,0 +1,36 @@
+/* Escalation policies. Kept beside the page so main.css stays untouched. */
+
+.policy-main {
+  min-width: 0;
+}
+
+/* Long descriptions are clamped in the list; the full text is in the edit
+   form and the title attribute. */
+.policy-description {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* The policy an alert linked to. */
+.policy-item-linked {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
+/* Text color keeps the focus ring above 3:1 in every theme. */
+.policy-item-linked:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.policy-linked-missing {
+  margin: 0 0 12px;
+}

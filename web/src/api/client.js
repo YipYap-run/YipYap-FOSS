@@ -1,5 +1,6 @@
 import { upgradePrompt } from '../state/upgrade';
-import { staffReadonly, setStaffReadonly, notifyReadonly, readonlyMessage, setReadonlyMessage } from '../state/session';
+import { staffReadonly, setStaffReadonly, notifyReadonly, readonlyMessage, setReadonlyMessage, markMFABlocked } from '../edition/mfa';
+import { setPasswordChangeRequired } from '../state/session';
 
 const API_BASE = '/api/v1';
 
@@ -48,15 +49,34 @@ export async function api(path, options = {}) {
   });
 
   if (res.status === 401 && !path.startsWith('/auth/')) {
+    // A revoked session gets a code so the sign-in page can say why.
+    const body = await res.json().catch(() => ({}));
     if (!noRedirect) {
       setToken(null);
-      window.location.href = '/login';
+      window.location.href = body.code === 'session_revoked' ? '/login?reason=signed_out' : '/login';
+      const err = new Error('Unauthorized');
+      err.status = 401;
+      throw err;
     }
-    throw new Error('Unauthorized');
+    // The caller handles the 401 itself (for example a wrong password or a
+    // missing step-up proof), so it gets the server's message and code.
+    const err = new Error(body.error || 'Unauthorized');
+    err.status = 401;
+    err.body = body;
+    throw err;
   }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+
+    // The sign-in rate limiter answers 429 in plain text with a Retry-After
+    // header, so there is no JSON error. Give every caller a sentence it can
+    // show as is instead of "HTTP 429" (auth-16).
+    if (res.status === 429) {
+      if (!body.error) body.error = 'Too many attempts. Wait a minute and try again.';
+      const retry = parseInt(res.headers.get('Retry-After') || '', 10);
+      if (body.retry_after == null && retry > 0) body.retry_after = retry;
+    }
 
     // The server marks read-only write rejections. Learn about the session here
     // even if the initial probe was skipped, and surface the same toast the
@@ -65,6 +85,31 @@ export async function api(path, options = {}) {
       setStaffReadonly(true);
       setReadonlyMessage(body.error);
       notifyReadonly(body.error);
+    }
+
+    // The org requires MFA and this user's grace period is over. Switch the
+    // app to the enrollment-only screen.
+    if (res.status === 403 && body.code === 'mfa_enrollment_required') {
+      markMFABlocked(body.deadline);
+    }
+
+    // An admin reset this user's password. Only the change-password screen
+    // works until they choose a new one.
+    if (res.status === 403 && body.code === 'password_change_required') {
+      setPasswordChangeRequired(true);
+    }
+
+    // The account was disabled mid-session. Every further call would fail,
+    // so end the session and explain why on the sign-in page.
+    if (res.status === 403 && body.code === 'account_disabled' && !noRedirect &&
+        window.location.pathname !== '/login') {
+      setToken(null);
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+      }).catch(() => {});
+      window.location.href = '/login?reason=disabled';
     }
 
     // Plan-gate 403s carry an upgrade_required marker (set server-side on the

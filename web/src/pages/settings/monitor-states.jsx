@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'preact/hooks';
 import { get, post, patch, del } from '../../api/client';
 import { Card, Modal, Spinner, useToast, ToastContainer } from '../../components/ui';
+import { currentUser } from '../../state/auth';
+import { canWrite } from '../../state/permissions.mjs';
 
 const HEALTH_CLASSES = [
   { value: 'healthy', label: 'Healthy' },
@@ -23,6 +25,8 @@ const DEFAULT_STATE = {
 };
 
 export function MonitorStatesTab() {
+  // Viewers are read-only (decision core-billing-org#5).
+  const writer = canWrite(currentUser.value?.role);
   const [states, setStates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -110,13 +114,13 @@ export function MonitorStatesTab() {
   return (
     <div>
       <ToastContainer toasts={toasts} />
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
         <div>
           <p style="font-size: 0.875rem; color: var(--color-text-muted);">
             Custom monitor states extend the built-in Up/Degraded/Down with your own labels, colors, and health classifications.
           </p>
         </div>
-        <button class="btn btn-primary btn-sm" onClick={openCreate}>Add State</button>
+        {writer && <button class="btn btn-primary btn-sm" onClick={openCreate}>Add State</button>}
       </div>
 
       <div style="display: grid; gap: 8px;">
@@ -145,13 +149,13 @@ export function MonitorStatesTab() {
                   {state.health_class} / {state.severity} / position {state.position}
                 </div>
               </div>
-              {!state.is_builtin && (
+              {writer && !state.is_builtin && (
                 <div style="display: flex; gap: 4px;">
                   <button class="btn btn-xs" onClick={() => openEdit(state)}>Edit</button>
                   <button class="btn btn-xs btn-danger" onClick={() => handleDelete(state.id)}>Delete</button>
                 </div>
               )}
-              {state.is_builtin && (
+              {writer && state.is_builtin && (
                 <button class="btn btn-xs" onClick={() => openEdit(state)}>Edit</button>
               )}
             </div>

@@ -77,12 +77,12 @@ func TestValidatePasswordReset_RejectsSessionToken(t *testing.T) {
 	}
 }
 
-func TestValidatePasswordReset_RejectsMFAToken(t *testing.T) {
+func TestValidatePasswordReset_RejectsRestrictedAudienceToken(t *testing.T) {
 	issuer := NewJWTIssuer([]byte("test-secret"), 24*time.Hour)
-	token, _ := issuer.IssueMFA("u1", "org1", "owner")
+	token, _ := issuer.IssueEmailVerification("u1", "org1", "user@example.com")
 	_, err := issuer.ValidatePasswordReset(token)
 	if err == nil {
-		t.Fatal("expected error validating MFA token as password-reset")
+		t.Fatal("expected error validating a restricted-audience token as password-reset")
 	}
 }
 
@@ -189,9 +189,9 @@ func TestSurveyToken(t *testing.T) {
 		t.Error("survey token accepted as a session token")
 	}
 
-	mfa, _ := issuer.IssueMFA("user_1", "org_1", "owner")
-	if _, err := issuer.ValidateSurvey(mfa); err == nil {
-		t.Error("MFA token accepted as a survey token")
+	restricted, _ := issuer.IssuePasswordReset("user_1", "org_1", "a@example.com", "hash")
+	if _, err := issuer.ValidateSurvey(restricted); err == nil {
+		t.Error("restricted-audience token accepted as a survey token")
 	}
 
 	expired, _ := issuer.IssueSurvey("tkt_1", "user_1", "org_1", -time.Minute)
@@ -201,5 +201,28 @@ func TestSurveyToken(t *testing.T) {
 
 	if _, err := NewJWTIssuer([]byte("other"), time.Hour).ValidateSurvey(tok); err == nil {
 		t.Error("survey token accepted with the wrong key")
+	}
+}
+
+func TestIssueSessionToken_RecordsAMRAndSID(t *testing.T) {
+	issuer := NewJWTIssuer([]byte("test-secret"), time.Hour)
+	if _, err := issuer.IssueSessionToken("u1", "o1", "member", AMRPassword, "", time.Now().Add(time.Hour)); err == nil {
+		t.Fatal("IssueSessionToken accepted an empty session id")
+	}
+	for _, amr := range []string{AMRPassword, AMRSSO} {
+		tok, err := issuer.IssueSessionToken("u1", "o1", "member", amr, "sid-"+amr, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatalf("IssueSessionToken(%s): %v", amr, err)
+		}
+		claims, err := issuer.Validate(tok)
+		if err != nil {
+			t.Fatalf("Validate(%s): %v", amr, err)
+		}
+		if claims.AMR != amr {
+			t.Errorf("AMR = %q, want %q", claims.AMR, amr)
+		}
+		if claims.SID != "sid-"+amr {
+			t.Errorf("SID = %q, want %q", claims.SID, "sid-"+amr)
+		}
 	}
 }

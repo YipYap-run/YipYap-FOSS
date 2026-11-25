@@ -11,27 +11,31 @@ type Config struct {
 	ListenAddr            string
 	DBDsn                 string // connection string  - file path for sqlite, DSN for postgres
 	JWTSecret             string
+	DataDir               string // YIPYAP_DATA_DIR; where generated local state (e.g. the JWT secret) lives. See ResolveDataDir.
 	JWTExpiry             time.Duration
-	APIKeySecret          string // separate HMAC key for API key hashing; falls back to JWTSecret if empty
-	NotificationKey       string // hex-encoded 32-byte AES-256 key for encrypting notification configs
-	DiscordPublicKey      string // hex-encoded Ed25519 public key for Discord interaction verification
-	SlackSigningSecret    string // Slack app signing secret for request verification
-	TelegramWebhookSecret string // secret token for Telegram webhook verification
-	TelegramBotToken      string // platform Telegram bot API token
-	TelegramBotUsername   string // public bot username for UI help
-	RegistrationEnabled   bool   // when true, allow new org+user registration via POST /auth/register
-	TrustedProxyCIDRs     string // comma-separated CIDRs or "cloudflare"  - proxy headers trusted only from these IPs
-	DevSeed               bool   // when true, populate database with mock development data
-	ProConfig                    // Pro/Enterprise fields (empty struct in FOSS)
+	APIKeySecret          string        // separate HMAC key for API key hashing; falls back to JWTSecret if empty
+	APIKeyMaxTTL          time.Duration // longest lifetime allowed for an API key created with an expiry
+	NotificationKey       string        // hex-encoded 32-byte AES-256 key for encrypting notification configs
+	DiscordPublicKey      string        // hex-encoded Ed25519 public key for Discord interaction verification
+	SlackSigningSecret    string        // Slack app signing secret for request verification
+	TelegramWebhookSecret string        // secret token for Telegram webhook verification
+	TelegramBotToken      string        // platform Telegram bot API token
+	TelegramBotUsername   string        // public bot username for UI help
+	RegistrationEnabled   bool          // when true, allow new org+user registration via POST /auth/register
+	TrustedProxyCIDRs     string        // comma-separated CIDRs or "cloudflare"  - proxy headers trusted only from these IPs
+	DevSeed               bool          // when true, populate database with mock development data
+	ProConfig                           // Pro/Enterprise fields (empty struct in FOSS)
 }
 
 func Load() *Config {
 	c := &Config{
 		ListenAddr:            envOr("YIPYAP_LISTEN", ":8080"),
 		DBDsn:                 envOr("YIPYAP_DB_DSN", "yipyap.db"),
-		JWTSecret:             envOr("YIPYAP_JWT_SECRET", ""),
+		JWTSecret:             envOr(JWTSecretEnv, ""),
+		DataDir:               envOr("YIPYAP_DATA_DIR", ""),
 		JWTExpiry:             envDuration("YIPYAP_JWT_EXPIRY", 24*time.Hour),
 		APIKeySecret:          envOr("YIPYAP_API_KEY_SECRET", ""),
+		APIKeyMaxTTL:          envDuration("YIPYAP_API_KEY_MAX_TTL", 365*24*time.Hour),
 		NotificationKey:       envOr("YIPYAP_NOTIFICATION_KEY", ""),
 		DiscordPublicKey:      envOr("YIPYAP_DISCORD_PUBLIC_KEY", ""),
 		SlackSigningSecret:    envOr("YIPYAP_SLACK_SIGNING_SECRET", ""),

@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { get, post, del } from '../../api/client';
-import { PageHeader, Card, StatusBadge, UptimeBar, LoadingPage, ErrorMessage, formatTime, formatDuration } from '../../components/ui';
-import { appMeta } from '../../state/auth';
+import { PageHeader, Card, StatusBadge, UptimeBar, LoadingPage, ErrorMessage, formatTime, formatDuration, useToast, ToastContainer } from '../../components/ui';
+import { appMeta, currentUser } from '../../state/auth';
+import { canWrite } from '../../state/permissions.mjs';
+import { ViewOnlyNote } from '../../components/view-only-note';
 import { safeHref } from '../../utils/url';
 import 'uplot/dist/uPlot.min.css';
 
@@ -86,6 +88,7 @@ const PAGE_SIZE = 50;
 
 export function MonitorDetailPage({ id }) {
   const [monitor, setMonitor] = useState(null);
+  const { toasts, toast } = useToast();
   const [checks, setChecks] = useState([]);
   const [checksTotal, setChecksTotal] = useState(0);
   const [checksPage, setChecksPage] = useState(0);
@@ -96,6 +99,7 @@ export function MonitorDetailPage({ id }) {
   const [latency, setLatency] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const [chartError, setChartError] = useState(false);
   const chartRef = useRef(null);
 
@@ -146,6 +150,7 @@ export function MonitorDetailPage({ id }) {
   }
 
   useEffect(() => { load(); }, [id]);
+
 
   // Latency chart with uPlot (lazy loaded).
   useEffect(() => {
@@ -240,22 +245,33 @@ export function MonitorDetailPage({ id }) {
     }
   }
 
+  // Runs a pause/resume or mute/unmute and reports failures instead of
+  // leaving an unhandled rejection.
+  async function runAction(action, failMsg) {
+    setActionError(null);
+    try {
+      await post(`/monitors/${id}/${action}`, {});
+      await load();
+    } catch (err) {
+      if (err.readonly) return;
+      const msg = err.message || failMsg || 'Could not update this monitor.';
+      setActionError(msg);
+      toast(msg, 'error');
+    }
+  }
+
   return (
     <div class="monitor-detail">
+      <ToastContainer toasts={toasts} />
       <PageHeader title={monitor.name}
         subtitle={`${monitor.type} monitor`}
-        actions={
+        actions={canWrite(currentUser.value?.role) && (
           <div class="btn-group">
-            <button class="btn btn-sm" onClick={async () => {
-              await post(`/monitors/${id}/${isPaused ? 'resume' : 'pause'}`, {});
-              load();
-            }}>
+            <button class="btn btn-sm" onClick={() => runAction(isPaused ? 'resume' : 'pause', 'Could not change the monitor state')}>
               {isPaused ? 'Resume' : 'Pause'}
             </button>
-            <button class="btn btn-sm" title={monitor.muted ? 'Checks running, notifications suppressed' : 'Mute notifications'} onClick={async () => {
-              await post(`/monitors/${id}/${monitor.muted ? 'unmute' : 'mute'}`, {});
-              load();
-            }}>
+            <button class="btn btn-sm" title={monitor.muted ? 'Checks running, notifications suppressed' : 'Mute notifications'}
+              onClick={() => runAction(monitor.muted ? 'unmute' : 'mute', 'Could not change notifications for this monitor')}>
               {monitor.muted ? 'Unmute' : 'Mute'}
             </button>
             <a href={`/monitors?edit=${id}`} class="btn btn-sm" data-readonly-block>Edit</a>
@@ -270,8 +286,13 @@ export function MonitorDetailPage({ id }) {
               }
             }}>Delete</button>
           </div>
-        }
+        )}
       />
+      <ViewOnlyNote />
+
+      {actionError && (
+        <div class="form-error" role="alert">{actionError}</div>
+      )}
 
       {monitor.description && (
         <p class="monitor-description" style="white-space: pre-wrap; color: var(--color-text-secondary); margin: 0 0 16px 0; font-size: 0.95rem; line-height: 1.5;">

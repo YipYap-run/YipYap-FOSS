@@ -1,11 +1,13 @@
 package providers
 
 import (
-	"context"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/checker"
 )
@@ -102,90 +104,6 @@ func TestValidateCloudEventHTTPConfig_AllowsLocalhost(t *testing.T) {
 	}
 }
 
-// TestSSRFGuardedDialContext_BlocksPrivateAtDial is the H-4 regression.
-// The scenario: create-time validation observed a public A for the host,
-// but by Dial time the attacker has flipped the DNS to 127.0.0.1 (or any
-// private range). The guarded DialContext re-resolves at connect time
-// and rejects with ErrSSRFBlocked. Redirects follow the same path so a
-// 302 to a private address is also blocked.
-func TestSSRFGuardedDialContext_BlocksPrivateAtDial(t *testing.T) {
-	origCP := checker.AllowPrivateControlPlaneTargets
-	checker.AllowPrivateControlPlaneTargets = false
-	defer func() { checker.AllowPrivateControlPlaneTargets = origCP }()
-
-	// Base dialer that would succeed were it not wrapped. We use a dialer
-	// that would connect to 127.0.0.1 in production; here we just assert
-	// the guard short-circuits before reaching the net layer.
-	called := false
-	base := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		called = true
-		return nil, errors.New("must not reach base dialer")
-	}
-	guarded := ssrfGuardedDialContext(base)
-
-	// Simulate a post-rebind connect to 127.0.0.1.
-	_, err := guarded(context.Background(), "tcp", "127.0.0.1:443")
-	if err == nil {
-		t.Fatalf("expected ErrSSRFBlocked, got nil")
-	}
-	if !errors.Is(err, checker.ErrSSRFBlocked) {
-		t.Fatalf("expected errors.Is(err, ErrSSRFBlocked); got %v", err)
-	}
-	if called {
-		t.Fatalf("base dialer must not be invoked when guard trips")
-	}
-
-	// Also simulate the metadata endpoint.
-	_, err = guarded(context.Background(), "tcp", "169.254.169.254:80")
-	if !errors.Is(err, checker.ErrSSRFBlocked) {
-		t.Fatalf("metadata endpoint: expected ErrSSRFBlocked; got %v", err)
-	}
-
-	// IPv6 private must also trip.
-	_, err = guarded(context.Background(), "tcp", "[fd00::1]:443")
-	if !errors.Is(err, checker.ErrSSRFBlocked) {
-		t.Fatalf("IPv6 ULA: expected ErrSSRFBlocked; got %v", err)
-	}
-
-	// A public address reaches the base dialer.
-	baseReached := false
-	basePublic := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		baseReached = true
-		return nil, errors.New("stop here")
-	}
-	guardedPublic := ssrfGuardedDialContext(basePublic)
-	_, err = guardedPublic(context.Background(), "tcp", "8.8.8.8:443")
-	if err == nil || err.Error() != "stop here" {
-		t.Fatalf("public address: expected to reach base dialer; got %v", err)
-	}
-	if !baseReached {
-		t.Fatalf("public address: base dialer not invoked")
-	}
-}
-
-// TestSSRFGuardedDialContext_OptInBypasses confirms the opt-in disables
-// the guard, needed for localhost CloudEvent development.
-func TestSSRFGuardedDialContext_OptInBypasses(t *testing.T) {
-	origCP := checker.AllowPrivateControlPlaneTargets
-	checker.AllowPrivateControlPlaneTargets = true
-	defer func() { checker.AllowPrivateControlPlaneTargets = origCP }()
-
-	reached := false
-	base := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		reached = true
-		return nil, errors.New("base ok")
-	}
-	guarded := ssrfGuardedDialContext(base)
-
-	_, err := guarded(context.Background(), "tcp", "127.0.0.1:443")
-	if err == nil || err.Error() != "base ok" {
-		t.Fatalf("opt-in: expected base dialer to run; got %v", err)
-	}
-	if !reached {
-		t.Fatalf("opt-in: base dialer not invoked")
-	}
-}
-
 // TestIsPrivateAddr_Matrix asserts the blocked-range matrix from the
 // security brief.
 func TestIsPrivateAddr_Matrix(t *testing.T) {
@@ -266,33 +184,53 @@ func TestIsPrivateAddr_BlocksIPv4CompatV6(t *testing.T) {
 	}
 }
 
-// TestSSRFGuardedDialContext_BlocksIPv4CompatV6 confirms the dial-time
-// guard also rejects the IPv4-compat v6 form. Pairs with the matrix test
-// above; the dial path is what actually fires when a sink redirects to
-// or DNS-rebinds onto ::169.254.169.254.
-func TestSSRFGuardedDialContext_BlocksIPv4CompatV6(t *testing.T) {
+// TestCloudEventClient_BlocksPrivateAtDial is the H-4 regression: the
+// sink client refuses to connect to loopback, metadata and IPv4-compat
+// v6 addresses when the control-plane toggle is off.
+func TestCloudEventClient_BlocksPrivateAtDial(t *testing.T) {
 	origCP := checker.AllowPrivateControlPlaneTargets
 	checker.AllowPrivateControlPlaneTargets = false
 	defer func() { checker.AllowPrivateControlPlaneTargets = origCP }()
 
-	called := false
-	base := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		called = true
-		return nil, errors.New("must not reach base dialer")
-	}
-	guarded := ssrfGuardedDialContext(base)
-
-	for _, addr := range []string{
-		"[::169.254.169.254]:80",
-		"[::10.0.0.1]:443",
-		"[::127.0.0.1]:8080",
+	client := newSSRFGuardedHTTPClient(2 * time.Second)
+	for _, u := range []string{
+		"http://127.0.0.1:1/sink",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://10.0.0.1/sink",
+		"http://[fd00::1]/sink",
+		"http://[::169.254.169.254]/sink",
+		"http://[::10.0.0.1]/sink",
 	} {
-		_, err := guarded(context.Background(), "tcp", addr)
+		resp, err := client.Get(u)
+		if err == nil {
+			_ = resp.Body.Close()
+			t.Errorf("GET %s: expected ErrSSRFBlocked, got a response", u)
+			continue
+		}
 		if !errors.Is(err, checker.ErrSSRFBlocked) {
-			t.Errorf("guarded(%q) = %v; want ErrSSRFBlocked", addr, err)
+			t.Errorf("GET %s: want ErrSSRFBlocked, got %v", u, err)
 		}
 	}
-	if called {
-		t.Fatalf("base dialer must not be invoked for IPv4-compat v6 private addresses")
+}
+
+// TestCloudEventClient_OptInBypasses confirms the opt-in disables the
+// guard, which localhost CloudEvent development needs.
+func TestCloudEventClient_OptInBypasses(t *testing.T) {
+	origCP := checker.AllowPrivateControlPlaneTargets
+	checker.AllowPrivateControlPlaneTargets = true
+	defer func() { checker.AllowPrivateControlPlaneTargets = origCP }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	resp, err := newSSRFGuardedHTTPClient(2 * time.Second).Get(srv.URL)
+	if err != nil {
+		t.Fatalf("opt-in: expected the request to reach the local sink, got %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }

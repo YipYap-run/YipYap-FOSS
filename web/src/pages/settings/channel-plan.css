@@ -1,0 +1,163 @@
+/* Paid channel status and refused Test notes (settings > channels). The
+   badges are words, so status does not rely on color. Text uses the main
+   or secondary tone on a tinted background for 4.5:1 in every theme. */
+.channel-plan-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.channel-plan-grace {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning);
+}
+
+.channel-plan-paused {
+  background: var(--color-down-bg);
+  border-color: var(--color-down);
+}
+
+.channel-plan-line,
+.channel-test-note {
+  display: block;
+  padding-left: 16px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.channel-plan-line-paused,
+.channel-test-note {
+  color: var(--color-text);
+}
+
+.channel-plan-line a,
+.channel-test-note a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.channel-test-note {
+  margin-top: 2px;
+  padding: 4px 8px;
+  margin-left: 16px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  border-radius: 2px;
+}
+
+/* One polite live region for the list, read by screen readers only. */
+.channel-sr-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Page banner after the org left its paid plan. The label word
+   ("Grace period", "Disabled") carries the state; the tint and side bar
+   only repeat it. Body text is --color-text on the tinted background,
+   which clears 4.5:1 in light, dark and OLED. The side bar uses the
+   status color for 3:1 against the surface. */
+.channel-plan-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-warning);
+  border-left-width: 4px;
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.channel-plan-banner-disabled {
+  border-color: var(--color-down);
+  background: var(--color-down-bg);
+}
+
+.channel-plan-banner p {
+  margin: 0;
+}
+
+.channel-plan-banner-label {
+  display: inline-block;
+  margin-right: 2px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
+
+.channel-plan-banner-names {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.channel-plan-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+/* A text link styled as the next step. The underline stays so it reads
+   as a link without color; 24px min height meets the WCAG 2.2 target
+   size rule. */
+.channel-plan-banner-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.channel-plan-banner-link:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* A failed Test: the reason stays under the row until dismissed. */
+.channel-test-note-failed {
+  border-left-color: var(--color-down);
+  background: var(--color-down-bg);
+}
+
+.channel-test-note-dismiss {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  min-height: 24px;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.channel-test-note-dismiss:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}

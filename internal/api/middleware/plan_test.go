@@ -47,7 +47,7 @@ func makeAuthenticatedRequest(t *testing.T, jwt *auth.JWTIssuer, orgID string, h
 		t.Fatal(err)
 	}
 
-	authed := middleware.Auth(jwt, nil, nil)(handler)
+	authed := middleware.Auth(jwt, nil, nil, nil)(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

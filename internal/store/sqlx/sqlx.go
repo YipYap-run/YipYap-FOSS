@@ -147,6 +147,12 @@ func Migrate(ctx context.Context, db *sql.DB, fsys fs.FS, dir string, d Dialect)
 			return fmt.Errorf("read migration %d: %w", m.Version, err)
 		}
 
+		if check := migrationPrecheck(m.Filename); check != nil {
+			if err := check(ctx, db, m); err != nil {
+				return err
+			}
+		}
+
 		if d.NoTransaction {
 			if err := applyMigration(ctx, db, string(data), m, d); err != nil {
 				return err

@@ -1,0 +1,148 @@
+/* Phone number verification (SMS and voice channels). */
+
+:root {
+  --phone-verify-tag-fg: #92400e;
+  --phone-verify-tag-border: #f59e0b;
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --phone-verify-tag-fg: #fcd34d;
+  --phone-verify-tag-border: #b45309;
+}
+
+/* Amber text on the warning background. The stock --color-warning is too
+   light for text on --color-warning-bg (about 2:1), so this uses darker
+   amber in light mode and lighter amber in dark modes (both above 4.5:1). */
+.label-tag.tag-unverified {
+  background: var(--color-warning-bg);
+  color: var(--phone-verify-tag-fg);
+  border: 1px solid var(--phone-verify-tag-border);
+  font-weight: 600;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.phone-verify {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.phone-verify-lead {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.phone-verify-number {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.phone-verify-status {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.phone-verify-send {
+  flex-wrap: wrap;
+}
+
+.phone-verify-send .btn {
+  min-height: 32px;
+}
+
+.phone-verify-have-code,
+.btn-link.phone-verify-have-code {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  min-height: 24px;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.phone-verify-have-code:focus-visible,
+.phone-verify-input:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.phone-verify-form .form-group {
+  margin-bottom: 0;
+}
+
+.phone-verify-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.phone-verify-input {
+  flex: 1 1 10ch;
+  max-width: 16ch;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  letter-spacing: 0.3em;
+  padding: 8px 12px;
+}
+
+.phone-verify-error:empty {
+  display: none;
+}
+
+.phone-verify-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--phone-verify-tag-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.phone-verify-notice p {
+  flex: 1 1 220px;
+}
+
+.phone-verify-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+@media (max-width: 480px) {
+  .phone-verify-send .btn,
+  .phone-verify-row .btn {
+    flex: 1 1 100%;
+  }
+  .phone-verify-input {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}

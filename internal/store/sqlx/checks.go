@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,7 +96,7 @@ func (s *CheckStore) GetLatest(ctx context.Context, monitorID string) (*domain.M
 		`SELECT `+checkCols+` FROM monitor_checks WHERE monitor_id = ? ORDER BY checked_at DESC LIMIT 1`, monitorID))
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("no checks found")
+			return nil, store.ErrNoChecks
 		}
 		return nil, err
 	}
@@ -167,6 +168,69 @@ func (s *CheckStore) GetLatestByMonitors(ctx context.Context, monitorIDs []strin
 		out[c.MonitorID] = c
 	}
 	return out, rows.Err()
+}
+
+// recentChecksChunk caps how many monitors go into one UNION ALL statement,
+// well under SQLite's 500-term compound select limit.
+const recentChecksChunk = 100
+
+// ListRecentByMonitors returns the newest perMonitor checks of each monitor.
+// Each monitor gets its own ORDER BY ... LIMIT branch of one UNION ALL, so
+// every branch reads only its newest rows from the (monitor_id, checked_at)
+// index instead of ranking a monitor's whole history.
+func (s *CheckStore) ListRecentByMonitors(ctx context.Context, monitorIDs []string, perMonitor int) (map[string][]*domain.MonitorCheck, error) {
+	out := make(map[string][]*domain.MonitorCheck, len(monitorIDs))
+	if len(monitorIDs) == 0 || perMonitor <= 0 {
+		return out, nil
+	}
+
+	q := s.q
+	if s.yugabyte && s.db != nil {
+		tx, err := FollowerReadTx(ctx, s.db)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Commit() }()
+		q = RebindingQueryable{Q: tx}
+	}
+
+	for start := 0; start < len(monitorIDs); start += recentChecksChunk {
+		end := min(start+recentChecksChunk, len(monitorIDs))
+		var b strings.Builder
+		args := make([]any, 0, 2*(end-start))
+		for i, id := range monitorIDs[start:end] {
+			if i > 0 {
+				b.WriteString(" UNION ALL ")
+			}
+			fmt.Fprintf(&b, "SELECT * FROM (SELECT %s FROM monitor_checks WHERE monitor_id = ? ORDER BY checked_at DESC LIMIT ?) r%d", checkCols, i)
+			args = append(args, id, perMonitor)
+		}
+		if err := s.collectRecent(ctx, q, b.String(), args, out); err != nil {
+			return nil, err
+		}
+	}
+	// UNION ALL does not promise branch order; restore newest first.
+	for id, checks := range out {
+		sort.SliceStable(checks, func(i, j int) bool { return checks[i].CheckedAt.After(checks[j].CheckedAt) })
+		out[id] = checks
+	}
+	return out, nil
+}
+
+func (s *CheckStore) collectRecent(ctx context.Context, q Queryable, query string, args []any, out map[string][]*domain.MonitorCheck) error {
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		c, err := scanCheck(rows)
+		if err != nil {
+			return err
+		}
+		out[c.MonitorID] = append(out[c.MonitorID], c)
+	}
+	return rows.Err()
 }
 
 func (s *CheckStore) GetStatusSince(ctx context.Context, monitorID string, status domain.CheckStatus) (*time.Time, error) {

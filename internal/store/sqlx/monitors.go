@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
@@ -91,7 +92,7 @@ func (s *MonitorStore) ListByOrg(ctx context.Context, orgID string, filter store
 		query += " AND enabled = ?"
 		args = append(args, s.d.BoolArg(*filter.Enabled))
 	}
-	query += " ORDER BY name LIMIT ? OFFSET ?"
+	query += " ORDER BY name, id LIMIT ? OFFSET ?"
 	args = append(args, limit, filter.Offset)
 
 	q := s.q
@@ -255,6 +256,34 @@ func (s *MonitorStore) GetLabels(ctx context.Context, monitorID string) (map[str
 	return labels, rows.Err()
 }
 
+func (s *MonitorStore) GetLabelsByMonitors(ctx context.Context, monitorIDs []string) (map[string]map[string]string, error) {
+	out := make(map[string]map[string]string)
+	if len(monitorIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(monitorIDs))
+	for i, id := range monitorIDs {
+		args[i] = id
+	}
+	rows, err := s.q.QueryContext(ctx,
+		`SELECT monitor_id, key, value FROM monitor_labels WHERE monitor_id IN (?`+strings.Repeat(", ?", len(monitorIDs)-1)+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, k, v string
+		if err := rows.Scan(&id, &k, &v); err != nil {
+			return nil, err
+		}
+		if out[id] == nil {
+			out[id] = make(map[string]string)
+		}
+		out[id][k] = v
+	}
+	return out, rows.Err()
+}
+
 func (s *MonitorStore) DeleteLabel(ctx context.Context, monitorID, key string) error {
 	_, err := s.q.ExecContext(ctx,
 		`DELETE FROM monitor_labels WHERE monitor_id = ? AND key = ?`, monitorID, key)
@@ -289,7 +318,11 @@ func scanMonitorRow(r Scanner) (*domain.Monitor, error) {
 		return nil, err
 	}
 	m.Type = domain.MonitorType(monType)
-	m.Config = json.RawMessage(config)
+	// A monitor saved without a config has an empty column. An empty
+	// RawMessage fails to marshal, which turned GET into a 200 with no body.
+	if config != "" {
+		m.Config = json.RawMessage(config)
+	}
 	m.DownSeverity = domain.Severity(downSev)
 	m.DegradedSeverity = domain.Severity(degSev)
 	_ = json.Unmarshal([]byte(regions), &m.Regions)

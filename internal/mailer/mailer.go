@@ -16,6 +16,10 @@ type Config struct {
 	Username string
 	Password string
 	From     string
+	// TLSMode is "tls" for implicit TLS, "starttls" for a required STARTTLS
+	// upgrade, or empty to pick by port (465 implicit, anything else
+	// STARTTLS). There is no cleartext mode.
+	TLSMode string
 }
 
 type Mailer struct {
@@ -52,12 +56,28 @@ func (m *Mailer) Send(to, subject, body string) error {
 // aborting if the server does not advertise STARTTLS so credentials are never
 // sent in cleartext.
 func (m *Mailer) SendMessage(to string, msg []byte) error {
+	return m.SendMessageTo([]string{to}, msg)
+}
+
+// SendMessageTo is SendMessage for one or more envelope recipients, sent as
+// a single SMTP transaction.
+func (m *Mailer) SendMessageTo(rcpts []string, msg []byte) error {
+	if len(rcpts) == 0 {
+		return fmt.Errorf("smtp: no recipients")
+	}
+	implicit := m.cfg.Port == 465
+	switch m.cfg.TLSMode {
+	case "tls":
+		implicit = true
+	case "starttls":
+		implicit = false
+	}
 	done := make(chan error, 1)
 	go func() {
-		if m.cfg.Port == 465 {
-			done <- m.sendSMTPS(to, msg)
+		if implicit {
+			done <- m.sendSMTPS(rcpts, msg)
 		} else {
-			done <- m.sendSTARTTLS(to, msg)
+			done <- m.sendSTARTTLS(rcpts, msg)
 		}
 	}()
 	select {
@@ -71,13 +91,13 @@ func (m *Mailer) SendMessage(to string, msg []byte) error {
 // sendSMTPS sends mail over an implicit TLS connection (port 465 / SMTPS).
 // The TLS handshake is performed before any SMTP traffic so credentials are
 // never sent in cleartext.
-func (m *Mailer) sendSMTPS(to string, msg []byte) error {
+func (m *Mailer) sendSMTPS(rcpts []string, msg []byte) error {
 	addr := net.JoinHostPort(m.cfg.Host, strconv.Itoa(m.cfg.Port))
 	tlsCfg := &tls.Config{
 		ServerName: m.cfg.Host,
 		MinVersion: tls.VersionTLS12,
 	}
-	conn, err := tls.Dial("tcp", addr, tlsCfg)
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 15 * time.Second}, "tcp", addr, tlsCfg)
 	if err != nil {
 		return fmt.Errorf("smtps dial: %w", err)
 	}
@@ -98,8 +118,10 @@ func (m *Mailer) sendSMTPS(to string, msg []byte) error {
 	if err := client.Mail(m.cfg.From); err != nil {
 		return fmt.Errorf("smtps MAIL FROM: %w", err)
 	}
-	if err := client.Rcpt(to); err != nil {
-		return fmt.Errorf("smtps RCPT TO: %w", err)
+	for _, to := range rcpts {
+		if err := client.Rcpt(to); err != nil {
+			return fmt.Errorf("smtps RCPT TO: %w", err)
+		}
 	}
 	wc, err := client.Data()
 	if err != nil {
@@ -115,7 +137,7 @@ func (m *Mailer) sendSMTPS(to string, msg []byte) error {
 // via STARTTLS before any authentication takes place (port 587).  If the server
 // does not advertise STARTTLS, the send is aborted rather than falling back to
 // cleartext.
-func (m *Mailer) sendSTARTTLS(to string, msg []byte) error {
+func (m *Mailer) sendSTARTTLS(rcpts []string, msg []byte) error {
 	addr := net.JoinHostPort(m.cfg.Host, strconv.Itoa(m.cfg.Port))
 
 	conn, err := net.DialTimeout("tcp", addr, 15*time.Second)
@@ -152,8 +174,10 @@ func (m *Mailer) sendSTARTTLS(to string, msg []byte) error {
 	if err := client.Mail(m.cfg.From); err != nil {
 		return fmt.Errorf("smtp MAIL FROM: %w", err)
 	}
-	if err := client.Rcpt(to); err != nil {
-		return fmt.Errorf("smtp RCPT TO: %w", err)
+	for _, to := range rcpts {
+		if err := client.Rcpt(to); err != nil {
+			return fmt.Errorf("smtp RCPT TO: %w", err)
+		}
 	}
 	wc, err := client.Data()
 	if err != nil {

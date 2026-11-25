@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'preact/hooks';
 import { get } from '../../api/client';
-import { wsMessages } from '../../api/ws';
-import { PageHeader, Card, StatusBadge, SeverityBadge, LoadingPage, ErrorMessage, relativeTime } from '../../components/ui';
+import { useLiveRefresh } from '../../state/live';
+import { PageHeader, Card, SeverityBadge, AlertStatusPill, LoadingPage, ErrorMessage, relativeTime } from '../../components/ui';
+import { countLabel } from '../alerts/list.jsx';
+
+// The dashboard asks for at most this many open alerts; a full page shows
+// as "200+" so the count does not read as exact.
+const OPEN_ALERT_CAP = 200;
+const STATUS_TEXT = { up: 'up', down: 'down', degraded: 'degraded', paused: 'paused', unknown: 'pending' };
 
 export function DashboardPage() {
   const [monitors, setMonitors] = useState([]);
@@ -10,20 +16,24 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+  // quiet is a background refresh after a live event: no full-page
+  // spinner, and a failed refresh keeps what is on screen.
+  async function load(quiet = false) {
+    if (!quiet) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [m, a, s] = await Promise.all([
         get('/monitors'),
-        get('/alerts?status=firing&status=acknowledged'),
+        get(`/alerts?status=firing&status=acknowledged&limit=${OPEN_ALERT_CAP}`),
         get('/schedules').catch(() => []),
       ]);
       setMonitors(m.monitors || m || []);
       setAlerts(a.alerts || a || []);
       setSchedules(s.schedules || s || []);
     } catch (err) {
-      setError(err);
+      if (!quiet) setError(err);
     } finally {
       setLoading(false);
     }
@@ -31,18 +41,12 @@ export function DashboardPage() {
 
   useEffect(() => { load(); }, []);
 
-  // Refresh on WS messages.
-  useEffect(() => {
-    if (wsMessages.value.length > 0) {
-      const msg = wsMessages.value[0];
-      if (msg.type === 'alert.fired' || msg.type === 'alert.resolved' || msg.type === 'monitor.status_changed') {
-        load();
-      }
-    }
-  }, [wsMessages.value]);
+  // Every live frame (monitor down/up, alert opened, acked, resolved,
+  // escalated) can change the counts here, so any frame refreshes.
+  useLiveRefresh(() => load(true));
 
   if (loading) return <LoadingPage />;
-  if (error) return <ErrorMessage error={error} onRetry={load} />;
+  if (error) return <ErrorMessage error={error} onRetry={() => load()} />;
 
   const monitorsByStatus = groupBy(monitors, m => m.status || 'unknown');
   const alertsBySeverity = groupBy(alerts, a => a.severity || 'info');
@@ -69,8 +73,8 @@ export function DashboardPage() {
           <div class="stat-label">Monitors Degraded</div>
         </Card>
         <Card class="stat-card stat-alerts">
-          <div class="stat-value">{alerts.length}</div>
-          <div class="stat-label">Active Alerts</div>
+          <div class="stat-value">{countLabel(alerts.length, OPEN_ALERT_CAP)}</div>
+          <div class="stat-label">Open Alerts</div>
         </Card>
         {pendingCount > 0 && (
           <Card class="stat-card stat-pending">
@@ -87,7 +91,10 @@ export function DashboardPage() {
             {monitors.map(m => (
               <a key={m.id} href={`/monitors/${m.id}`} class={`monitor-tile status-${m.status || 'unknown'}`}>
                 <span class="monitor-tile-name">{m.name}</span>
-                <span class="monitor-tile-type">{m.type}</span>
+                <span class="monitor-tile-type">
+                  {m.type}
+                  <span class="sr-only">, {STATUS_TEXT[m.status || 'unknown'] || m.status}</span>
+                </span>
               </a>
             ))}
             {monitors.length === 0 && <p class="text-muted">No monitors configured</p>}
@@ -95,17 +102,23 @@ export function DashboardPage() {
         </Card>
 
         <Card class="dashboard-section">
-          <h3>Active Alerts</h3>
+          <h3>Open Alerts</h3>
           <div class="alert-list-compact">
             {alerts.slice(0, 10).map(a => (
               <a key={a.id} href={`/alerts/${a.id}`} class="alert-row">
                 <SeverityBadge severity={a.severity} />
                 <span class="alert-row-name">{a.monitor_name || `Monitor ${a.monitor_id}`}</span>
-                <span class="alert-row-time">{relativeTime(a.fired_at || a.created_at)}</span>
+                {a.status === 'acknowledged' && <AlertStatusPill status={a.status} />}
+                <span class="alert-row-time">{relativeTime(a.started_at)}</span>
               </a>
             ))}
-            {alerts.length === 0 && <p class="text-muted">No active alerts</p>}
+            {alerts.length === 0 && <p class="text-muted">No open alerts. Nothing is firing.</p>}
           </div>
+          {alerts.length > 10 && (
+            <a href="/alerts" class="alert-list-more">
+              View all {countLabel(alerts.length, OPEN_ALERT_CAP)} open alerts
+            </a>
+          )}
         </Card>
 
         <Card class="dashboard-section">

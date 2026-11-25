@@ -1,0 +1,36 @@
+/* Text colors for FormError and FormSuccess (components/ui.jsx).
+   The shared .form-error uses --color-down (#ef4444) on --color-down-bg,
+   about 3.6:1, and the old success text used --color-up (#10b981) on white,
+   about 2.5:1. Both fail WCAG 1.4.3 for body-size text. These pairs reach
+   at least 4.5:1 on their own backgrounds in every theme. Scoped to the two
+   components so other .form-error users keep their current look. */
+.form-feedback {
+  --form-feedback-error: #b91c1c;   /* 5.9:1 on #fef2f2 */
+  --form-feedback-success: #047857; /* 5.2:1 on #ecfdf5 */
+}
+
+[data-theme="dark"] .form-feedback,
+[data-theme="oled"] .form-feedback {
+  --form-feedback-error: #fca5a5;   /* 7:1 or more on the dark error backgrounds */
+  --form-feedback-success: #6ee7b7; /* 6.8:1 on #064e3b */
+}
+
+.form-error.form-feedback {
+  color: var(--form-feedback-error);
+}
+
+.form-success.form-feedback {
+  padding: 8px 12px;
+  background: var(--color-up-bg);
+  color: var(--form-feedback-success);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+}
+
+/* FormSuccess stays mounted as a live region; hide the box while empty. */
+.form-success.form-feedback:empty {
+  padding: 0;
+  margin: 0;
+  background: none;
+}

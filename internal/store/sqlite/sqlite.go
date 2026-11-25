@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -21,8 +22,9 @@ type queryable = sqlx.Queryable
 
 // SQLiteStore implements store.Store using SQLite via modernc.org/sqlite.
 type SQLiteStore struct {
-	db *sql.DB
-	q  queryable // either db or a tx
+	db     *sql.DB
+	q      queryable // either db or a tx
+	memory bool      // opened with dsn ":memory:"
 }
 
 // New opens a SQLite database at dsn and configures it for WAL mode,
@@ -48,7 +50,7 @@ func New(dsn string) (*SQLiteStore, error) {
 		}
 	}
 
-	return &SQLiteStore{db: db, q: db}, nil
+	return &SQLiteStore{db: db, q: db, memory: dsn == ":memory:"}, nil
 }
 
 // dialect parameterizes the shared store infrastructure for SQLite.
@@ -81,6 +83,13 @@ var dialect = sqlx.Dialect{
 // Migrations are auto-discovered from the embedded migrations/ directory.
 // Files must be named with a numeric prefix: 001_name.sql, 002_name.sql, etc.
 func (s *SQLiteStore) Migrate(ctx context.Context) error {
+	if s.memory && testing.Testing() {
+		return s.migrateFromTestSnapshot(ctx)
+	}
+	return s.migrate(ctx)
+}
+
+func (s *SQLiteStore) migrate(ctx context.Context) error {
 	return sqlx.Migrate(ctx, s.db, migrationsFS, "migrations", dialect)
 }
 
@@ -123,12 +132,19 @@ func (s *SQLiteStore) NotificationChannels() store.NotificationChannelStore { re
 func (s *SQLiteStore) MaintenanceWindows() store.MaintenanceWindowStore { return sqlx.NewMaintenanceWindowStore(s.q, dialect) }
 func (s *SQLiteStore) APIKeys() store.APIKeyStore                      { return sqlx.NewAPIKeyStore(s.q, dialect) }
 func (s *SQLiteStore) Dedup() store.DedupStore                         { return sqlx.NewDedupStore(s.q, dialect) }
+func (s *SQLiteStore) RateBudget() store.RateBudgetStore               { return sqlx.NewRateBudgetStore(s.q, dialect) }
+func (s *SQLiteStore) Usage() store.UsageStore               { return sqlx.NewUsageStore(s.q, dialect) }
+func (s *SQLiteStore) Invites() store.InviteStore           { return sqlx.NewInviteStore(s.q, dialect) }
+func (s *SQLiteStore) Promos() store.PromoStore             { return sqlx.NewPromoStore(s.q, dialect) }
+func (s *SQLiteStore) WebhookEvents() store.WebhookEventStore { return sqlx.NewWebhookEventStore(s.q, dialect) }
 func (s *SQLiteStore) Outbox() store.OutboxStore                       { return sqlx.NewOutboxStore(s.q, dialect) }
 func (s *SQLiteStore) Billing() store.BillingStore                     { return sqlx.NewBillingStore(s.q, dialect) }
 func (s *SQLiteStore) Stats() store.StatsStore                         { return nil }
 func (s *SQLiteStore) MFA() store.MFAStore                             { return sqlx.NewMFAStore(s.q, dialect) }
 func (s *SQLiteStore) OrgSettings() store.OrgSettingsStore              { return sqlx.NewOrgSettingsStore(s.q, dialect) }
+func (s *SQLiteStore) Sessions() store.SessionStore { return sqlx.NewSessionStore(s.q, dialect) }
 func (s *SQLiteStore) CloudEventIngest() store.CloudEventIngest          { return sqlx.NewCloudEventIngestStore(s.q, dialect) }
+func (s *SQLiteStore) CloudEventPositions() store.CloudEventPositionStore { return sqlx.NewCloudEventPositionStore(s.q, dialect) }
 func (s *SQLiteStore) CloudEventReplyAudit() store.CloudEventReplyAudit  { return sqlx.NewCloudEventReplyAuditStore(s.q, dialect) }
 func (s *SQLiteStore) AlertSuppressions() store.AlertSuppressionStore    { return sqlx.NewAlertSuppressionStore(s.q, dialect) }
 func (s *SQLiteStore) AlertRemediations() store.AlertRemediationStore    { return sqlx.NewAlertRemediationStore(s.q, dialect) }

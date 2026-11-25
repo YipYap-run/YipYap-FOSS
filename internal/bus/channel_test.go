@@ -232,3 +232,35 @@ func TestChannelBus_Close(t *testing.T) {
 		// expected
 	}
 }
+
+// A handler runs after Publish returns, so cancelling the publisher's
+// context (an HTTP request ending) must not cancel the handler's work.
+func TestChannelBusHandlerOutlivesPublisherContext(t *testing.T) {
+	b := NewChannel()
+	defer func() { _ = b.Close() }()
+	got := make(chan error, 2)
+	release := make(chan struct{})
+	h := func(ctx context.Context, _ string, _ []byte) error {
+		<-release
+		got <- ctx.Err()
+		return nil
+	}
+	_ = b.Subscribe("s", h)
+	_ = b.QueueSubscribe("s", "q", h)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := b.Publish(ctx, "s", nil); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	close(release)
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-got:
+			if err != nil {
+				t.Fatalf("handler ctx err = %v, want nil", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("handler did not run")
+		}
+	}
+}

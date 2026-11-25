@@ -228,7 +228,7 @@ func Run(ctx context.Context, db store.Store) error {
 	}
 	targets := map[string][]domain.StepTarget{
 		step1ID: {
-			{ID: uuid.NewString(), StepID: step1ID, TargetType: domain.TargetOnCallPrimary, ChannelID: channels[0].ID, Simultaneous: true},
+			{ID: uuid.NewString(), StepID: step1ID, TargetType: domain.TargetOnCallPrimary, TargetID: platformSchedule.ID, ChannelID: channels[0].ID, Simultaneous: true},
 		},
 		step2ID: {
 			{ID: uuid.NewString(), StepID: step2ID, TargetType: domain.TargetTeam, TargetID: infraTeam.ID, ChannelID: channels[0].ID, Simultaneous: true},
@@ -424,7 +424,7 @@ func Run(ctx context.Context, db store.Store) error {
 
 	firingEvents := []*domain.AlertEvent{
 		{ID: uuid.NewString(), AlertID: firingAlert.ID, EventType: domain.EventTriggered, CreatedAt: firingAlert.StartedAt},
-		{ID: uuid.NewString(), AlertID: firingAlert.ID, EventType: domain.EventNotified, Channel: "slack", TargetUserID: alice.ID, CreatedAt: firingAlert.StartedAt.Add(10 * time.Second)},
+		{ID: uuid.NewString(), AlertID: firingAlert.ID, EventType: domain.EventNotificationSent, Channel: "slack", TargetUserID: alice.ID, CreatedAt: firingAlert.StartedAt.Add(10 * time.Second)},
 		{ID: uuid.NewString(), AlertID: firingAlert.ID, EventType: domain.EventEscalated, CreatedAt: firingAlert.StartedAt.Add(5 * time.Minute)},
 	}
 	for _, e := range firingEvents {
@@ -462,7 +462,7 @@ func Run(ctx context.Context, db store.Store) error {
 
 	resolvedEvents := []*domain.AlertEvent{
 		{ID: uuid.NewString(), AlertID: resolvedAlert.ID, EventType: domain.EventTriggered, CreatedAt: resolvedAlert.StartedAt},
-		{ID: uuid.NewString(), AlertID: resolvedAlert.ID, EventType: domain.EventNotified, Channel: "slack", CreatedAt: resolvedAlert.StartedAt.Add(5 * time.Second)},
+		{ID: uuid.NewString(), AlertID: resolvedAlert.ID, EventType: domain.EventNotificationSent, Channel: "slack", CreatedAt: resolvedAlert.StartedAt.Add(5 * time.Second)},
 		{ID: uuid.NewString(), AlertID: resolvedAlert.ID, EventType: domain.EventAck, TargetUserID: admin.ID, CreatedAt: ackAt},
 		{ID: uuid.NewString(), AlertID: resolvedAlert.ID, EventType: domain.EventResolved, CreatedAt: resolvedAt},
 	}
@@ -551,7 +551,7 @@ func Run(ctx context.Context, db store.Store) error {
 		Name:      "CI/CD pipeline",
 		KeyHash:   hex.EncodeToString(h[:]),
 		Prefix:    rawKey[:11],
-		Scopes:    []string{"monitors:read", "monitors:write", "checks:write"},
+		Scopes:    []string{"monitors:write"},
 		CreatedBy: admin.ID,
 		CreatedAt: now,
 	}

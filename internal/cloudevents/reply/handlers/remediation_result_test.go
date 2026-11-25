@@ -34,7 +34,7 @@ func TestRemediationResultHandler_HappyPath_Failure(t *testing.T) {
 	s := newTestStore(t)
 	alert := seedAlert(t, s)
 	seedRemediation(t, s, alert.ID, "rem-1")
-	h := NewRemediationResultHandler(s)
+	h := NewRemediationResultHandler(s, nil)
 
 	ev := newReplyEvent(t, types.TypeReplyAlertRemediationResultV1, types.ReplyAlertRemediationResultV1Data{
 		AlertID:       alert.ID,
@@ -62,7 +62,7 @@ func TestRemediationResultHandler_InvalidOutcome(t *testing.T) {
 	s := newTestStore(t)
 	alert := seedAlert(t, s)
 	seedRemediation(t, s, alert.ID, "rem-2")
-	h := NewRemediationResultHandler(s)
+	h := NewRemediationResultHandler(s, nil)
 	ev := newReplyEvent(t, types.TypeReplyAlertRemediationResultV1, types.ReplyAlertRemediationResultV1Data{
 		AlertID:       alert.ID,
 		RemediationID: "rem-2",
@@ -78,7 +78,7 @@ func TestRemediationResultHandler_InvalidOutcome(t *testing.T) {
 func TestRemediationResultHandler_UnknownRemediation(t *testing.T) {
 	s := newTestStore(t)
 	alert := seedAlert(t, s)
-	h := NewRemediationResultHandler(s)
+	h := NewRemediationResultHandler(s, nil)
 	ev := newReplyEvent(t, types.TypeReplyAlertRemediationResultV1, types.ReplyAlertRemediationResultV1Data{
 		AlertID:       alert.ID,
 		RemediationID: "does-not-exist",
@@ -105,7 +105,7 @@ func TestRemediationResultHandler_AutoResolveWhenMonitorUp(t *testing.T) {
 		t.Fatalf("Checks.Create: %v", err)
 	}
 
-	h := NewRemediationResultHandler(s)
+	h := NewRemediationResultHandler(s, nil)
 	ev := newReplyEvent(t, types.TypeReplyAlertRemediationResultV1, types.ReplyAlertRemediationResultV1Data{
 		AlertID:       alert.ID,
 		RemediationID: "rem-autores",
@@ -136,7 +136,7 @@ func TestRemediationResultHandler_NoAutoResolveWhenMonitorDown(t *testing.T) {
 		t.Fatalf("Checks.Create: %v", err)
 	}
 
-	h := NewRemediationResultHandler(s)
+	h := NewRemediationResultHandler(s, nil)
 	ev := newReplyEvent(t, types.TypeReplyAlertRemediationResultV1, types.ReplyAlertRemediationResultV1Data{
 		AlertID:       alert.ID,
 		RemediationID: "rem-noautores",

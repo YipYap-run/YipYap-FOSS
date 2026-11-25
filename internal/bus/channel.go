@@ -38,8 +38,8 @@ func (b *ChannelBus) QueueSubscribe(subject, queue string, handler Handler) erro
 }
 
 // Unsubscribe drops every subscription registered against (subject, queue).
-// No-op if no match. R2-H6: lets ceConsumerCache eviction stop new messages
-// reaching the cache slot it just freed.
+// No-op if no match. R2-H6: lets an evicted consumer stop receiving
+// messages so its handler can be garbage collected.
 func (b *ChannelBus) Unsubscribe(subject, queue string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -113,6 +113,12 @@ func (b *ChannelBus) Publish(ctx context.Context, subject string, data []byte) e
 		}
 	}
 
+	// Handlers run after Publish returns, so they must not inherit the
+	// publisher's cancellation: an HTTP handler that publishes alert.ack
+	// and then returns would cancel the engine's store calls mid-ack.
+	// Values (trace IDs) are kept.
+	ctx = context.WithoutCancel(ctx)
+
 	// Deliver to every broadcast subscriber.
 	for _, s := range broadcast {
 		go func(h Handler) { _ = h(ctx, subject, data) }(s.handler)
@@ -132,10 +138,14 @@ func (b *ChannelBus) PublishDurable(ctx context.Context, subject string, data []
 	return b.Publish(ctx, subject, data)
 }
 
-// PublishAlert falls back to a single Publish (the in-process channel already
-// fans out to both broadcast and queue-group subscribers).
+// PublishAlert publishes once on the alert subject (for pull and queue
+// consumers) and once on its broadcast subject. The two subjects have
+// disjoint subscribers, so each handler sees the event exactly once.
 func (b *ChannelBus) PublishAlert(ctx context.Context, subject string, data []byte, _ string) error {
-	return b.Publish(ctx, subject, data)
+	if err := b.Publish(ctx, subject, data); err != nil {
+		return err
+	}
+	return b.Publish(ctx, AlertBroadcastSubject(subject), data)
 }
 
 // PullSubscribe adapts QueueSubscribe with an auto-ack Msg wrapper.
