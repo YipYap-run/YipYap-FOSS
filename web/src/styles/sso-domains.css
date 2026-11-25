@@ -1,0 +1,358 @@
+/* SSO: sign in with a work email, and Settings > SSO connections and domains. */
+
+:root {
+  --sso-ok-bg: #ecfdf5;
+  --sso-ok-text: #065f46;
+  --sso-pending-bg: #fffbeb;
+  --sso-pending-text: #78350f;
+  --sso-note-border: #f59e0b;
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --sso-ok-bg: #064e3b;
+  --sso-ok-text: #d1fae5;
+  --sso-pending-bg: #451a03;
+  --sso-pending-text: #fde68a;
+  --sso-note-border: #b45309;
+}
+
+.sso-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Sign-in page: work email form */
+.sso-signin-intro {
+  margin-bottom: 16px;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.sso-signin-heading {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.sso-signin-heading:focus {
+  outline: none;
+}
+
+.sso-signin-back {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+/* Looks like a link, behaves like a button (it changes the form, not the URL). */
+.sso-link-button {
+  background: none;
+  border: none;
+  padding: 4px 2px;
+  min-height: 24px;
+  font: inherit;
+  color: var(--color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.sso-link-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Settings > SSO */
+.sso-status {
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--sso-ok-bg);
+  color: var(--sso-ok-text);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+/* Keep the width steady when the label changes to Copied. */
+.sso-copy-btn {
+  min-width: 64px;
+}
+
+.sso-copy-hint {
+  margin-top: 4px;
+  color: var(--sso-pending-text);
+}
+
+.sso-intro {
+  margin-bottom: 16px;
+  font-size: 0.875rem;
+  max-width: 70ch;
+}
+
+.sso-settings h3:focus,
+.sso-domains-title:focus {
+  outline: none;
+}
+
+.sso-empty {
+  padding: 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+}
+
+.sso-empty p + p {
+  margin-top: 4px;
+}
+
+.sso-conn-list,
+.sso-domain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sso-conn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sso-conn {
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.sso-conn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.sso-conn-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.sso-conn-title h4 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sso-domains {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.875rem;
+}
+
+.sso-domains-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.sso-domains-note {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--sso-note-border);
+  background: var(--sso-pending-bg);
+  color: var(--sso-pending-text);
+  border-radius: 4px;
+}
+
+.sso-domains-empty {
+  margin-bottom: 8px;
+}
+
+.sso-domain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sso-domain {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.sso-domain-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.sso-domain-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sso-domain-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.sso-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.sso-badge-ok {
+  background: var(--sso-ok-bg);
+  color: var(--sso-ok-text);
+}
+
+.sso-badge-pending {
+  background: var(--sso-pending-bg);
+  color: var(--sso-pending-text);
+}
+
+.sso-domain-meta {
+  margin-top: 6px;
+}
+
+.sso-domain-steps {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sso-copy-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.sso-copy-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sso-copy-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.sso-row-error {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.sso-domain-add label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.sso-domain-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sso-domain-add-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 320px;
+}
+
+.sso-modal-intro {
+  margin-bottom: 16px;
+  font-size: 0.875rem;
+}
+
+/* WCAG 2.2 target size: keep small buttons at least 24px. */
+.sso-domains .btn-xs,
+.sso-conn-head .btn-xs {
+  min-height: 24px;
+  min-width: 24px;
+}
+
+@media (max-width: 480px) {
+  .sso-conn {
+    padding: 12px;
+  }
+
+  .sso-domain-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .sso-domain-add-row {
+    flex-wrap: wrap;
+  }
+
+  .sso-domain-add-row input {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}
+
+/* Enforce SSO section (Settings > SSO). */
+.sso-enforcement {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+.sso-enforcement .btn {
+  margin-top: 8px;
+}
+.sso-enforcement p + p {
+  margin-top: 8px;
+}
+.sso-enforce-state.is-on {
+  background: var(--sso-ok-bg);
+  color: var(--sso-ok-text);
+}
+/* What is missing before Enforce SSO can be turned on. Shown as text, not
+   only as a disabled button, so it reads without focusing the button. */
+.sso-enforce-hint {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--sso-note-border);
+  border-radius: var(--radius-sm);
+  background: var(--sso-pending-bg);
+  color: var(--sso-pending-text);
+  font-size: 0.875rem;
+}
+.sso-modal-list {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  font-size: 0.875rem;
+}
+.sso-modal-list li + li {
+  margin-top: 6px;
+}

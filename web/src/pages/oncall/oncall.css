@@ -1,0 +1,280 @@
+/* On-call page. Kept beside the page so main.css stays untouched. */
+
+.oncall-section-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 8px;
+}
+
+.oncall-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.oncall-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.oncall-list-item:hover {
+  background: var(--color-muted-bg);
+}
+
+.oncall-list-item:focus-visible,
+.oncall-detail-title:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.oncall-list-item.is-selected {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary);
+}
+
+.oncall-list-item.is-selected .oncall-list-status {
+  color: var(--color-text);
+}
+
+.oncall-list-name {
+  font-weight: 500;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.oncall-list-status {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.oncall-detail-loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.oncall-detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.oncall-detail-title {
+  font-size: 1.125rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.oncall-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.oncall-now {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--color-border);
+  background: var(--color-muted-bg);
+}
+
+.oncall-now p {
+  margin: 0 0 4px;
+}
+
+.oncall-now p:last-child {
+  margin-bottom: 0;
+}
+
+.oncall-now-up { border-left-color: var(--color-up); }
+.oncall-now-info { border-left-color: var(--color-primary); }
+.oncall-now-warning { border-left-color: var(--color-down); }
+
+.oncall-now-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.oncall-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.oncall-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  font-size: 0.875rem;
+}
+
+.oncall-facts > div {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 8px;
+}
+
+.oncall-facts dt {
+  color: var(--color-text-secondary);
+}
+
+.oncall-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .oncall-facts > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+.oncall-order {
+  margin: 0;
+  padding-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.875rem;
+}
+
+.oncall-order li {
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.oncall-order li .badge {
+  margin-left: 8px;
+}
+
+.oncall-overrides {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.oncall-override {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.875rem;
+}
+
+.oncall-override:last-child {
+  border-bottom: none;
+}
+
+.oncall-override-main {
+  min-width: 0;
+  flex: 1 1 14rem;
+  overflow-wrap: anywhere;
+}
+
+.oncall-override-time,
+.oncall-override-reason {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  margin-top: 2px;
+}
+
+.oncall-fieldset {
+  border: 0;
+  padding: 0;
+  margin-inline: 0;
+  min-width: 0;
+}
+
+.oncall-fieldset legend {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.oncall-fieldset legend.required::after {
+  content: ' *';
+  color: var(--color-down);
+  font-weight: normal;
+}
+
+.oncall-datetime {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.oncall-datetime input {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+
+.oncall-callout {
+  padding: 12px 14px;
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  font-size: 0.875rem;
+}
+
+.oncall-callout p {
+  margin: 0 0 8px;
+}
+
+.oncall-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.oncall-policy-list {
+  margin: 8px 0 0;
+  padding-left: 1.25rem;
+}
+
+.oncall-unreachable {
+  margin-bottom: 12px;
+}
+
+.oncall-unreachable p {
+  margin: 0;
+}
+
+.oncall-unreachable p + p {
+  margin-top: 4px;
+}

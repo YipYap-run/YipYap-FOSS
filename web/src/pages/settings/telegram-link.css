@@ -1,0 +1,140 @@
+/* Telegram chat linking (channel form and list tag). */
+
+:root {
+  --telegram-link-warn-fg: #92400e;
+  --telegram-link-warn-border: #f59e0b;
+  --telegram-link-ok-fg: #065f46;
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --telegram-link-warn-fg: #fcd34d;
+  --telegram-link-warn-border: #b45309;
+  --telegram-link-ok-fg: #6ee7b7;
+}
+
+/* Darker amber text in light mode, lighter in dark modes, so the pill
+   stays above 4.5:1 on the warning background. */
+.label-tag.tag-telegram-unlinked {
+  background: var(--color-warning-bg);
+  color: var(--telegram-link-warn-fg);
+  border: 1px solid var(--telegram-link-warn-border);
+  font-weight: 600;
+}
+
+.telegram-link {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.telegram-link-heading {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.telegram-link-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.telegram-link-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.telegram-link-command {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.telegram-link-status {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.telegram-link-status .telegram-link-warn {
+  color: var(--telegram-link-warn-fg);
+}
+
+.telegram-link-countdown time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.telegram-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.telegram-link-status p + p {
+  margin-top: 4px;
+}
+
+.telegram-link-status .is-linked {
+  color: var(--telegram-link-ok-fg);
+  font-weight: 600;
+}
+
+.telegram-link-notice {
+  font-size: 0.875rem;
+  padding: 8px 10px;
+  border: 1px solid var(--telegram-link-warn-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--telegram-link-warn-fg);
+  margin-bottom: 8px;
+}
+
+.telegram-link-current {
+  font-size: 0.875rem;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+
+/* Visually hidden, still read by screen readers. */
+.telegram-link-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The command field gets focus when a code arrives. Below 16px, iOS
+   Safari zooms the page on focus, so phones get 16px. Narrow screens
+   stack the Copy button under the command. */
+@media (max-width: 768px) {
+  .telegram-link .telegram-link-command {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 400px) {
+  .telegram-link-row {
+    flex-wrap: wrap;
+  }
+  .telegram-link-row .telegram-link-command {
+    flex-basis: 100%;
+  }
+  .telegram-link-row .btn {
+    min-height: 44px;
+    flex: 1 1 auto;
+  }
+}

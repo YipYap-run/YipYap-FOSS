@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/api"
+	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
@@ -141,36 +142,50 @@ func newSmokeFixture(t *testing.T) *smokeFixture {
 
 	// Mint API keys.
 	f.apiKeyAll = f.mintAPIKey("all-scopes", allKnownScopes())
-	f.apiKeyNoScopes = f.mintAPIKey("no-scopes", nil) // empty == legacy unrestricted
-	// "unrelated" scope means RequireScope(monitors) etc. all fail with 403.
-	f.apiKeyEmpty = f.mintAPIKey("unrelated-scope-only", []string{"unrelated:irrelevant"})
+	f.apiKeyNoScopes = f.insertLegacyAPIKey("no-scopes") // empty == legacy unrestricted
+	// A valid scope unrelated to the probed resources, so RequireScope on
+	// monitors, alerts and the rest fails with 403.
+	f.apiKeyEmpty = f.mintAPIKey("unrelated-scope-only", []string{"users:read"})
 
 	return f
 }
 
-// allKnownScopes returns every scope name referenced by RequireScope() in the
-// router. New ones must be added here when the router grows.
+// allKnownScopes returns every scope in the vocabulary this build enforces,
+// so the key can reach every scoped route. Read-only resources get their read
+// scope, which is all a key can hold there.
 func allKnownScopes() []string {
-	return []string{
-		"monitors",
-		"alerts",
-		"escalation_policies",
-		"notification_channels",
-		"maintenance_windows",
-		// Scopes mentioned in the smoke-test brief but NOT currently used by
-		// any RequireScope() in the router. We still include them so an
-		// any-scope key can probe paid endpoints. Adding scopes the gate
-		// never reads is harmless.
-		"status_pages",
-		"services",
-		"incidents",
-		"schedules",
-		"teams",
-		"events",
-		"heartbeat",
-		"cloudevents",
-		"admin",
+	var out []string
+	for _, r := range middleware.ScopeVocabulary() {
+		if r.ReadOnly {
+			out = append(out, r.Read)
+			continue
+		}
+		out = append(out, r.Write)
 	}
+	return out
+}
+
+// insertLegacyAPIKey stores a key with no scopes directly, the way keys were
+// created before scopes were required. The create endpoint now rejects an
+// empty scope list.
+func (f *smokeFixture) insertLegacyAPIKey(name string) string {
+	f.t.Helper()
+	plaintext, hash, prefix, err := f.hasher.GenerateAPIKey()
+	if err != nil {
+		f.t.Fatalf("generate api key: %v", err)
+	}
+	ctx := context.Background()
+	owner, err := f.store.Users().GetByEmail(ctx, f.ownerEmail)
+	if err != nil {
+		f.t.Fatalf("owner lookup: %v", err)
+	}
+	if err := f.store.APIKeys().Create(ctx, &domain.APIKey{
+		ID: "legacy-" + name, OrgID: owner.OrgID, Name: name, KeyHash: hash,
+		Prefix: prefix, CreatedBy: owner.ID, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		f.t.Fatalf("insert legacy api key: %v", err)
+	}
+	return plaintext
 }
 
 func (f *smokeFixture) registerOwner(email, orgName, password string) string {
@@ -306,6 +321,7 @@ func (f *smokeFixture) do(c endpointCase) (int, string) {
 		req.Header.Set("Authorization", "Bearer "+f.apiKeyEmpty)
 	case authOpsToken:
 		req.Header.Set("Authorization", "Bearer "+f.opsToken)
+		req.Header.Set("X-Ops-Actor", "smoke-staff@example.com")
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -329,7 +345,7 @@ func (f *smokeFixture) do(c endpointCase) (int, string) {
 }
 
 // runCase asserts that the response status is one of the expected ones and
-//, critically, never a 5xx unless explicitly allowed.
+// , critically, never a 5xx unless explicitly allowed.
 func (f *smokeFixture) runCase(c endpointCase) {
 	f.t.Helper()
 	got, body := f.do(c)
@@ -383,6 +399,11 @@ func commonPubAuthCases() []endpointCase {
 			body:         map[string]string{"org_name": "SmokeRegOrg", "email": "smokereg+u@test.com", "password": "supersecret123"},
 			wantStatuses: []int{http.StatusCreated, http.StatusBadRequest, http.StatusConflict},
 			notes:        "documented public, rate-limited"},
+		{name: "invite-accept-get", method: http.MethodGet, path: "/api/v1/invites/accept?token=bad.token", authMode: authNone,
+			wantStatuses: []int{http.StatusNotFound}, notes: "public, token in link"},
+		{name: "invite-accept-post", method: http.MethodPost, path: "/api/v1/invites/accept", authMode: authNone,
+			body:         map[string]string{"token": "bad.token", "password": "supersecret123"},
+			wantStatuses: []int{http.StatusNotFound}, notes: "public, token in body"},
 		{name: "auth-login", method: http.MethodPost, path: "/api/v1/auth/login", authMode: authNone,
 			body:         map[string]string{"email": "noone@test.com", "password": "wrong"},
 			wantStatuses: []int{http.StatusOK, http.StatusUnauthorized, http.StatusForbidden, http.StatusBadRequest},
@@ -416,6 +437,14 @@ func commonPubAuthCases() []endpointCase {
 			body:         map[string]string{"token": "garbage"},
 			wantStatuses: []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized},
 			notes:        "documented public, rate-limited"},
+		{name: "auth-confirm-email-change", method: http.MethodPost, path: "/api/v1/auth/confirm-email-change", authMode: authNone,
+			body:         map[string]string{"token": "garbage"},
+			wantStatuses: []int{http.StatusBadRequest, http.StatusTooManyRequests},
+			notes:        "documented public, rate-limited; the signed link is the proof"},
+		{name: "auth-cancel-email-change", method: http.MethodPost, path: "/api/v1/auth/cancel-email-change", authMode: authNone,
+			body:         map[string]string{"token": "garbage"},
+			wantStatuses: []int{http.StatusBadRequest, http.StatusTooManyRequests},
+			notes:        "documented public, rate-limited; the signed link is the proof"},
 
 		// Logout requires no valid token.
 		{name: "auth-logout", method: http.MethodPost, path: "/api/v1/auth/logout", authMode: authNone,
@@ -482,6 +511,8 @@ func commonAuthedCases() []endpointCase {
 		{name: "auth-change-email", method: http.MethodPut, path: "/api/v1/auth/email", authMode: authSession,
 			body:         map[string]string{"email": "smoke-owner-new@test.com", "password": "supersecret123"},
 			wantStatuses: []int{http.StatusOK, http.StatusBadRequest, http.StatusConflict, http.StatusUnauthorized, http.StatusAccepted}},
+		{name: "auth-cancel-pending-email", method: http.MethodDelete, path: "/api/v1/auth/email/pending", authMode: authSession,
+			wantStatuses: []int{http.StatusNoContent, http.StatusNotFound}},
 		{name: "auth-delete-account", method: http.MethodPost, path: "/api/v1/auth/delete-account", authMode: authSession,
 			body:         map[string]string{"password": "supersecret123"},
 			wantStatuses: []int{http.StatusOK, http.StatusAccepted, http.StatusNoContent, http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound},
@@ -498,15 +529,34 @@ func commonAuthedCases() []endpointCase {
 		{name: "org-update-settings", method: http.MethodPut, path: "/api/v1/org/settings", authMode: authSession,
 			body:         map[string]string{},
 			wantStatuses: []int{http.StatusOK, http.StatusBadRequest, http.StatusNoContent, http.StatusUnprocessableEntity}},
+		{name: "org-get-notification-permissions", method: http.MethodGet, path: "/api/v1/org/notification-permissions", authMode: authSession,
+			wantStatuses: []int{http.StatusOK}},
+		{name: "org-update-notification-permissions", method: http.MethodPut, path: "/api/v1/org/notification-permissions", authMode: authSession,
+			body:         map[string][]string{"manage_roles": {"owner", "admin"}},
+			wantStatuses: []int{http.StatusOK}},
+		{name: "org-get-channel-failure-alerts", method: http.MethodGet, path: "/api/v1/org/channel-failure-alerts", authMode: authSession,
+			wantStatuses: []int{http.StatusOK}},
+		{name: "org-update-channel-failure-alerts", method: http.MethodPut, path: "/api/v1/org/channel-failure-alerts", authMode: authSession,
+			body:         map[string]int{"threshold": 3},
+			wantStatuses: []int{http.StatusOK}},
 
 		// Users.
 		{name: "users-list", method: http.MethodGet, path: "/api/v1/users", authMode: authSession,
 			wantStatuses: []int{http.StatusOK}},
 		{name: "users-get", method: http.MethodGet, path: "/api/v1/users/" + nonExistentULID, authMode: authSession,
 			wantStatuses: []int{http.StatusOK, http.StatusNotFound}},
-		{name: "users-create", method: http.MethodPost, path: "/api/v1/users", authMode: authSession,
+		{name: "users-create-removed", method: http.MethodPost, path: "/api/v1/users", authMode: authSession,
+			body:         map[string]string{"email": "newuser@test.com", "password": "adminchosen", "role": "member"},
+			wantStatuses: []int{http.StatusGone}},
+		{name: "users-invite-create", method: http.MethodPost, path: "/api/v1/users/invites", authMode: authSession,
 			body:         map[string]string{"email": "newuser@test.com", "role": "member"},
 			wantStatuses: []int{http.StatusCreated, http.StatusBadRequest, http.StatusConflict}},
+		{name: "users-invite-list", method: http.MethodGet, path: "/api/v1/users/invites", authMode: authSession,
+			wantStatuses: []int{http.StatusOK}},
+		{name: "users-invite-resend", method: http.MethodPost, path: "/api/v1/users/invites/" + nonExistentULID + "/resend", authMode: authSession,
+			wantStatuses: []int{http.StatusNotFound}},
+		{name: "users-invite-revoke", method: http.MethodDelete, path: "/api/v1/users/invites/" + nonExistentULID, authMode: authSession,
+			wantStatuses: []int{http.StatusNotFound}},
 		{name: "users-update", method: http.MethodPatch, path: "/api/v1/users/" + nonExistentULID, authMode: authSession,
 			body:         map[string]string{"role": "member"},
 			wantStatuses: []int{http.StatusOK, http.StatusBadRequest, http.StatusNotFound}},
@@ -639,6 +689,12 @@ func commonAuthedCases() []endpointCase {
 		{name: "notif-channels-test", method: http.MethodPost, path: "/api/v1/notification-channels/" + nonExistentULID + "/test", authMode: authSession,
 			body:         map[string]interface{}{},
 			wantStatuses: []int{http.StatusOK, http.StatusNotFound, http.StatusBadRequest}},
+		// Telegram pairing (notif-16). 503 when the bot is not configured.
+		{name: "telegram-link-code-create", method: http.MethodPost, path: "/api/v1/telegram/link-codes", authMode: authSession,
+			body:         map[string]interface{}{"purpose": "channel", "name": "smk-telegram"},
+			wantStatuses: []int{http.StatusCreated, http.StatusServiceUnavailable, http.StatusForbidden}},
+		{name: "telegram-link-code-status", method: http.MethodGet, path: "/api/v1/telegram/link-codes/" + nonExistentULID, authMode: authSession,
+			wantStatuses: []int{http.StatusNotFound}},
 
 		// Maintenance windows.
 		{name: "maint-windows-list", method: http.MethodGet, path: "/api/v1/maintenance-windows", authMode: authSession,

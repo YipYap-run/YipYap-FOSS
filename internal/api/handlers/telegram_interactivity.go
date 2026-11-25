@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,22 +18,25 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-// TelegramInteractivityHandler handles Telegram callback_query updates
-// (inline keyboard button clicks for acknowledge/resolve).
+// TelegramInteractivityHandler handles updates sent to the platform
+// Telegram bot: /link and /start commands that bind a chat to a channel,
+// and callback_query updates from the Acknowledge and Resolve buttons.
 type TelegramInteractivityHandler struct {
 	store       store.Store
 	bus         bus.Bus
 	secretToken string
 	botToken    string
+	botUsername string
 	apiBase     string
 	client      *http.Client
+	linker      *telegramLinker
 }
 
 // NewTelegramInteractivityHandler creates a new TelegramInteractivityHandler.
 // secretToken is the secret token configured when registering the Telegram
 // webhook. If empty, all requests are rejected (fail closed).
-// botToken is the Telegram Bot API token used to edit messages after
-// ack/resolve actions. If empty, messages will not be updated.
+// botToken is the Telegram Bot API token used to reply to commands and to
+// edit messages after ack/resolve actions. If empty, nothing is sent back.
 func NewTelegramInteractivityHandler(s store.Store, b bus.Bus, secretToken, botToken string) *TelegramInteractivityHandler {
 	return &TelegramInteractivityHandler{
 		store:       s,
@@ -41,7 +45,14 @@ func NewTelegramInteractivityHandler(s store.Store, b bus.Bus, secretToken, botT
 		botToken:    botToken,
 		apiBase:     "https://api.telegram.org",
 		client:      &http.Client{Timeout: 10 * time.Second},
+		linker:      newTelegramLinker(s),
 	}
+}
+
+// SetBotUsername sets the bot's public username. Commands addressed to a
+// different bot ("/link@otherbot CODE") are then ignored.
+func (h *TelegramInteractivityHandler) SetBotUsername(username string) {
+	h.botUsername = strings.TrimPrefix(strings.TrimSpace(username), "@")
 }
 
 // telegramWebhookUpdate mirrors the relevant fields of a Telegram webhook update.
@@ -51,46 +62,57 @@ type telegramWebhookUpdate struct {
 	Message       *telegramWebhookMessage       `json:"message"`
 }
 
+type telegramWebhookChat struct {
+	ID        int64  `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+}
+
 type telegramWebhookMessage struct {
-	MessageID int `json:"message_id"`
-	From      struct {
-		ID       int    `json:"id"`
-		Username string `json:"username"`
-	} `json:"from"`
-	Chat struct {
-		ID   int64  `json:"id"`
-		Type string `json:"type"`
-	} `json:"chat"`
-	Text string `json:"text"`
+	MessageID int                 `json:"message_id"`
+	From      telegramWebhookUser `json:"from"`
+	Chat      telegramWebhookChat `json:"chat"`
+	Text      string              `json:"text"`
+}
+
+type telegramWebhookUser struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
 }
 
 type telegramWebhookCallbackQuery struct {
-	ID   string `json:"id"`
-	From struct {
-		ID       int    `json:"id"`
-		Username string `json:"username"`
-	} `json:"from"`
+	ID      string              `json:"id"`
+	From    telegramWebhookUser `json:"from"`
 	Message *struct {
-		MessageID int `json:"message_id"`
-		Chat      struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		Text string `json:"text"`
+		MessageID int                 `json:"message_id"`
+		Chat      telegramWebhookChat `json:"chat"`
+		Text      string              `json:"text"`
 	} `json:"message"`
 	Data string `json:"data"`
 }
 
-func isTelegramChatIDCommand(text string) bool {
+// parseTelegramCommand splits "/link@yipyapbot ABC" into ("link", "yipyapbot", "ABC").
+// ok is false when text is not a command.
+func parseTelegramCommand(text string) (cmd, bot, arg string, ok bool) {
 	text = strings.TrimSpace(text)
-	return text == "/start" || text == "/chatid" || strings.HasPrefix(text, "/start@") || strings.HasPrefix(text, "/chatid@")
+	if !strings.HasPrefix(text, "/") {
+		return "", "", "", false
+	}
+	head, rest, _ := strings.Cut(text, " ")
+	head = strings.TrimPrefix(head, "/")
+	cmd, bot, _ = strings.Cut(head, "@")
+	return strings.ToLower(cmd), bot, strings.TrimSpace(rest), cmd != ""
 }
 
-func (h *TelegramInteractivityHandler) sendChatID(ctx context.Context, chatID int64) error {
-	body, _ := json.Marshal(map[string]any{
-		"chat_id": chatID,
-		"text":    fmt.Sprintf("Chat ID: %d\n\nUse this in YipYap Settings → Channels → Telegram.", chatID),
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.apiBase+"/bot"+h.botToken+"/sendMessage", bytes.NewReader(body))
+func (h *TelegramInteractivityHandler) call(ctx context.Context, method string, payload map[string]any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.apiBase+"/bot"+h.botToken+"/"+method, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -101,14 +123,70 @@ func (h *TelegramInteractivityHandler) sendChatID(ctx context.Context, chatID in
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("telegram sendMessage status %d", resp.StatusCode)
+		return fmt.Errorf("telegram %s status %d", method, resp.StatusCode)
 	}
 	return nil
 }
 
-// Handle processes POST /webhooks/telegram.
-// Telegram sends webhook updates as JSON POST bodies. We only care about
-// callback_query updates (inline keyboard button clicks). Always returns 200.
+func (h *TelegramInteractivityHandler) sendText(ctx context.Context, chatID int64, text string) {
+	if h.botToken == "" {
+		return
+	}
+	if err := h.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": text}); err != nil {
+		slog.Warn("telegram interactivity: send message", "error", err)
+	}
+}
+
+// answerCallback stops the button spinner and shows text to the clicker.
+func (h *TelegramInteractivityHandler) answerCallback(ctx context.Context, queryID, text string) {
+	if h.botToken == "" || queryID == "" {
+		return
+	}
+	payload := map[string]any{"callback_query_id": queryID}
+	if text != "" {
+		payload["text"] = text
+	}
+	if err := h.call(ctx, "answerCallbackQuery", payload); err != nil {
+		slog.Warn("telegram interactivity: answer callback", "error", err)
+	}
+}
+
+// handleMessage answers /link and /start. The chat ID is never echoed:
+// chats are linked with a code made in YipYap (notif-16).
+func (h *TelegramInteractivityHandler) handleMessage(ctx context.Context, msg *telegramWebhookMessage) {
+	cmd, bot, arg, ok := parseTelegramCommand(msg.Text)
+	if !ok {
+		return
+	}
+	if bot != "" && h.botUsername != "" && !strings.EqualFold(bot, h.botUsername) {
+		return // addressed to another bot in the group
+	}
+	chat := telegramChat{
+		ID: msg.Chat.ID, Type: msg.Chat.Type, Title: msg.Chat.Title,
+		Username: msg.Chat.Username, FirstName: msg.Chat.FirstName,
+	}
+	switch cmd {
+	case "link":
+		if arg == "" {
+			h.sendText(ctx, chat.ID, "Send the command YipYap shows you, for example:\n/link ABCD2345EF")
+			return
+		}
+		h.sendText(ctx, chat.ID, h.linker.link(ctx, arg, chat))
+	case "start":
+		// A t.me deep link (?start=CODE or ?startgroup=CODE) arrives as
+		// "/start CODE".
+		if arg != "" {
+			h.sendText(ctx, chat.ID, h.linker.link(ctx, arg, chat))
+			return
+		}
+		h.sendText(ctx, chat.ID, telegramStartReply)
+	case "chatid", "help":
+		h.sendText(ctx, chat.ID, telegramStartReply)
+	}
+}
+
+// Handle processes POST /webhooks/telegram. Always returns 200 once the
+// secret token checks out, so Telegram does not retry.
 func (h *TelegramInteractivityHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// Fail closed if no secret token is configured.
 	if h.secretToken == "" {
@@ -125,7 +203,7 @@ func (h *TelegramInteractivityHandler) Handle(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	body, err := io.ReadAll(io.LimitReader(r.Body, 16384))
 	if err != nil {
 		slog.Warn("telegram interactivity: read body", "error", err)
 		w.WriteHeader(http.StatusOK)
@@ -139,122 +217,143 @@ func (h *TelegramInteractivityHandler) Handle(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// A /start or /chatid message lets the user discover the group chat ID
-	// without a second bot or getUpdates (which is unavailable once a webhook
-	// is set).
 	if update.CallbackQuery == nil {
-		if update.Message != nil && isTelegramChatIDCommand(update.Message.Text) && h.botToken != "" {
-			if err := h.sendChatID(r.Context(), update.Message.Chat.ID); err != nil {
-				slog.Warn("telegram interactivity: send chat id", "error", err)
-			}
+		if update.Message != nil {
+			h.handleMessage(r.Context(), update.Message)
 		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	parts := strings.SplitN(update.CallbackQuery.Data, ":", 2)
-	if len(parts) != 2 {
-		slog.Warn("telegram interactivity: malformed callback_data", "data", update.CallbackQuery.Data)
-		w.WriteHeader(http.StatusOK)
+	h.handleCallback(r.Context(), update.CallbackQuery)
+	w.WriteHeader(http.StatusOK)
+}
+
+func telegramActor(from telegramWebhookUser) (actor, label string) {
+	switch {
+	case from.Username != "":
+		label = "@" + from.Username
+	case strings.TrimSpace(from.FirstName) != "":
+		label = strings.TrimSpace(from.FirstName)
+	default:
+		label = fmt.Sprintf("user %d", from.ID)
+	}
+	return "Telegram user " + label, label
+}
+
+func (h *TelegramInteractivityHandler) handleCallback(ctx context.Context, cbq *telegramWebhookCallbackQuery) {
+	action, alertID, ok := strings.Cut(cbq.Data, ":")
+	if !ok || alertID == "" || (action != "ack" && action != "resolve") {
+		slog.Warn("telegram interactivity: malformed callback_data", "data", cbq.Data)
+		h.answerCallback(ctx, cbq.ID, "")
+		return
+	}
+	if h.store == nil || h.bus == nil {
+		slog.Error("telegram interactivity: not wired", "has_store", h.store != nil, "has_bus", h.bus != nil)
 		return
 	}
 
-	action, alertID := parts[0], parts[1]
+	// The click must come from a chat linked to an enabled telegram channel
+	// of the alert's org. Anything else reads as not found, so a chat
+	// cannot probe or act on another org's alerts (notif-16).
+	if cbq.Message == nil {
+		slog.Warn("telegram interactivity: callback without message", "alert_id", alertID)
+		h.answerCallback(ctx, cbq.ID, "That alert was not found.")
+		return
+	}
+	chatID := cbq.Message.Chat.ID
+	alert, err := h.store.Alerts().GetByID(ctx, alertID)
+	linked := false
+	if err == nil {
+		linked, err = orgTelegramChatLinked(ctx, h.store, alert.OrgID, chatID)
+		if err != nil {
+			slog.Error("telegram interactivity: check chat", "alert_id", alertID, "error", err)
+			h.answerCallback(ctx, cbq.ID, "YipYap could not process that click. Try again.")
+			return
+		}
+	}
+	if !linked {
+		slog.Warn("telegram interactivity: chat not linked to the alert's org", "alert_id", alertID, "chat_id", chatID)
+		h.answerCallback(ctx, cbq.ID, "That alert was not found.")
+		return
+	}
+
+	actor, label := telegramActor(cbq.From)
+	if alert.Status == domain.AlertResolved {
+		h.answerCallback(ctx, cbq.ID, "Already resolved.")
+		h.editMessage(ctx, cbq, "Already resolved")
+		return
+	}
 
 	switch action {
 	case "ack":
-		ackEvt := domain.AckEvent{
-			AlertID: alertID,
-			UserID:  fmt.Sprintf("%d", update.CallbackQuery.From.ID),
-			Channel: "telegram",
-		}
-		data, err := json.Marshal(ackEvt)
-		if err != nil {
-			slog.Error("telegram interactivity: marshal ack event", "error", err)
-			w.WriteHeader(http.StatusOK)
+		if alert.Status == domain.AlertAcknowledged {
+			h.answerCallback(ctx, cbq.ID, "Already acknowledged.")
 			return
 		}
+		data, _ := json.Marshal(domain.AckEvent{AlertID: alert.ID, UserID: actor, Channel: "telegram"})
 		// CloudEvent emission for acknowledged.v1 happens in escalation.Engine.handleAck
-		// when it consumes this alert.ack message. Slack/Discord/Telegram interactivity
-		// handlers are intentionally not wired with their own cloudevents.Emitter.
-		if err := h.bus.PublishAlert(r.Context(), "alert.ack", data, ""); err != nil {
+		// when it consumes this alert.ack message.
+		if err := h.bus.PublishAlert(context.WithoutCancel(ctx), "alert.ack", data, ""); err != nil {
 			slog.Error("telegram interactivity: publish ack", "error", err)
+			h.answerCallback(ctx, cbq.ID, "YipYap could not acknowledge the alert. Try again.")
+			return
 		}
+		h.answerCallback(ctx, cbq.ID, "Acknowledged.")
+		h.editMessage(ctx, cbq, "Acknowledged by "+label)
 
 	case "resolve":
-		alert, err := h.store.Alerts().GetByID(r.Context(), alertID)
-		if err != nil {
-			slog.Warn("telegram interactivity: alert not found", "alert_id", alertID, "error", err)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		monitor, err := h.store.Monitors().GetByID(r.Context(), alert.MonitorID)
-		if err != nil {
+		monitor, err := h.store.Monitors().GetByID(ctx, alert.MonitorID)
+		if err != nil || monitor.OrgID != alert.OrgID {
 			slog.Warn("telegram interactivity: monitor not found", "monitor_id", alert.MonitorID, "error", err)
-			w.WriteHeader(http.StatusOK)
+			h.answerCallback(ctx, cbq.ID, "That alert's monitor was not found.")
 			return
 		}
-		evt := alertTriggerEvent{
-			MonitorID:   monitor.ID,
-			MonitorName: monitor.Name,
-			Status:      domain.StatusUp,
-			LatencyMS:   0,
-			CheckedAt:   time.Now().UTC(),
-		}
-		data, err := json.Marshal(evt)
-		if err != nil {
-			slog.Error("telegram interactivity: marshal recover event", "error", err)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		if err := h.bus.PublishAlert(r.Context(), "alert.recover", data, ""); err != nil {
+		data, _ := json.Marshal(alertTriggerEvent{
+			OrgID: alert.OrgID, MonitorID: monitor.ID, MonitorName: monitor.Name,
+			Status: domain.StatusUp, CheckedAt: time.Now().UTC(),
+			AlertID: alert.ID, ResolvedBy: actor, Channel: "telegram",
+		})
+		if err := h.bus.PublishAlert(context.WithoutCancel(ctx), "alert.recover", data, ""); err != nil {
 			slog.Error("telegram interactivity: publish recover", "error", err)
+			h.answerCallback(ctx, cbq.ID, "YipYap could not resolve the alert. Try again.")
+			return
 		}
+		h.answerCallback(ctx, cbq.ID, "Resolved.")
+		h.editMessage(ctx, cbq, "Resolved by "+label)
 	}
+}
 
-	// Update the original Telegram message: append who acted and remove
-	// the inline keyboard so buttons cannot be clicked again.
-	cbq := update.CallbackQuery
-	if h.botToken != "" && cbq.Message != nil {
-		go func() {
-			actionStr := "Acknowledged"
-			if action == "resolve" {
-				actionStr = "Resolved"
-			}
-			userName := cbq.From.Username
-			if userName == "" {
-				userName = fmt.Sprintf("user %d", cbq.From.ID)
-			}
-
-			updatedText := cbq.Message.Text
-			if updatedText != "" {
-				updatedText += "\n\n"
-			}
-			updatedText += fmt.Sprintf("%s by %s", actionStr, userName)
-
-			editURL := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", h.botToken)
-			editBody, _ := json.Marshal(map[string]any{
-				"chat_id":      cbq.Message.Chat.ID,
-				"message_id":   cbq.Message.MessageID,
-				"text":         updatedText,
-				"parse_mode":   "HTML",
-				"reply_markup": map[string]any{"inline_keyboard": []any{}},
-			})
-
-			req, err := http.NewRequest("POST", editURL, bytes.NewReader(editBody))
-			if err != nil {
-				slog.Warn("telegram: failed to build edit request", "error", err)
-				return
-			}
-			req.Header.Set("Content-Type", "application/json")
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				slog.Warn("telegram: failed to edit message", "error", err)
-				return
-			}
-			_ = resp.Body.Close()
-		}()
+// editMessage appends a status line to the clicked message and removes
+// the buttons so they cannot be pressed again. The original text comes
+// back from Telegram as plain text, so it is escaped for HTML mode.
+func (h *TelegramInteractivityHandler) editMessage(ctx context.Context, cbq *telegramWebhookCallbackQuery, line string) {
+	if h.botToken == "" || cbq.Message == nil {
+		return
 	}
+	text := telegramEditedText(cbq.Message.Text, line)
+	if err := h.call(ctx, "editMessageText", map[string]any{
+		"chat_id":      cbq.Message.Chat.ID,
+		"message_id":   cbq.Message.MessageID,
+		"text":         text,
+		"parse_mode":   "HTML",
+		"reply_markup": map[string]any{"inline_keyboard": []any{}},
+	}); err != nil {
+		slog.Warn("telegram interactivity: edit message", "error", err)
+	}
+}
 
-	w.WriteHeader(http.StatusOK)
+// telegramEditedText is the edited message after a button press. Telegram
+// returns the message as plain text (the HTML formatting is gone), and the
+// edit is sent with parse_mode HTML, so the old text and the status line
+// are escaped. Otherwise a monitor named "API <prod>" makes the edit fail
+// and the buttons stay live.
+func telegramEditedText(oldText, line string) string {
+	var b strings.Builder
+	if oldText != "" {
+		b.WriteString(html.EscapeString(oldText))
+		b.WriteString("\n\n")
+	}
+	b.WriteString(html.EscapeString(line))
+	return b.String()
 }

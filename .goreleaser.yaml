@@ -97,8 +97,8 @@ release:
     ## Quick Start
 
     ```bash
-    # Single binary
-    YIPYAP_JWT_SECRET=your-secret ./yipyap
+    # Single binary (generates and stores a JWT secret on first boot)
+    ./yipyap
 
     # Docker Compose
     docker compose up

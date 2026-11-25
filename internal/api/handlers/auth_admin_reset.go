@@ -4,10 +4,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/session"
+	"github.com/go-chi/chi/v5"
 )
 
 // ResetPassword allows an owner or admin to set a temporary password for another user,
@@ -38,6 +39,9 @@ func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, "temporary_password is required")
 		return
 	}
+	if !checkPasswordPolicy(w, req.TemporaryPassword) {
+		return
+	}
 
 	hash, err := auth.HashPassword(req.TemporaryPassword)
 	if err != nil {
@@ -51,6 +55,10 @@ func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.store.Users().Update(r.Context(), target); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to reset password")
+		return
+	}
+	if err := session.RevokeAll(r.Context(), h.store, target.ID, ""); err != nil {
+		errorResponse(w, http.StatusInternalServerError, "password reset, but signing out the user's sessions failed")
 		return
 	}
 

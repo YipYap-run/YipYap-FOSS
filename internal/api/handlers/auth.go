@@ -2,18 +2,21 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
+	"github.com/YipYap-run/YipYap-FOSS/internal/session"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/google/uuid"
 )
 
 type AuthHandler struct {
@@ -21,6 +24,27 @@ type AuthHandler struct {
 	jwt           *auth.JWTIssuer
 	mailer        *mailer.Mailer
 	publicBaseURL string
+	// sendMail replaces mailer.Send in tests that inspect outgoing mail.
+	sendMail func(to, subject, body string) error
+}
+
+// send delivers one email through the test hook or the mailer.
+func (h *AuthHandler) send(to, subject, body string) error {
+	if h.sendMail != nil {
+		return h.sendMail(to, subject, body)
+	}
+	return h.mailer.Send(to, subject, body)
+}
+
+// errSlugTaken makes the registration loop retry with a suffixed slug.
+var errSlugTaken = errors.New("org slug taken")
+
+// writeEmailTaken sends the 409 for a sign-up whose email has an account.
+func writeEmailTaken(w http.ResponseWriter) {
+	jsonResponse(w, http.StatusConflict, map[string]string{
+		"error": emailTakenMessage,
+		"code":  codeEmailTaken,
+	})
 }
 
 func NewAuthHandler(s store.Store, jwt *auth.JWTIssuer) *AuthHandler {
@@ -36,31 +60,19 @@ func NewAuthHandlerFull(s store.Store, jwt *auth.JWTIssuer, m *mailer.Mailer, pu
 }
 
 // setSessionCookie writes the JWT as an HttpOnly session cookie.
-func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, token string) {
-	maxAge := int(h.jwt.TTL().Seconds())
-	if maxAge <= 0 {
-		maxAge = 86400
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "yipyap_session",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   strings.HasPrefix(h.publicBaseURL, "https://"),
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   maxAge,
-	})
+func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+	writeSessionCookie(w, r, h.jwt, h.publicBaseURL, token)
 }
 
-// clearSessionCookie expires the session cookie.
-func clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "yipyap_session",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		MaxAge:   -1,
-	})
+// StartSession issues a session token for user and sets the session cookie.
+// The invite accept handler uses it to sign a new member in.
+func (h *AuthHandler) StartSession(w http.ResponseWriter, user *domain.User) (string, error) {
+	token, err := h.jwt.Issue(user.ID, user.OrgID, string(user.Role))
+	if err != nil {
+		return "", err
+	}
+	writeSessionCookie(w, nil, h.jwt, h.publicBaseURL, token)
+	return token, nil
 }
 
 type registerRequest struct {
@@ -93,22 +105,52 @@ func slugify(name string) string {
 	return s
 }
 
+// errEmailTaken aborts a registration transaction when the email already
+// has an account.
+var errEmailTaken = errors.New("email already registered")
+
+// slugAttempts bounds the retries when a generated org slug collides.
+const slugAttempts = 5
+
+// slugCandidate returns base for the first attempt and base plus a random
+// suffix after that, so two orgs with the same name get distinct slugs.
+func slugCandidate(base string, attempt int) string {
+	if attempt == 0 {
+		return base
+	}
+	suffix, err := randomHex(3)
+	if err != nil {
+		suffix = uuid.New().String()[:6]
+	}
+	return base + "-" + suffix
+}
+
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := decodeBody(r, &req); err != nil {
 		errorResponse(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.OrgName == "" || req.Email == "" || req.Password == "" {
+	req.OrgName = strings.TrimSpace(req.OrgName)
+	if req.OrgName == "" || strings.TrimSpace(req.Email) == "" || req.Password == "" {
 		errorResponse(w, http.StatusBadRequest, "org_name, email, and password are required")
 		return
 	}
-	if len(req.Password) < 8 {
-		errorResponse(w, http.StatusBadRequest, "password must be at least 8 characters")
+	email, ok := normalizedEmail(w, req.Email)
+	if !ok {
+		return
+	}
+	if !checkPasswordPolicy(w, req.Password) {
 		return
 	}
 	if req.ConfirmPassword != "" && req.ConfirmPassword != req.Password {
 		errorResponse(w, http.StatusBadRequest, "passwords do not match")
+		return
+	}
+
+	ctx := r.Context()
+	if emailInUse(ctx, h.store, email, "") {
+		writeEmailTaken(w)
 		return
 	}
 
@@ -119,10 +161,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
+	baseSlug := slugify(req.OrgName)
 	org := &domain.Org{
 		ID:        uuid.New().String(),
 		Name:      req.OrgName,
-		Slug:      slugify(req.OrgName),
 		Plan:      domain.PlanFree,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -131,31 +173,51 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	user := &domain.User{
 		ID:           uuid.New().String(),
 		OrgID:        org.ID,
-		Email:        req.Email,
+		Email:        email,
 		PasswordHash: passwordHash,
 		Role:         domain.RoleOwner,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
 
-	err = h.store.Tx(r.Context(), func(tx store.Store) error {
-		if err := tx.Orgs().Create(r.Context(), org); err != nil {
-			return err
-		}
-		if err := tx.Users().Create(r.Context(), user); err != nil {
-			return err
-		}
-		if sp, ok := tx.(store.MonitorStateProvider); ok {
-			if err := sp.MonitorStates().SeedBuiltins(r.Context(), org.ID); err != nil {
+	// The slug is globally unique but the org name is not (auth-7): a taken
+	// slug gets a random suffix. The email and slug checks run inside the
+	// transaction; a unique-index failure from a concurrent sign-up is
+	// retried, and then reported as a taken email if that is the cause.
+	for attempt := 0; ; attempt++ {
+		org.Slug = slugCandidate(baseSlug, attempt)
+		err = h.store.Tx(ctx, func(tx store.Store) error {
+			if emailInUse(ctx, tx, email, "") {
+				return errEmailTaken
+			}
+			if _, err := tx.Orgs().GetBySlug(ctx, org.Slug); err == nil {
+				return errSlugTaken
+			}
+			if err := tx.Orgs().Create(ctx, org); err != nil {
 				return err
 			}
+			if err := tx.Users().Create(ctx, user); err != nil {
+				return err
+			}
+			if sp, ok := tx.(store.MonitorStateProvider); ok {
+				if err := sp.MonitorStates().SeedBuiltins(ctx, org.ID); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err == nil {
+			break
 		}
-		return nil
-	})
-	if err != nil {
-		log.Printf("register: transaction failed: %v", err)
-		errorResponse(w, http.StatusConflict, "org or user already exists")
-		return
+		if errors.Is(err, errEmailTaken) || emailInUse(ctx, h.store, email, "") {
+			writeEmailTaken(w)
+			return
+		}
+		if attempt+1 >= slugAttempts {
+			slog.Error("register: transaction failed", "attempts", attempt+1, "error", err)
+			errorResponse(w, http.StatusInternalServerError, "failed to create account, try again")
+			return
+		}
 	}
 
 	// FOSS fallback: no mailer configured => auto-verify and issue session.
@@ -163,12 +225,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		if err := h.store.Users().MarkEmailVerified(r.Context(), user.ID, now); err != nil {
 			log.Printf("register: failed to auto-verify user %s: %v", user.ID, err)
 		}
-		token, err := h.jwt.Issue(user.ID, org.ID, string(user.Role))
+		token, err := issueLoginSession(r, h.store, h.jwt, user, auth.AMRPassword)
 		if err != nil {
 			errorResponse(w, http.StatusInternalServerError, "failed to issue token")
 			return
 		}
-		h.setSessionCookie(w, token)
+		h.setSessionCookie(w, r, token)
 		jsonResponse(w, http.StatusCreated, authResponse{Token: token, User: user})
 		return
 	}
@@ -214,6 +276,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Email = domain.NormalizeEmail(req.Email)
 	if req.Email == "" || req.Password == "" {
 		errorResponse(w, http.StatusBadRequest, "email and password are required")
 		return
@@ -247,29 +310,26 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for MFA.
-	hasMFA, methods := userHasMFA(r.Context(), h.store, user)
-	if hasMFA {
-		mfaToken, err := h.jwt.IssueMFA(user.ID, user.OrgID, string(user.Role))
-		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, "failed to issue MFA token")
-			return
-		}
-		jsonResponse(w, http.StatusOK, map[string]interface{}{
-			"mfa_required": true,
-			"mfa_token":    mfaToken,
-			"mfa_methods":  methods,
-		})
+	// An org that enforces SSO refuses password sign-in for members. This
+	// runs after the password check so the refusal reveals nothing to
+	// someone who does not know the password. An edition that supports a
+	// second factor may answer the request here instead of continuing.
+	handled, err := h.beginSecondFactorLogin(w, r, user)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "failed to start sign-in")
+		return
+	}
+	if handled {
 		return
 	}
 
-	token, err := h.jwt.Issue(user.ID, user.OrgID, string(user.Role))
+	token, err := issueLoginSession(r, h.store, h.jwt, user, auth.AMRPassword)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to issue token")
 		return
 	}
 
-	h.setSessionCookie(w, token)
+	h.setSessionCookie(w, r, token)
 	jsonResponse(w, http.StatusOK, authResponse{Token: token, User: user})
 }
 
@@ -292,18 +352,64 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.jwt.Issue(user.ID, user.OrgID, string(user.Role))
+	// Once the org enforces SSO, a password session of a member is not
+	// renewed. Turning enforcement on already revokes these; this covers a
+	// member who signed in as the owner and was later demoted.
+	if ssoSessionBlocked(r.Context(), h.store, user, claims.AMR) {
+		if err := session.Revoke(r.Context(), h.store, user.ID, claims.SID); err != nil && !errors.Is(err, store.ErrSessionNotFound) {
+			slog.Error("refresh: revoke session", "user_id", user.ID, "error", err)
+		}
+		clearSessionCookie(w)
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{
+			"error": "your organization requires single sign-on, sign in with SSO",
+			"code":  "sso_required",
+		})
+		return
+	}
+
+	token, err := session.Renew(r.Context(), h.store, h.jwt, claims, string(user.Role))
+	if errors.Is(err, session.ErrRevoked) {
+		clearSessionCookie(w)
+		errorResponse(w, http.StatusUnauthorized, "session expired or signed out")
+		return
+	}
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to issue token")
 		return
 	}
 
-	h.setSessionCookie(w, token)
+	h.setSessionCookie(w, r, token)
 	jsonResponse(w, http.StatusOK, authResponse{Token: token, User: user})
 }
 
+// Logout revokes the caller's server-side session and clears the cookie.
+// It needs no valid session: an expired or already revoked token still gets
+// its cookie cleared.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	if claims := h.sessionClaimsFromRequest(r); claims != nil && claims.SID != "" {
+		if err := session.Revoke(r.Context(), h.store, claims.UserID, claims.SID); err != nil && !errors.Is(err, store.ErrSessionNotFound) {
+			slog.Error("logout: revoke session", "user_id", claims.UserID, "error", err)
+		}
+	}
 	clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// sessionClaimsFromRequest returns the validated session JWT claims from the
+// session cookie or a Bearer header, or nil.
+func (h *AuthHandler) sessionClaimsFromRequest(r *http.Request) *auth.Claims {
+	var token string
+	if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
+		token = c.Value
+	} else if hdr := r.Header.Get("Authorization"); strings.HasPrefix(hdr, "Bearer ") {
+		token = strings.TrimPrefix(hdr, "Bearer ")
+	}
+	if token == "" {
+		return nil
+	}
+	claims, err := h.jwt.Validate(token)
+	if err != nil {
+		return nil
+	}
+	return claims
+}

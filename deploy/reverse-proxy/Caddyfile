@@ -23,9 +23,15 @@ yipyap.example.com {
     reverse_proxy localhost:8080 {
         # Forward real client IP to YipYap. Make sure the matching CIDR
         # is listed in YIPYAP_TRUSTED_PROXY_CIDRS on the YipYap side.
+        # X-Real-IP and X-Forwarded-For are overwritten with the address
+        # Caddy saw, so a client cannot inject its own value.
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
+        # Drop any client-supplied Cloudflare header. YipYap only honors
+        # it from Cloudflare's own ranges, but strip it here as well.
+        header_up -CF-Connecting-IP
+        header_up -True-Client-IP
     }
 
     # Access log (optional). Comment out if you want Caddy's default.

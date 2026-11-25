@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'preact/hooks';
 import { resendVerification } from '../../state/auth';
+import { FormError } from '../../components/ui';
 
 const COOLDOWN_SECS = 30;
 
@@ -58,7 +59,7 @@ export function VerifyEmailSentPage() {
         </p>
 
         {status && <div class="form-success">{status}</div>}
-        {error && <div class="form-error">{error}</div>}
+        <FormError>{error}</FormError>
 
         <button
           type="button"

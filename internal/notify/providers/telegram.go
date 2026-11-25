@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -25,6 +27,7 @@ type Telegram struct {
 	fallback TelegramConfig
 	decrypt  notify.DecryptFunc
 	client   *http.Client
+	apiBase  string
 }
 
 // NewTelegram creates a Telegram notifier.
@@ -33,10 +36,11 @@ func NewTelegram(fallback TelegramConfig, decrypt notify.DecryptFunc) *Telegram 
 		fallback: fallback,
 		decrypt:  decrypt,
 		client:   &http.Client{Timeout: 30 * time.Second},
+		apiBase:  "https://api.telegram.org",
 	}
 }
 
-func (t *Telegram) Channel() string    { return "telegram" }
+func (t *Telegram) Channel() string     { return "telegram" }
 func (t *Telegram) MaxConcurrency() int { return 5 }
 
 func (t *Telegram) Send(ctx context.Context, job domain.NotificationJob) (string, error) {
@@ -44,46 +48,13 @@ func (t *Telegram) Send(ctx context.Context, job domain.NotificationJob) (string
 	if err := resolveConfig(job, t.decrypt, &cfg); err != nil {
 		return "", fmt.Errorf("resolve telegram config: %w", err)
 	}
+	if strings.TrimSpace(cfg.ChatID) == "" {
+		// The channel was created but no chat has sent its /link code yet.
+		return "", fmt.Errorf("telegram chat not linked: send the channel's /link code to the bot in the chat")
+	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
-
-	text := fmt.Sprintf("[%s] %s\n%s", job.Severity, job.MonitorName, job.Message)
-	if job.RunbookURL != "" {
-		text += fmt.Sprintf("\n\xf0\x9f\x93\x8b <a href=\"%s\">Runbook</a>", job.RunbookURL)
-	}
-	if job.ServiceName != "" {
-		text += fmt.Sprintf("\n<b>Service:</b> %s", job.ServiceName)
-	}
-	if len(job.DependencyStatus) > 0 {
-		var deps []struct {
-			ServiceName  string `json:"service_name"`
-			Relationship string `json:"relationship"`
-			IsAlerting   bool   `json:"is_alerting"`
-		}
-		if err := json.Unmarshal(job.DependencyStatus, &deps); err == nil && len(deps) > 0 {
-			text += "\n<b>Dependencies:</b>"
-			for _, dep := range deps {
-				icon := "\xe2\x9c\x85"
-				if dep.IsAlerting {
-					icon = "\xf0\x9f\x94\xb4"
-				}
-				text += fmt.Sprintf("\n%s %s (%s)", icon, dep.ServiceName, dep.Relationship)
-			}
-		}
-	}
-	if len(job.ContextLinks) > 0 {
-		var links []struct {
-			Label string `json:"label"`
-			URL   string `json:"url"`
-		}
-		if err := json.Unmarshal(job.ContextLinks, &links); err == nil && len(links) > 0 {
-			var linkParts []string
-			for _, link := range links {
-				linkParts = append(linkParts, fmt.Sprintf("<a href=\"%s\">%s</a>", link.URL, link.Label))
-			}
-			text += "\n<b>Quick Links:</b> " + strings.Join(linkParts, " | ")
-		}
-	}
+	url := fmt.Sprintf("%s/bot%s/sendMessage", t.apiBase, cfg.BotToken)
+	text := telegramMessageText(job)
 
 	payload := map[string]any{
 		"chat_id":    cfg.ChatID,
@@ -137,6 +108,74 @@ func (t *Telegram) Send(ctx context.Context, job domain.NotificationJob) (string
 		return "", fmt.Errorf("telegram API error: %s", result.Description)
 	}
 	return fmt.Sprintf("%d", result.Result.MessageID), nil
+}
+
+// telegramMessageText builds the HTML body for parse_mode HTML. Every
+// interpolated value is escaped: Telegram rejects the whole message when the
+// text holds an unknown tag or a bare '<' or '&', so a monitor named
+// "API <prod>" would otherwise never arrive.
+func telegramMessageText(job domain.NotificationJob) string {
+	esc := html.EscapeString
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s] %s\n%s", esc(job.Severity), esc(job.MonitorName), esc(job.Message))
+	if href := telegramHref(job.RunbookURL); href != "" {
+		fmt.Fprintf(&b, "\n\xf0\x9f\x93\x8b <a href=\"%s\">Runbook</a>", href)
+	}
+	if job.ServiceName != "" {
+		fmt.Fprintf(&b, "\n<b>Service:</b> %s", esc(job.ServiceName))
+	}
+	if len(job.DependencyStatus) > 0 {
+		var deps []struct {
+			ServiceName  string `json:"service_name"`
+			Relationship string `json:"relationship"`
+			IsAlerting   bool   `json:"is_alerting"`
+		}
+		if err := json.Unmarshal(job.DependencyStatus, &deps); err == nil && len(deps) > 0 {
+			b.WriteString("\n<b>Dependencies:</b>")
+			for _, dep := range deps {
+				icon := "\xe2\x9c\x85"
+				if dep.IsAlerting {
+					icon = "\xf0\x9f\x94\xb4"
+				}
+				fmt.Fprintf(&b, "\n%s %s (%s)", icon, esc(dep.ServiceName), esc(dep.Relationship))
+			}
+		}
+	}
+	if len(job.ContextLinks) > 0 {
+		var links []struct {
+			Label string `json:"label"`
+			URL   string `json:"url"`
+		}
+		if err := json.Unmarshal(job.ContextLinks, &links); err == nil && len(links) > 0 {
+			var linkParts []string
+			for _, link := range links {
+				label := esc(link.Label)
+				if label == "" {
+					label = esc(link.URL)
+				}
+				if href := telegramHref(link.URL); href != "" {
+					linkParts = append(linkParts, fmt.Sprintf("<a href=\"%s\">%s</a>", href, label))
+				} else if label != "" {
+					linkParts = append(linkParts, label)
+				}
+			}
+			if len(linkParts) > 0 {
+				b.WriteString("\n<b>Quick Links:</b> " + strings.Join(linkParts, " | "))
+			}
+		}
+	}
+	return b.String()
+}
+
+// telegramHref returns an escaped href for an http(s) URL, or "" for
+// anything else (empty, relative, javascript: and similar).
+func telegramHref(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := neturl.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	return html.EscapeString(raw)
 }
 
 // telegramUpdate mirrors the relevant fields of a Telegram webhook update.

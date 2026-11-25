@@ -14,4 +14,9 @@ func NewDedupStore(_ Queryable, _ Dialect) *DedupStore { return &DedupStore{} }
 func (s *DedupStore) Claim(_ context.Context, _ string, _ time.Duration) (bool, error) {
 	return true, nil
 }
+func (s *DedupStore) Peek(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+func (s *DedupStore) Release(_ context.Context, _ string) error { return nil }
+
 func (s *DedupStore) Cleanup(_ context.Context) error { return nil }

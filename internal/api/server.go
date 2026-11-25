@@ -19,8 +19,11 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
+	"github.com/YipYap-run/YipYap-FOSS/internal/contactmethod"
 	"github.com/YipYap-run/YipYap-FOSS/internal/crypto"
 	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
+	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
+	"github.com/YipYap-run/YipYap-FOSS/internal/session"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 	"github.com/YipYap-run/YipYap-FOSS/internal/telemetry"
 	"github.com/YipYap-run/YipYap-FOSS/web"
@@ -37,16 +40,28 @@ type ServerOptions struct {
 	Mailer              *mailer.Mailer
 	// APIKeyHasher is used to hash API key tokens for storage and lookup.
 	// When nil, plain SHA-256 is used for backward compatibility.
-	APIKeyHasher          *auth.APIKeyHasher
+	APIKeyHasher *auth.APIKeyHasher
+	// APIKeyMaxTTL bounds expires_at on new API keys. Zero uses
+	// handlers.DefaultAPIKeyMaxTTL.
+	APIKeyMaxTTL          time.Duration
 	DiscordPublicKey      string // hex-encoded Ed25519 public key for Discord webhook verification
 	SlackSigningSecret    string // Slack app signing secret for request verification
+	SlackClientID         string // platform Slack app OAuth client ID (SaaS)
+	SlackClientSecret     string // platform Slack app OAuth client secret (SaaS)
+	DiscordClientID       string // platform Discord app application ID (SaaS)
+	DiscordClientSecret   string // platform Discord app OAuth client secret (SaaS)
+	DiscordBotToken       string // platform Discord bot token (SaaS)
 	TelegramWebhookSecret string // secret token for Telegram webhook verification
 	TelegramBotToken      string // platform Telegram bot API token for editing messages on ack/resolve
 	TelegramBotUsername   string // public bot username for UI help
 	TwilioAuthToken       string // Twilio account auth token for voice callback signature verification
 	TelnyxWebhookSecret   string // HMAC secret for Telnyx TeXML callback URLs
-	// TrustedProxyNets lists CIDRs from which proxy headers (CF-Connecting-IP,
-	// X-Real-IP, X-Forwarded-For) are trusted. When empty, RemoteAddr is used
+	// PhoneVerifySender sends OTP codes that activate SMS and voice
+	// channels. Nil disables verification (the endpoints answer 503).
+	PhoneVerifySender handlers.PhoneCodeSender
+	// TrustedProxyNets lists CIDRs from which proxy headers (X-Forwarded-For,
+	// X-Real-IP) are trusted. CF-Connecting-IP is additionally limited to
+	// peers in Cloudflare's published ranges. When empty, RemoteAddr is used
 	// as-is and proxy headers are ignored.
 	TrustedProxyNets []*net.IPNet
 	// Metrics is the centralised OTEL metrics bundle. When non-nil it is
@@ -56,7 +71,7 @@ type ServerOptions struct {
 	// non-FOSS builds. FOSS builds ignore it.
 	JWKSHandler http.Handler
 	// LifecycleCtx, when non-nil, is observed by long-lived components
-	// (ceConsumerCache sweep loop, etc.) so they can release resources
+	// so they can release resources
 	// when the parent process is shutting down. main.go passes the same
 	// context it cancels in its SIGTERM handler. A4-N-2.
 	LifecycleCtx context.Context
@@ -71,6 +86,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	handlers.SetAPIKeyMaxTTL(opt.APIKeyMaxTTL)
 
 	// Derive a safe CORS origin from publicBaseURL. Never default to "*".
 	corsOrigin := publicBaseURL
@@ -83,7 +99,9 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 
 	// Global middleware.
 	r.Use(trustedProxyRealIP(opt.TrustedProxyNets))
-	r.Use(chimw.Logger)
+	// Structured access log by route pattern. chimw.Logger wrote the full
+	// RequestURI, which leaked ingest, heartbeat and survey tokens. (core-5)
+	r.Use(middleware.RequestLog(nil))
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.Latency(opt.RequestLatencyMS))
 	r.Use(middleware.SecurityHeaders(publicBaseURL))
@@ -99,6 +117,12 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	resetH := handlers.NewPasswordResetHandler(s, jwt, opt.Mailer, publicBaseURL)
 	orgH := handlers.NewOrgHandlerWithHasher(s, opt.APIKeyHasher)
 	userH := handlers.NewUserHandler(s)
+	var inviteMailer handlers.InviteMailer
+	if opt.Mailer != nil {
+		inviteMailer = opt.Mailer
+	}
+	userH.SetInviteDelivery(inviteMailer, publicBaseURL)
+	userH.SetSessionStarter(authH.StartSession)
 	monitorH := handlers.NewMonitorHandler(s)
 	if opt.OnMonitorChange != nil {
 		monitorH.SetOnChange(opt.OnMonitorChange)
@@ -106,24 +130,48 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	monitorGroupH := handlers.NewMonitorGroupHandler(s)
 	monitorStateH := handlers.NewMonitorStateHandler(s)
 	alertH := handlers.NewAlertHandler(s)
+	alertH.SetBus(msgBus)
+	if opt.Envelope != nil {
+		alertH.SetContactMethodCipher(contactmethod.Cipher{Enc: opt.Envelope.Encrypt, Dec: opt.Envelope.Decrypt})
+	}
 	escalationH := handlers.NewEscalationHandler(s)
 	notifChanH := handlers.NewNotificationChannelHandler(s, opt.TestSender)
+	notifChanH.SetTelegramBot(opt.TelegramBotUsername, opt.TelegramWebhookSecret != "" && opt.TelegramBotToken != "")
+	notifChanH.SetPlatformEmail(opt.Mailer != nil)
+	if opt.Mailer != nil {
+		notifChanH.SetChannelAlerts(notify.NewChannelAlerts(s, opt.Mailer, publicBaseURL))
+	}
 	maintenanceH := handlers.NewMaintenanceHandler(s)
 	publicH := handlers.NewPublicHandler(s)
-	bulkImportH := handlers.NewBulkImportHandler(s)
+	bulkImportH := handlers.NewBulkImportHandler(s, opt.Mailer != nil)
+	if opt.OnMonitorChange != nil {
+		bulkImportH.SetOnChange(opt.OnMonitorChange)
+	}
 	accountDeleteH := handlers.NewAccountDeleteHandler(s, jwt, opt.Mailer, publicBaseURL)
 	replyAuditH := handlers.NewReplyAuditHandler(s)
+	sessionH := handlers.NewSessionHandler(s)
+	contactH := newContactMethodHandler(s, opt)
 
-	authMiddleware := middleware.Auth(jwt, s.APIKeys(), opt.APIKeyHasher)
+	authMiddleware := middleware.Auth(jwt, s.APIKeys(), opt.APIKeyHasher, session.Checker(s))
+	// Full chain for user-facing authenticated routes (auth-2).
+	authed := authedChain(s, authMiddleware)
+	authedAllowReadOnlyWrite := authedChainAllowReadOnlyWrite(s, authMiddleware)
 
-	// WebSocket endpoint  - JWT auth via query param, not middleware.
+	// WebSocket endpoint: session cookie auth plus the account gates, inside
+	// ServeWS, with the server-side session re-checked while open.
 	if wsHub != nil {
-		r.Get("/ws", wsHub.ServeWS(jwt))
+		r.Get("/ws", wsHub.ServeWS(jwt, s, session.Checker(s)))
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public routes (no auth).
-		r.Get("/meta", handlers.MetaGet(opt.RegistrationEnabled, s, opt.TelegramBotUsername))
+		// Public route with optional auth: anonymous callers get the
+		// public fields, signed-in callers also get plan, promo and
+		// retention. PromoExpiry runs so an org past its promo grace sees
+		// its Free plan here on the same request.
+		r.With(
+			middleware.OptionalAuth(jwt, s.APIKeys(), opt.APIKeyHasher, s.Users()),
+			middleware.PromoExpiry(s),
+		).Get("/meta", handlers.MetaGet(opt.RegistrationEnabled, s, opt.TelegramBotUsername, billingClient != nil && billingWebhookSecret != ""))
 
 		// Rate-limited public auth routes.
 		r.Group(func(r chi.Router) {
@@ -139,11 +187,23 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			r.Post("/auth/confirm-delete", accountDeleteH.ConfirmDeletion)
 			r.Post("/auth/recover-account", accountDeleteH.RequestRecovery)
 			r.Post("/auth/confirm-recover", accountDeleteH.ConfirmRecovery)
+			r.Post("/auth/confirm-email-change", authH.ConfirmEmailChange)
+			r.Post("/auth/cancel-email-change", authH.CancelEmailChange)
+		})
+
+		// Member invite accept (public, the token is in the link). Its own
+		// rate-limit bucket, so opening the accept page does not use up the
+		// sign-in allowance.
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitBy(20, time.Minute, handlers.RateLimitKeyByClientIP))
+			r.Get("/invites/accept", userH.GetInviteForAccept)
+			r.Post("/invites/accept", userH.AcceptInvite)
 		})
 
 		registerSaaSPreAuthRoutes(r, authH)
 
-		// Logout clears the session cookie and requires no valid token.
+		// Logout revokes the session and clears the cookie. It requires no
+		// valid token.
 		r.Post("/auth/logout", authH.Logout)
 
 		r.Get("/public/{orgSlug}/maintenance", publicH.Maintenance)
@@ -169,27 +229,17 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		})
 
 		// CloudEvents poll-mode and stream-mode transports for the
-		// yipyap-knative-source ContainerSource binary. Bearer-auth'd
-		// drains of the internal bus scoped to the caller's org. Poll
-		// and stream share a single consumer cache so switching modes
-		// on the same (org, filter) resumes cleanly across cursor state.
+		// yipyap-knative-source adapter. Bearer-auth'd reads of the
+		// fan-out log scoped to the caller's org. Poll and stream share
+		// one feed, so both modes use the same remembered positions.
 		//
 		// Tier gating (R2-C1): RequirePaidPlan blocks SaaS Free orgs;
 		// FOSS builds are tier-blind (RequirePaidPlan is a build-tagged
 		// no-op there) so self-hosted operators retain full access.
-		ceConsumerCache := handlers.NewCloudEventsConsumerCache(msgBus)
-		// A4-N-2: stop the sweep goroutine when the lifecycle context is
-		// cancelled (main.go's SIGTERM path). Without this, the sweeper
-		// outlives the SIGTERM-triggered cancel until process exit.
-		if opt.LifecycleCtx != nil {
-			ctx := opt.LifecycleCtx
-			go func() {
-				<-ctx.Done()
-				ceConsumerCache.Close()
-			}()
-		}
-		cePollH := handlers.NewCloudEventsPollHandlerWithCache(ceConsumerCache)
-		ceStreamH := handlers.NewCloudEventsStreamHandlerWithCache(ceConsumerCache)
+		ceFeed := handlers.NewCloudEventsFeed(msgBus, s)
+		cePollH := handlers.NewCloudEventsPollHandlerWithFeed(ceFeed)
+		ceStreamH := handlers.NewCloudEventsStreamHandlerWithFeed(ceFeed)
+		ceAckH := handlers.NewCloudEventsAckHandlerWithFeed(ceFeed)
 		ceStreamGate := handlers.NewStreamConcurrencyGate(handlers.DefaultMaxStreamsPerOrg)
 		// Per-org rate limits (H-16): poll at 60 req/min/org, stream
 		// concurrency capped at DefaultMaxStreamsPerOrg per org. Auth
@@ -197,8 +247,15 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		// works here. Poll uses httprate's fixed-window counter; stream
 		// uses a semaphore so concurrent long-lived connections are
 		// bounded.
+		//
+		// These routes run the full authenticated chain (disabled account,
+		// forced password change, org MFA, promo expiry) like every other
+		// user route (auth-16). Staff impersonation tokens are refused: a
+		// poll or stream advances the org's shared consumer cursor, so a
+		// staff read would take events from the customer's source.
 		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware)
+			r.Use(authed)
+			r.Use(middleware.RejectStaffReadonly())
 			r.Use(middleware.RequirePaidPlan(s))
 			r.Group(func(r chi.Router) {
 				r.Use(httprate.LimitBy(60, time.Minute, handlers.RateLimitKeyByOrg))
@@ -210,58 +267,77 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			})
 		})
 
+		// Ack confirms a cursor for a source ID. It only moves a read
+		// position, so read-only keys may call it, but every other gate
+		// (disabled account, staff read-only, MFA, promo expiry) still
+		// applies. It has its own per-org limit so stream clients acking
+		// each batch do not eat into the poll budget.
+		r.Group(func(r chi.Router) {
+			r.Use(authedAllowReadOnlyWrite)
+			r.Use(middleware.RejectStaffReadonly())
+			r.Use(middleware.RequirePaidPlan(s))
+			r.Use(httprate.LimitBy(handlers.CEAckRatePerMinute, time.Minute, handlers.RateLimitKeyByOrg))
+			r.Post("/cloudevents/ack", ceAckH.Ack)
+		})
+
 		// Knative source-config endpoint. The yipyap-knative-source
 		// ContainerSource binary polls this on startup (and again every
 		// refresh_after_seconds) to learn the recommended mode and
-		// cadence. Auth is via the shared authMiddleware: either a JWT
-		// or a Bearer API key. No write-guards, this is a read-only
-		// hint endpoint.
+		// cadence. Auth is a JWT or a Bearer API key through the full
+		// authenticated chain (auth-16). It is a read-only hint endpoint.
 		//
 		// Tier gating (R2-C1): RequirePaidPlan applies, Knative source
 		// configuration is a paid feature in SaaS builds; FOSS is tier-blind.
 		knativeSourceConfigH := handlers.NewKnativeSourceConfigHandler(s)
 		r.Route("/knative", func(r chi.Router) {
-			r.Use(authMiddleware)
+			r.Use(authed)
 			r.Use(middleware.RequirePaidPlan(s))
 			r.Get("/source-config", knativeSourceConfigH.Get)
 		})
 
-		// Discord interactivity callback (button clicks for ack/resolve).
-		discordInteractivityH := handlers.NewDiscordInteractivityHandler(s, msgBus, opt.DiscordPublicKey)
-		r.Post("/webhooks/discord", discordInteractivityH.Handle)
+		// Discord: OAuth callback and button clicks. SaaS serves the
+		// platform app; FOSS keeps the public-key click handler.
+		discordApp := newDiscordAppRoutes(s, msgBus, jwt, opt, publicBaseURL, notifChanH)
+		discordApp.public(r)
 
 		// Pro-only voice callback routes (registered by build-tagged helpers).
-		registerTwilioRoutes(r, s, publicBaseURL, opt.TwilioAuthToken)
-		registerTelnyxRoutes(r, s, publicBaseURL, opt.TelnyxWebhookSecret)
+		registerTwilioRoutes(r, s, msgBus, publicBaseURL, opt.TwilioAuthToken)
+		registerTelnyxRoutes(r, s, msgBus, publicBaseURL, opt.TelnyxWebhookSecret)
 
 		telegramInteractivityH := handlers.NewTelegramInteractivityHandler(s, msgBus, opt.TelegramWebhookSecret, opt.TelegramBotToken)
+		telegramInteractivityH.SetBotUsername(opt.TelegramBotUsername)
 		r.Post("/webhooks/telegram", telegramInteractivityH.Handle)
 
-		// Slack interactivity callback (button clicks for ack/resolve).
-		slackInteractivityH := handlers.NewSlackInteractivityHandler(s, msgBus, opt.SlackSigningSecret)
-		r.Post("/integrations/slack/actions", slackInteractivityH.Handle)
+		// Slack: OAuth callback, Events API and button clicks. SaaS serves
+		// the platform app; FOSS keeps the signing-secret click handler.
+		slackApp := newSlackAppRoutes(s, msgBus, jwt, opt, publicBaseURL)
+		slackApp.public(r)
 
 		// Authenticated routes.
 		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware)
-			r.Use(middleware.DisabledAccountGuard(s))
-			applySaaSAuthExtras(r)
-			r.Use(middleware.RequireWriteAccess())
-			r.Use(middleware.ForcePasswordChange(s))
-			r.Use(middleware.MFAEnforce(s))
-			r.Use(middleware.PromoExpiry(s))
+			r.Use(authed)
 
-			registerSaaSAuthRoutes(r)
+			registerSaaSAuthRoutes(r, s)
+			slackApp.authed(r)
+			discordApp.authed(r)
 
-			// Auth.
-			r.Post("/auth/refresh", authH.Refresh)
-			r.Put("/auth/password", authH.ChangePassword)
-			r.Put("/auth/email", authH.ChangeEmail)
-			r.Post("/auth/delete-account", accountDeleteH.RequestDeletion)
+			// Auth. Session only: an API key must never mint a session or
+			// change its creator's credentials.
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireSession())
+				r.Post("/auth/refresh", authH.Refresh)
+				r.Put("/auth/password", authH.ChangePassword)
+				r.Put("/auth/email", authH.ChangeEmail)
+				r.Delete("/auth/email/pending", authH.CancelPendingEmail)
+				r.Post("/auth/delete-account", accountDeleteH.RequestDeletion)
+				r.Get("/auth/sessions", sessionH.List)
+				r.Delete("/auth/sessions/{id}", sessionH.Revoke)
+				r.Post("/auth/sessions/revoke-others", sessionH.RevokeOthers)
+			})
 
 			// Org.
-			r.Get("/org", orgH.Get)
-			r.Get("/org/settings", orgH.GetSettings)
+			r.With(middleware.RequireScope("org")).Get("/org", orgH.Get)
+			r.With(middleware.RequireScope("org")).Get("/org/settings", orgH.GetSettings)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole("owner", "admin"))
 				r.Patch("/org", orgH.Update)
@@ -269,17 +345,25 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			})
 
 			// Users (read - any authenticated user).
-			r.Get("/users", userH.List)
-			r.Get("/users/{id}", userH.Get)
+			r.With(middleware.RequireScope("users")).Get("/users", userH.List)
+			r.With(middleware.RequireScope("users")).Get("/users/{id}", userH.Get)
 
 			// Users (write - owner/admin only).
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole("owner", "admin"))
-				r.Post("/users", userH.Create)
+				r.Post("/users", userH.LegacyCreate)
+				r.Get("/users/invites", userH.ListInvites)
+				r.Post("/users/invites", userH.CreateInvite)
+				r.Post("/users/invites/{id}/resend", userH.ResendInvite)
+				r.Delete("/users/invites/{id}", userH.RevokeInvite)
 				r.Patch("/users/{id}", userH.Update)
 				r.Delete("/users/{id}", userH.Delete)
+				r.Get("/users/{id}/api-keys", userH.ListAPIKeys)
 				r.Post("/users/{id}/reset-password", userH.ResetPassword)
 			})
+
+			// Personal contact methods and notification rules.
+			contactH.Mount(r)
 
 			// Ownership transfer (owner only).
 			r.Group(func(r chi.Router) {
@@ -290,6 +374,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			// Monitors.
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireScope("monitors"))
+				r.Use(middleware.RequireWriterRole())
 				r.Get("/monitors", monitorH.List)
 				r.Post("/monitors", monitorH.Create)
 				r.Get("/monitors/check-stats", monitorH.CheckStats)
@@ -307,9 +392,10 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 				r.Delete("/monitors/{id}/labels/{key}", monitorH.DeleteLabel)
 			})
 
-			// Bulk import (admin/owner only).
+			// Bulk import (owner/admin/member; it only creates resources a
+			// member can create one by one).
 			r.Group(func(r chi.Router) {
-				r.Use(middleware.RequireRole("owner", "admin"))
+				r.Use(middleware.RequireRole("owner", "admin", "member"))
 				r.Post("/import", bulkImportH.Import)
 			})
 
@@ -327,7 +413,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 				r.Get("/monitor-groups", monitorGroupH.List)
 				r.Get("/monitor-groups/{id}", monitorGroupH.Get)
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireRole("owner", "admin"))
+					r.Use(middleware.RequireRole("owner", "admin", "member"))
 					r.Post("/monitor-groups", monitorGroupH.Create)
 					r.Patch("/monitor-groups/{id}", monitorGroupH.Update)
 					r.Delete("/monitor-groups/{id}", monitorGroupH.Delete)
@@ -340,7 +426,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 				r.Get("/monitor-states", monitorStateH.List)
 				r.Get("/monitors/{id}/rules", monitorStateH.ListRules)
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireRole("owner", "admin"))
+					r.Use(middleware.RequireRole("owner", "admin", "member"))
 					r.Post("/monitor-states", monitorStateH.Create)
 					r.Patch("/monitor-states/{id}", monitorStateH.Update)
 					r.Delete("/monitor-states/{id}", monitorStateH.Delete)
@@ -356,36 +442,35 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 				r.Use(middleware.RequireScope("alerts"))
 				r.Get("/alerts", alertH.List)
 				r.Get("/alerts/{id}", alertH.Get)
+				// Viewers may ack alerts paged to them; the handler checks.
 				r.Post("/alerts/{id}/ack", alertH.Ack)
-				r.Post("/alerts/{id}/resolve", alertH.Resolve)
 				r.Get("/alerts/{id}/timeline", alertH.Timeline)
+				r.With(middleware.RequireWriterRole()).Post("/alerts/{id}/resolve", alertH.Resolve)
 			})
 
 			// Escalation Policies.
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireScope("escalation_policies"))
+				r.Use(middleware.RequireWriterRole())
 				r.Get("/escalation-policies", escalationH.List)
-				r.Post("/escalation-policies", escalationH.Create)
 				r.Get("/escalation-policies/{id}", escalationH.Get)
-				r.Patch("/escalation-policies/{id}", escalationH.Update)
-				r.Delete("/escalation-policies/{id}", escalationH.Delete)
-				r.Put("/escalation-policies/{id}/steps", escalationH.ReplaceSteps)
+				// Policies decide who gets paged, so viewers and members
+				// only read them.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireRole("owner", "admin", "api_key"))
+					r.Post("/escalation-policies", escalationH.Create)
+					r.Patch("/escalation-policies/{id}", escalationH.Update)
+					r.Delete("/escalation-policies/{id}", escalationH.Delete)
+					r.Put("/escalation-policies/{id}/steps", escalationH.ReplaceSteps)
+				})
 			})
 
-			// Notification Channels.
-			r.Group(func(r chi.Router) {
-				r.Use(middleware.RequireScope("notification_channels"))
-				r.Get("/notification-channels", notifChanH.List)
-				r.Post("/notification-channels", notifChanH.Create)
-				r.Get("/notification-channels/{id}", notifChanH.Get)
-				r.Patch("/notification-channels/{id}", notifChanH.Update)
-				r.Delete("/notification-channels/{id}", notifChanH.Delete)
-				r.Post("/notification-channels/{id}/test", notifChanH.Test)
-			})
+			registerNotificationChannelRoutes(r, s, notifChanH, opt)
 
 			// Maintenance Windows.
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireScope("maintenance_windows"))
+				r.Use(middleware.RequireWriterRole())
 				r.Get("/maintenance-windows", maintenanceH.List)
 				r.Post("/maintenance-windows", maintenanceH.Create)
 				r.Get("/maintenance-windows/{id}", maintenanceH.Get)
@@ -396,12 +481,15 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		})
 
 		// Pro-only routes (teams, schedules, OIDC, API keys, billing).
-		registerProRoutes(r, s, jwt, authMiddleware, msgBus, billingClient, billingWebhookSecret, publicBaseURL, userH, opt.Envelope, opt.OpsToken, root, opt.APIKeyHasher, opt.Mailer)
+		registerProRoutes(r, s, jwt, authed, msgBus, billingClient, billingWebhookSecret, publicBaseURL, userH, opt.Envelope, opt.OpsToken, root, opt.APIKeyHasher, opt.Mailer, opt.TestSender)
 	})
 
 	// JWKS endpoint, mounted before the SPA catch-all so that
 	// /.well-known/jwks.json is routable. FOSS's MountJWKS is a no-op.
 	MountJWKS(r, opt.JWKSHandler)
+
+	// Signed acknowledge links from notifications (no login).
+	registerAckLinkRoutes(r, s, jwt, msgBus, publicBaseURL)
 
 	// Public status pages (vanity URLs, no auth).
 	r.Get("/{orgSlug}/status/{statusSlug}", publicH.StatusPage)
@@ -412,6 +500,12 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	if err == nil {
 		staticHandler := http.FileServer(http.FS(distFS))
 		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+			if target, ok := handlers.LegacySurveyRedirect(req); ok {
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Referrer-Policy", "no-referrer")
+				http.Redirect(w, req, target, http.StatusFound)
+				return
+			}
 			// Serve static files directly if they exist.
 			path := strings.TrimPrefix(req.URL.Path, "/")
 			if path == "" {

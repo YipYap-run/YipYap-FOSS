@@ -2,11 +2,16 @@ import { useState, useEffect } from 'preact/hooks';
 import { currentUser, currentOrg, logout, billingStatus, appMeta, isPaidPlan } from '../state/auth';
 import { currentPath } from '../state/route';
 import { upgradePrompt, clearUpgradePrompt } from '../state/upgrade';
-import { staffReadonly, READONLY_TOAST_EVENT, notifyReadonly } from '../state/session';
-import { wsConnected } from '../api/ws';
+import { staffReadonly, READONLY_TOAST_EVENT, notifyReadonly } from '../edition/mfa';
+import { LiveStatusDot, LiveStatusBanner } from './live-status';
 import { get } from '../api/client';
 import { ToastContainer } from './ui';
+import { UpgradeLink } from './upgrade-link';
+import { isOrgAdmin } from '../state/permissions.mjs';
 import { SupportFAB } from './support-fab';
+import { StaffSessionBanner, MFAGraceBanner } from '../edition/mfa-ui';
+import { PromoBanner } from './promo-banner';
+import { SSOLinkBanner } from './sso-link-banner';
 import { theme, toggleTheme } from '../state/theme';
 
 const NAV_ITEMS = [
@@ -52,9 +57,11 @@ function GlobalToasts() {
       const id = `${Date.now()}-${Math.random()}`;
       setToasts((current) => {
         if (current.some((t) => t.message === detail.message)) return current;
-        return [...current, { id, message: detail.message, type: detail.type || 'warning' }];
+        // The Toast component times itself out (pausing on hover or focus)
+        // and calls onDismiss.
+        const onDismiss = () => setToasts((list) => list.filter((t) => t.id !== id));
+        return [...current, { id, message: detail.message, type: detail.type || 'warning', onDismiss }];
       });
-      setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 4000);
     };
     window.addEventListener(READONLY_TOAST_EVENT, handler);
     return () => window.removeEventListener(READONLY_TOAST_EVENT, handler);
@@ -70,7 +77,7 @@ export function Layout({ children }) {
   // Strip any query/hash so matching stays path-only.
   const path = (currentPath.value || '/').split(/[?#]/)[0];
   const [openTickets, setOpenTickets] = useState(0);
-  const isOwnerOrAdmin = user?.role === 'owner' || user?.role === 'admin';
+  const isOwnerOrAdmin = isOrgAdmin(user?.role);
   const items = NAV_ITEMS.filter(item =>
     (!item.saasOnly || appMeta.value?.edition !== 'foss') &&
     (!item.paidOnly || isPaidPlan.value) &&
@@ -105,8 +112,7 @@ export function Layout({ children }) {
       <aside class="sidebar">
         <div class="sidebar-header">
           <h1 class="logo">YipYap</h1>
-          <span class={`ws-status ${wsConnected.value ? 'connected' : 'disconnected'}`}
-                title={wsConnected.value ? 'Connected' : 'Disconnected'} />
+          <LiveStatusDot />
         </div>
         {org && (
           <div class="sidebar-org">
@@ -159,29 +165,31 @@ export function Layout({ children }) {
       </nav>
 
       <main class="main-content">
+        <StaffSessionBanner />
+        <MFAGraceBanner />
+        <SSOLinkBanner />
         {staffReadonly.value && (
           <div class="readonly-banner">
             Staff read-only session. Changes to this customer account are disabled.
           </div>
         )}
-        {upgradePrompt.value && (
-          <div class="payment-banner upgrade-banner">
+        <LiveStatusBanner />
+        {/* Plan upgrades do not exist on the self-hosted edition. */}
+        {upgradePrompt.value && appMeta.value?.edition !== 'foss' && (
+          <div class="payment-banner upgrade-banner" role="status">
             {upgradePrompt.value}
-            {' '}<a href="/settings/billing" onClick={clearUpgradePrompt}>Upgrade your plan</a>
-            <button class="upgrade-banner-close" onClick={clearUpgradePrompt} aria-label="Dismiss">&times;</button>
+            {' '}<UpgradeLink onClick={clearUpgradePrompt}>Upgrade your plan</UpgradeLink>
+            <button type="button" class="upgrade-banner-close" onClick={clearUpgradePrompt} aria-label="Dismiss upgrade notice">&times;</button>
           </div>
         )}
         {appMeta.value?.billing_enabled && billingStatus.value?.status === 'past_due' && (
-          <div class="payment-banner">
-            Payment failed. <a href="/settings/billing">Update your payment method</a> to avoid service interruption.
+          <div class="payment-banner" role="status">
+            {isOwnerOrAdmin
+              ? <>Payment failed. <a href="/settings/billing">Update your payment method</a> to avoid service interruption.</>
+              : <>Payment failed. An owner or admin needs to update the payment method to avoid service interruption.</>}
           </div>
         )}
-        {appMeta.value?.promo_expiring && (
-          <div class="payment-banner" style="background: #fef3cd; color: #856404; border-bottom: 1px solid #ffeaa7">
-            Your promotional account expires in {appMeta.value.promo_days_remaining} days.
-            {' '}<a href="/settings/billing" style="color: #856404; font-weight: 600">Upgrade now</a> to keep your features.
-          </div>
-        )}
+        <PromoBanner />
         {children}
         <SupportFAB />
       </main>

@@ -30,6 +30,10 @@ func Instrument(b Bus, m *BusMetrics) Bus {
 	return &InstrumentedBus{Bus: b, m: *m}
 }
 
+// Unwrap returns the wrapped bus so callers can reach its optional
+// interfaces, such as EventLog.
+func (b *InstrumentedBus) Unwrap() Bus { return b.Bus }
+
 func (b *InstrumentedBus) Publish(ctx context.Context, subject string, data []byte) error {
 	err := b.Bus.Publish(ctx, subject, data)
 	if err == nil {
@@ -88,4 +92,9 @@ func (b *InstrumentedBus) wrapHandler(subject string, handler Handler) Handler {
 		b.m.ConsumeLatencyMS.Record(ctx, float64(time.Since(start).Milliseconds()), attrs)
 		return err
 	}
+}
+
+// StopConsuming forwards to the wrapped bus when it supports it.
+func (b *InstrumentedBus) StopConsuming() {
+	StopConsuming(b.Bus)
 }

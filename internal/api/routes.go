@@ -13,15 +13,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func registerProRoutes(r chi.Router, s store.Store, _ *auth.JWTIssuer, authMW func(http.Handler) http.Handler, _ bus.Bus, _ interface{}, _ string, _ string, _ interface{}, _ *crypto.Envelope, _ string, _ chi.Router, hasher *auth.APIKeyHasher, _ *mailer.Mailer) {
+func registerProRoutes(r chi.Router, s store.Store, _ *auth.JWTIssuer, authMW func(http.Handler) http.Handler, _ bus.Bus, _ interface{}, _ string, _ string, _ interface{}, _ *crypto.Envelope, _ string, _ chi.Router, hasher *auth.APIKeyHasher, _ *mailer.Mailer, _ handlers.TestSender) {
 	// FOSS: teams, schedules, OIDC, and billing are not available.
 	// API keys are shared across all editions.
 	orgH := handlers.NewOrgHandlerWithHasher(s, hasher)
 	r.Group(func(r chi.Router) {
 		r.Use(authMW)
-		r.Use(middleware.RequireWriteAccess())
 		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireSession())
 			r.Use(middleware.RequireRole("owner", "admin"))
+			r.Get("/org/api-keys/scopes", orgH.ListAPIKeyScopes)
 			r.Get("/org/api-keys", orgH.ListAPIKeys)
 			r.Post("/org/api-keys", orgH.CreateAPIKey)
 			r.Delete("/org/api-keys/{id}", orgH.DeleteAPIKey)

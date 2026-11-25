@@ -29,6 +29,21 @@ func TestSplitSQLStatements(t *testing.T) {
 			want:  []string{"INSERT INTO t (v) VALUES ('it''s; fine')"},
 		},
 		{
+			name:  "dollar-quoted DO block",
+			input: "DO $$\nBEGIN\n  IF true THEN\n    PERFORM 1;\n  END IF;\nEND $$;\nSELECT 2;",
+			want:  []string{"DO $$\nBEGIN\n  IF true THEN\n    PERFORM 1;\n  END IF;\nEND $$", "SELECT 2"},
+		},
+		{
+			name:  "tagged dollar quote with nested $$",
+			input: "DO $body$ BEGIN PERFORM '$$;'; END $body$; SELECT 3;",
+			want:  []string{"DO $body$ BEGIN PERFORM '$$;'; END $body$", "SELECT 3"},
+		},
+		{
+			name:  "placeholder is not a dollar quote",
+			input: "SELECT $1; SELECT a$b$c FROM t;",
+			want:  []string{"SELECT $1", "SELECT a$b$c FROM t"},
+		},
+		{
 			name:  "trailing semicolon and whitespace",
 			input: "CREATE TABLE a (x TEXT);\n\n",
 			want:  []string{"CREATE TABLE a (x TEXT)"},

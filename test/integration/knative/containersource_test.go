@@ -14,7 +14,6 @@ package knative
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -153,8 +152,8 @@ func newContainerSourceHarness(t *testing.T) *containerSourceHarness {
 }
 
 // fireEvent publishes a CloudEvent of the given type onto h.bus for h.org,
-// using the same subject scheme as cepub.Publisher so the poll handler's
-// durable consumer picks it up. Returns the event so tests can assert on
+// through cepub.Publisher so it lands in the fan-out log the poll handler
+// reads. Returns the event so tests can assert on
 // the ce-id they see at the sink.
 func (h *containerSourceHarness) fireEvent(ceType string) ce.Event {
 	h.t.Helper()
@@ -166,22 +165,17 @@ func (h *containerSourceHarness) fireEvent(ceType string) ce.Event {
 	if err := ev.SetData(ce.ApplicationJSON, map[string]string{"k": "v"}); err != nil {
 		h.t.Fatalf("set data: %v", err)
 	}
-	payload, err := json.Marshal(ev)
-	if err != nil {
-		h.t.Fatalf("marshal: %v", err)
-	}
-	subject := cepub.SubjectFor(h.org.ID, ev.Type())
-	if err := h.bus.PublishDurable(context.Background(), subject, payload, ev.ID()); err != nil {
+	if err := cepub.NewPublisher(h.bus).Publish(context.Background(), h.org.ID, ev); err != nil {
 		h.t.Fatalf("publish: %v", err)
 	}
 	return ev
 }
 
-// primeConsumer issues a priming poll so the handler's durable consumer is
-// subscribed to the bus BEFORE we publish. ChannelBus is fire-and-forget,
-// messages published without an active subscriber are dropped on the floor.
-// The real JetStream-backed bus doesn't have this problem; this priming
-// call is a harness limitation, not a production path.
+// primeConsumer issues a priming poll so the server remembers a start
+// position for this client before we publish. A client with no cursor and
+// no remembered position starts at the end of the log, so without the
+// priming poll the adapter's first poll would skip events published
+// before it.
 func (h *containerSourceHarness) primeConsumer(filter string) {
 	h.t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, h.yipyap.URL+"/api/v1/cloudevents/poll", nil)
@@ -191,6 +185,7 @@ func (h *containerSourceHarness) primeConsumer(filter string) {
 		req.URL.RawQuery = q.Encode()
 	}
 	req.Header.Set("Authorization", "Bearer "+h.apiKey)
+	req.Header.Set("X-YipYap-Source-ID", "containersource-test")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		h.t.Fatalf("prime: %v", err)
@@ -428,9 +423,9 @@ func TestKnative_ContainerSource_CursorResume(t *testing.T) {
 		t.Fatalf("cumulative sink count after second run = %d, want 3", len(hdrs))
 	}
 	// The third delivery should be our new event, not a redelivery of the
-	// first two. The poll handler advances its durable consumer on each
-	// drain so the second run sees only new messages; this is the contract
-	// we're validating for at-least-once + no-dupes happy path.
+	// first two. The adapter confirmed the first batch by sending its
+	// cursor, so the second run sees only new messages; this is the
+	// at-least-once, no-duplicates happy path.
 	if got := hdrs[2].Get("Ce-Id"); got != thirdEv.ID() {
 		t.Errorf("third delivery ce-id = %q, want %q (new event only)", got, thirdEv.ID())
 	}

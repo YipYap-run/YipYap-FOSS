@@ -61,6 +61,11 @@ func setupKnativeSourceConfigTest(t *testing.T) (*httptest.Server, *sqlite.SQLit
 		t.Fatalf("generate api key: %v", err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
+	// The key's creator must exist: the CloudEvents routes run the
+	// full authenticated chain, which loads the creator (auth-16).
+	if err := s.Users().Create(ctx, &domain.User{ID: "user-ksc", OrgID: org.ID, Email: "user-ksc" + "@example.com", PasswordHash: "x", Role: domain.RoleOwner, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create key creator: %v", err)
+	}
 	apiKey := &domain.APIKey{
 		ID:        "key-" + ulid.Make().String(),
 		OrgID:     org.ID,

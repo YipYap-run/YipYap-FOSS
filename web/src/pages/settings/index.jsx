@@ -1,49 +1,85 @@
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { get, post, patch, del, put } from '../../api/client';
-import { PageHeader, Card, Modal, LoadingPage, ErrorMessage, formatTime, useToast, ToastContainer } from '../../components/ui';
+import { PageHeader, Card, Modal, LoadingPage, ErrorMessage, formatTime, useToast, ToastContainer, useAutoLabels } from '../../components/ui';
 import { currentOrg, currentUser, appMeta, isPaidPlan } from '../../state/auth';
+import { clearUpgradePrompt } from '../../state/upgrade';
 import { route } from 'preact-router';
-import { MFATab } from './mfa.jsx';
+import { MFATab, OrgMFASection } from '../../edition/mfa-ui';
+import { SessionsTab } from './sessions.jsx';
+import { SupportAccessTab } from './support-access.jsx';
 import { AccountTab } from './account.jsx';
 import { IntegrationsTab } from './integrations';
 import { MonitorStatesTab } from './monitor-states.jsx';
 import { ImportTab } from './import.jsx';
+import { HostedNote } from '../../components/hosted-note';
+import { MaintenanceTab } from './maintenance.jsx';
+import { ContactMethodsTab } from './contact-methods.jsx';
+import { BillingTab } from './billing.jsx';
+import { APIKeysTab } from './api-keys.jsx';
+import { MembersTab } from './members.jsx';
+import { TeamsTab } from './teams.jsx';
+import { OrgTab } from './org.jsx';
+import { canWrite, isOrgAdmin, settingsTabDeniedNote, settingsTabReadOnlyNote } from '../../state/permissions.mjs';
+import { UpgradeLink } from '../../components/upgrade-link';
+import { availableSettingsTabs, visibleSettingsTabs } from './tabs.mjs';
+import { EmailChannelFields } from './email-channel.jsx';
+import { channelAccessNote } from './channel-permissions-logic.mjs';
+import { ChannelHealthBadge, ChannelHealthLine, FailingChannelsNote, useLinkedChannel, channelRowId } from './channel-health.jsx';
+import { ChannelPlanBadge, ChannelPlanLine, PaidChannelsBanner, ChannelTestNote, useTestCooldowns, channelTestNoteId } from './channel-plan.jsx';
+import { testRefusal, testCooldown } from './channel-plan-logic.mjs';
+import { testSentMessage, testFilteredMessage, testFailureNote } from './channel-health-logic.mjs';
+import { testResultLifetime } from '../../components/ui-logic.mjs';
+import { validateEmailConfig, emailConfigBody, parseEmailConfigError, splitRecipients, EMAIL_FIELDS } from './email-channel-logic.mjs';
+import './channel-config.css';
+import { CONFIG_SENTINEL, isSavedSecret, savedURLText, writeOnlyURLSummary } from './channel-secrets-logic.mjs';
+import { WebhookHeadersEditor } from './webhook-headers.jsx';
+import { ChannelUsageLine, ChannelDeleteBlocked, InlineConfirm, fromUsageDisclosure, StepChannelWarning, usePolicyDeepLink } from './channel-usage.jsx';
+import { usedByList, needsDisableConfirm, disableConfirmText, deleteConfirmText, deleteBlockedBy, formSnapshot, channelOptionLabel } from './channel-usage-logic.mjs';
+import { SlackWorkspaces } from './slack-app.jsx';
+import { SlackAppChannelFields, SlackAppDisconnectedTag } from './slack-app-channel.jsx';
+import { SLACK_APP_TYPE, slackAppConfig, validateSlackAppConfig, slackAppSummary, offerSlackAppType, withInstallation as withSlackInstallation } from './slack-app-channel-state.mjs';
+import { slackInstallsData } from './slack-installs.js';
+import { DiscordServers, DiscordAppChannelFields, DiscordAppDisconnectedTag } from './discord-app.jsx';
+import { DISCORD_APP_TYPE, discordAppConfig, validateDiscordAppConfig, discordAppSummary, offerDiscordAppType, newChannelConfig as newDiscordChannelConfig } from './discord-app-state.mjs';
+import { discordInstallsData } from './discord-installs.js';
+import { PhoneVerifyPanel, UnverifiedTag, UnverifiedNotice, isPhoneChannel, isUnverified } from './phone-verify.jsx';
+import { TelegramChannelSection, TelegramNotLinkedTag, TelegramLinkAnnouncer, announceTelegramLinked, isTelegramUnlinked, telegramSummary, TELEGRAM_NAME_MAX } from './telegram-link.jsx';
+import {
+  SigningSecretReveal, SigningSecretSection, SigningCreateNote, UnsignedTag,
+  applyRotation, withoutSecret, shouldWarnBeforeClose,
+} from './webhook-signing.jsx';
+import { headersToRows, rowsToHeaders, headerRowForServerField } from './webhook-headers-logic.mjs';
+import { isPhoneType, isRetiredType, normalizePhone, formatPhone, phoneConfigBody, parseChannelServerError, outboundURLHelp, channelTypeOptions, testErrorField, parseJsonField, parseJsonFields, stringifyJsonFields, configFieldError, prettyJsonField, jsonFieldRows, addEventTypePattern, acceptedRepliesError, CLOUDEVENT_TYPE_GROUPS } from './channel-config-logic.mjs';
 
-const SETTING_TABS = [
-  { key: 'account', label: 'Account' },
-  { key: 'channels', label: 'Channels' },
-  { key: 'escalation', label: 'Escalation' },
-  { key: 'integrations', label: 'Integrations' },
-  { key: 'teams', label: 'Teams' },
-  { key: 'monitor-states', label: 'Monitor States' },
-  { key: 'maintenance', label: 'Maintenance' },
-  { key: 'status-page', label: 'Status Pages' },
-  { key: 'api-keys', label: 'API Keys' },
-  { key: 'sso', label: 'SSO' },
-  { key: 'members', label: 'Members' },
-  { key: 'billing', label: 'Billing' },
-  { key: 'security', label: 'Security' },
-  { key: 'import', label: 'Import' },
-  { key: 'data', label: 'Data' },
-  { key: 'org', label: 'Organization' },
-];
 
 export function SettingsPage({ tab: initialTab }) {
   const [tab, setTab] = useState(initialTab || 'account');
+  // Links each <label> in the settings forms to its field (a11y-2).
+  const mainRef = useRef(null);
+  useAutoLabels(mainRef);
+
+  // In-app links such as /settings/sessions reuse this component, so follow
+  // the route parameter when it changes.
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
 
   function handleTabChange(t) {
     setTab(t);
     route(`/settings/${t}`, true);
   }
 
-  const visibleTabs = SETTING_TABS.filter(t => {
-    const isFoss = appMeta.value?.edition === 'foss';
-    if (t.key === 'billing' && (isFoss || !appMeta.value?.billing_enabled)) return false;
-    if (isFoss && ['teams', 'status-page', 'sso', 'integrations'].includes(t.key)) return false;
-    if (!isPaidPlan.value && ['sso', 'integrations'].includes(t.key)) return false;
-    if (t.key === 'security' && isFoss) return false;
-    return true;
-  });
+  // Tabs this edition and plan offer, before the role check.
+  const availableTabs = availableSettingsTabs(appMeta.value, isPaidPlan.value);
+  const role = currentUser.value?.role;
+  const visibleTabs = visibleSettingsTabs(appMeta.value, isPaidPlan.value, role);
+  // A deep link to a tab that exists but this role cannot open (for example a
+  // member opening /settings/billing) shows who manages it instead of a page
+  // of 403s. A tab this edition or plan does not offer falls back to Account.
+  const deniedTab = visibleTabs.some(t => t.key === tab) ? null : availableTabs.find(t => t.key === tab);
+  const deniedNote = deniedTab ? settingsTabDeniedNote(role, deniedTab.key, deniedTab.label) : null;
+  const activeTab = deniedNote ? null : (visibleTabs.some(t => t.key === tab) ? tab : 'account');
+  const readOnlyNote = activeTab ? settingsTabReadOnlyNote(role, activeTab) : null;
 
   return (
     <div class="settings-page">
@@ -52,29 +88,45 @@ export function SettingsPage({ tab: initialTab }) {
         <nav class="settings-nav" aria-label="Settings sections">
           {visibleTabs.map(t => (
             <button key={t.key}
-                    class={`settings-nav-item ${tab === t.key ? 'active' : ''}`}
+                    class={`settings-nav-item ${activeTab === t.key ? 'active' : ''}`}
+                    aria-current={activeTab === t.key ? 'page' : undefined}
                     onClick={() => handleTabChange(t.key)}>
               {t.label}
             </button>
           ))}
         </nav>
-        <div class="settings-main">
-          {tab === 'account' && <AccountTab />}
-          {tab === 'channels' && <ChannelsTab />}
-          {tab === 'escalation' && <EscalationTab />}
-          {tab === 'integrations' && <IntegrationsTab />}
-          {tab === 'teams' && <TeamsTab />}
-          {tab === 'monitor-states' && <MonitorStatesTab />}
-          {tab === 'maintenance' && <MaintenanceTab />}
-          {tab === 'status-page' && <StatusPageTab />}
-          {tab === 'api-keys' && <APIKeysTab />}
-          {tab === 'sso' && <SSOTab />}
-          {tab === 'members' && <MembersTab />}
-          {tab === 'billing' && <BillingTab />}
-          {tab === 'security' && <MFATab />}
-          {tab === 'import' && <ImportTab />}
-          {tab === 'data' && <DataTab />}
-          {tab === 'org' && <OrgTab />}
+        <div class="settings-main" ref={mainRef}>
+          {deniedNote && (
+            <section class="settings-denied" aria-labelledby="settings-denied-title">
+              <h3 id="settings-denied-title">{deniedTab.label}</h3>
+              <p>{deniedNote}</p>
+              <p class="text-muted">The Members tab lists who the owners and admins are.</p>
+              <div class="btn-group">
+                <button class="btn btn-sm btn-primary" onClick={() => handleTabChange('members')}>See members</button>
+                <button class="btn btn-sm" onClick={() => handleTabChange('account')}>Go to Account</button>
+              </div>
+            </section>
+          )}
+          {readOnlyNote && <p class="settings-role-note">{readOnlyNote}</p>}
+          {activeTab === 'account' && <AccountTab />}
+          {activeTab === 'sessions' && <SessionsTab />}
+          {activeTab === 'contact-methods' && <ContactMethodsTab />}
+          {activeTab === 'channels' && <ChannelsTab />}
+          {activeTab === 'escalation' && <EscalationTab />}
+          {activeTab === 'integrations' && <IntegrationsTab />}
+          {activeTab === 'teams' && <TeamsTab />}
+          {activeTab === 'monitor-states' && <MonitorStatesTab />}
+          {activeTab === 'maintenance' && <MaintenanceTab />}
+          {activeTab === 'status-page' && <StatusPageTab />}
+          {activeTab === 'api-keys' && <APIKeysTab />}
+          {activeTab === 'sso' && <SSOTab />}
+          {activeTab === 'members' && <MembersTab />}
+          {activeTab === 'support' && <SupportAccessTab />}
+          {activeTab === 'billing' && <BillingTab />}
+          {activeTab === 'security' && <><MFATab /><OrgMFASection /></>}
+          {activeTab === 'import' && <ImportTab />}
+          {activeTab === 'data' && <DataTab />}
+          {activeTab === 'org' && (<><OrgTab /><HostedNote /></>)}
         </div>
       </div>
     </div>
@@ -83,42 +135,55 @@ export function SettingsPage({ tab: initialTab }) {
 
 /* ─── Notification Channels ─── */
 
+// SMS and voice channels take only the destination number. The sender
+// number, provider account and call script are set by the platform.
+const PHONE_FIELD = { key: 'to', label: 'Phone Number', type: 'tel', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1). Alerts come from the YipYap number.' };
+
+// Voice calls also say what the person will hear and how to acknowledge.
+// Keep in sync with the script in internal/api/handlers/voice_call.go.
+const VOICE_FIELD = { ...PHONE_FIELD, help: 'US and Canada numbers only (+1). The call comes from the YipYap number, reads the severity and monitor name, and asks you to press 1 to acknowledge. It repeats once if no key is pressed.' };
+
 const CHANNEL_TYPES = {
   webhook: { label: 'Webhook', fields: [
     { key: 'url', label: 'URL', type: 'url', placeholder: 'https://hooks.example.com/alerts', required: true },
     { key: 'format', label: 'Payload Format', type: 'webhook_format' },
-    { key: 'headers', label: 'Custom Headers (JSON)', type: 'json', placeholder: '{"X-Api-Key": "..."}' },
+    { key: 'headers', label: 'Custom Headers', type: 'headers', help: 'Sent with every request. Saved values are never shown again: Replace sets a new value, Remove deletes the header when you save. Host, Content-Type and Content-Length are set by YipYap.' },
   ]},
-  slack:        { label: 'Slack', fields: [
+  // Fields are drawn by SlackAppChannelFields (workspace and channel pickers).
+  slack_app:    { label: 'Slack (YipYap app)', custom: true, fields: [] },
+  // Fields are drawn by DiscordAppChannelFields (server and channel pickers).
+  discord_app:  { label: 'Discord (YipYap app)', custom: true, fields: [] },
+  // Bring-your-own bots post an Open in YipYap link, never Ack/Resolve
+  // buttons (notif-12). The form label says so; the list tag stays short.
+  slack:        { label: 'Slack (own bot, no Ack buttons)', tag: 'Slack (own bot)', fields: [
     { key: 'bot_token', label: 'Bot Token', type: 'secret', placeholder: 'xoxb-...', required: true, help: 'OAuth & Permissions \u2192 Bot User OAuth Token' },
     { key: 'channel_id', label: 'Channel ID', type: 'text', placeholder: 'C01234ABC', required: true, help: 'Right-click channel \u2192 View channel details \u2192 Copy ID' },
   ]},
-  discord:      { label: 'Discord', fields: [
+  discord:      { label: 'Discord (own bot, no Ack buttons)', tag: 'Discord (own bot)', fields: [
     { key: 'bot_token', label: 'Bot Token', type: 'secret', placeholder: 'MTIz...', required: true, help: 'Developer Portal \u2192 Bot \u2192 Token' },
     { key: 'channel_id', label: 'Channel ID', type: 'text', placeholder: '1234567890', required: true, help: 'Enable Developer Mode \u2192 Right-click channel \u2192 Copy ID' },
   ]},
-  telegram:     { label: 'Telegram', fields: [
-    { key: 'chat_id', label: 'Chat ID', type: 'text', placeholder: '-100123456789', required: true, help: 'Add the bot to the group, send /start, then paste the chat ID it replies with' },
-  ]},
-  smtp:         { label: 'Email (SMTP)', fields: [
-    { key: 'host', label: 'SMTP Host', type: 'text', placeholder: 'smtp.gmail.com', required: true },
-    { key: 'port', label: 'Port', type: 'number', placeholder: '587', required: true },
-    { key: 'username', label: 'Username', type: 'text', placeholder: 'alerts@company.com' },
-    { key: 'password', label: 'Password', type: 'secret', placeholder: 'App password or SMTP password' },
-    { key: 'from', label: 'From Address', type: 'text', placeholder: 'alerts@company.com', required: true },
-    { key: 'to', label: 'To Address', type: 'text', placeholder: 'oncall@company.com', required: true },
+  // The chat is linked with a one-time code (TelegramChannelSection), never
+  // typed in: the API refuses a raw chat_id.
+  telegram:     { label: 'Telegram', custom: true, fields: [] },
+  // Email: recipients only by default (sent through the platform mailer),
+  // with an optional "own SMTP server" section. The form lives in
+  // email-channel.jsx; these keys are what it edits.
+  smtp:         { label: 'Email', custom: true, fields: [
+    { key: 'mode' }, { key: 'to' }, { key: 'host' }, { key: 'port' }, { key: 'tls_mode' },
+    { key: 'username' }, { key: 'password' }, { key: 'from' },
   ]},
   telnyx_sms:   { label: 'SMS (Telnyx)', fields: [
-    { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
+    PHONE_FIELD,
   ]},
   telnyx_voice: { label: 'Voice Call (Telnyx)', fields: [
-    { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
+    VOICE_FIELD,
   ]},
   twilio_sms:   { label: 'SMS (Twilio legacy)', legacy: true, fields: [
-    { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
+    PHONE_FIELD,
   ]},
   twilio_voice: { label: 'Voice Call (Twilio legacy)', legacy: true, fields: [
-    { key: 'to', label: 'Phone Number', type: 'text', placeholder: '+1 212-555-4240', required: true, help: 'US and Canada numbers only (+1)' },
+    VOICE_FIELD,
   ]},
   ntfy: { label: 'ntfy.sh', fields: [
     { key: 'server_url', label: 'Server URL', type: 'url', placeholder: 'https://ntfy.sh', help: 'Leave blank for the public ntfy.sh server' },
@@ -132,10 +197,10 @@ const CHANNEL_TYPES = {
     { key: 'sound', label: 'Sound', type: 'text', placeholder: 'Optional notification sound' },
   ]},
   cloudevent_http: { label: 'CloudEvents (Knative)', fields: [
-    { key: 'sink_url', label: 'Sink URL', type: 'url', placeholder: 'https://broker.example.com/ns/default', required: true, help: 'The HTTPS URL that accepts CloudEvent POSTs (Knative Broker ingress, Eventarc destination, any CloudEvents-compatible sink).' },
+    { key: 'sink_url', label: 'Sink URL', type: 'url', placeholder: 'https://broker.example.com/ns/default', required: true, help: 'The HTTPS URL that accepts CloudEvent POSTs (Knative Broker ingress, Eventarc destination, any CloudEvents-compatible sink). Each CloudEvents channel gets its own copy of every matching event, so two channels can point at different sinks.' },
     { key: 'mode', label: 'HTTP Mode', type: 'select', options: [{ value: 'binary', label: 'Binary (one event per request; ce-* headers)' }, { value: 'structured', label: 'Structured (application/cloudevents+json)' }], default: 'binary' },
-    { key: 'event_types', label: 'Event Types Filter', type: 'json', placeholder: '["run.yipyap.alert.*", "run.yipyap.monitor.down.*"]', help: 'JSON array of glob patterns over CloudEvent types. Leave empty to receive all event types.' },
-    { key: 'ce_overrides', label: 'CloudEvent Overrides', type: 'json', placeholder: '{"environment": "production"}', help: 'Extension attributes (key/value strings) added to every emitted event. Useful for tagging by environment, region, etc.' },
+    { key: 'event_types', label: 'Event Types Filter', type: 'json', placeholder: '["run.yipyap.alert.*", "run.yipyap.monitor.down.*"]', help: 'A JSON list of patterns over CloudEvent types, where * matches any part, for example ["run.yipyap.alert.*"]. Leave empty to receive every event type.' },
+    { key: 'ce_overrides', label: 'CloudEvent Overrides', type: 'json', placeholder: '{"environment": "production"}', help: 'A JSON object of extension attributes added to every event, for example to tag the environment or region. Names use lower-case letters and digits only.' },
     { key: 'accepted_replies', label: 'Accepted Replies', type: 'accepted_replies', help: 'Choose which reply CloudEvent types this channel will act on when a sink returns a CloudEvent in its response body. Replies without a ce_alertref matching a recent outbound event are always rejected.' },
   ]},
 };
@@ -161,30 +226,41 @@ function detectWebhookFormat(url) {
 
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s || ''; }
 
-function getConfigSummary(type, config) {
+function getConfigSummary(type, config, ch) {
   if (!config || typeof config !== 'object') return '';
+  // A URL that holds a credential comes back hidden; show its host.
+  const hiddenURL = writeOnlyURLSummary(ch);
+  if (hiddenURL) return hiddenURL;
   switch (type) {
     case 'webhook': return config.url ? truncate(config.url, 40) : '';
+    case 'slack_app': return slackAppSummary(config, slackInstallsData.value?.installations);
+    case 'discord_app': return discordAppSummary(config, discordInstallsData.value?.installations);
     case 'slack': return config.channel_id ? 'Channel: ' + config.channel_id : '';
     case 'discord': return config.channel_id ? 'Channel: ' + config.channel_id : '';
-    case 'telegram': return config.chat_id ? 'Chat: ' + config.chat_id : '';
-    case 'smtp': return config.host ? config.host + ' \u2192 ' + (config.to || '') : '';
-    case 'telnyx_sms': return config.to || '';
-    case 'telnyx_voice': return config.to || '';
-    case 'twilio_sms': return config.to || '';
-    case 'twilio_voice': return config.to || '';
+    case 'telegram': return telegramSummary(config);
+    case 'smtp': {
+      const to = splitRecipients(config.to);
+      const who = to.length > 2 ? to.slice(0, 2).join(', ') + ' +' + (to.length - 2) : to.join(', ');
+      const own = config.mode === 'smtp' || (!config.mode && config.host);
+      return own && config.host ? who + ' via ' + config.host : who;
+    }
+    case 'telnyx_sms':
+    case 'telnyx_voice':
+    case 'twilio_sms':
+    case 'twilio_voice': return formatPhone(config.to);
     default: return '';
   }
 }
 
-function SecretInput({ value, onInput, placeholder }) {
+function SecretInput({ value, onInput, placeholder, id, required }) {
   const [show, setShow] = useState(false);
   return (
     <div class="secret-field">
-      <input type={show ? 'text' : 'password'} value={value} onInput={onInput}
-        placeholder={placeholder} autocomplete="off" />
+      <input id={id} type={show ? 'text' : 'password'} value={value} onInput={onInput}
+        placeholder={placeholder} autocomplete="off" aria-required={required ? 'true' : undefined} />
       <button type="button" class="secret-toggle" onClick={() => setShow(!show)}
-        title={show ? 'Hide' : 'Show'}>
+        aria-pressed={show ? 'true' : 'false'} aria-controls={id}
+        aria-label={show ? 'Hide value' : 'Show value'}>
         {show ? 'Hide' : 'Show'}
       </button>
     </div>
@@ -201,25 +277,160 @@ function ChannelsTab() {
   const [config, setConfig] = useState({});
   const [enabled, setEnabled] = useState(true);
   const [errors, setErrors] = useState({});
+  const [headerErrors, setHeaderErrors] = useState({}); // { [row key]: { name?, value? } }
   const [testing, setTesting] = useState(null); // channel id being tested
   const [testResult, setTestResult] = useState({}); // { [id]: 'ok' | 'fail' }
+  // Refused tests (rate limit, plan, quota): a note under the row and a
+  // cooldown that holds back the Test buttons the limit covers.
+  const [testNotes, setTestNotes] = useState({}); // { [id]: refusal }
+  const { cooldowns, startCooldown, announce, announcement } = useTestCooldowns(setTestNotes);
+  // Server facts for the form. platform_email false means email channels
+  // must use their own SMTP server (FOSS without a configured mailer).
+  const [caps, setCaps] = useState({ platform_email: true, email_max_recipients: 10 });
+  // What the caller may do, from GET /org/notification-permissions. The
+  // server enforces it; this only hides controls that would be refused.
+  // null while loading: write controls stay hidden so a viewer never sees
+  // them flash. If the request fails they show, and the server answers any
+  // refused action with a 403 message.
+  const [perms, setPerms] = useState(null);
+  // Policies that block deleting the channel being edited, shown in the
+  // edit modal with links; null when no delete was refused.
+  const [deleteBlock, setDeleteBlock] = useState(null);
+  // An in-form question waiting for an answer: 'delete' (unused channel)
+  // or 'disable' (saving an in-use channel as disabled). Answering it
+  // either way keeps the form and its edits.
+  const [pendingConfirm, setPendingConfirm] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  // The form as it was when the edit opened, to tell whether a policy
+  // link in the refused-delete notice would discard changes.
+  const [openedSnapshot, setOpenedSnapshot] = useState('');
+  // The phone channel in its verify step, if any.
+  const [verifyChannel, setVerifyChannel] = useState(null);
+  // Webhook signing secret on screen right now: { secret, copied, context:
+  // 'create' | 'rotate', channelId }. Lives here, not in the section, so a
+  // list reload cannot drop it and closing can warn first.
+  const [shownSecret, setShownSecret] = useState(null);
+  const [secretLeaveWarn, setSecretLeaveWarn] = useState(false);
+  const deleteBtnRef = useRef(null);
+  const saveBtnRef = useRef(null);
+  const addChannelBtn = useRef(null);
+  const telegramStart = useRef(null); // set by TelegramChannelSection
   const { toasts, toast } = useToast();
 
-  async function load() {
-    setLoading(true);
+  // quiet skips the full-page spinner, for refreshing health after a test.
+  async function load(quiet) {
+    if (!quiet) setLoading(true);
     try {
       const data = await get('/notification-channels');
-      setChannels(data.channels || data || []);
+      const list = data.channels || data || [];
+      setChannels(list);
+      return list;
     } catch (e) {
-      toast('Failed to load channels', 'error');
+      if (!quiet) toast('Failed to load channels', 'error');
     }
-    setLoading(false);
+    if (!quiet) setLoading(false);
+    return [];
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    get('/notification-channels/capabilities').then(c => c && setCaps(s => ({ ...s, ...c }))).catch(() => {});
+    get('/org/notification-permissions')
+      .then(p => setPerms(p || { can_manage: true, can_test: true }))
+      .catch(() => setPerms({ can_manage: true, can_test: true }));
+  }, []);
+
+  // Shows errors and moves focus to the first one, so keyboard and screen
+  // reader users land on the field that needs attention.
+  function showErrors(errs, forType = type) {
+    setErrors(errs);
+    const fields = forType === 'smtp' ? EMAIL_FIELDS
+      : forType === SLACK_APP_TYPE ? ['installation_id', 'channel_id']
+      : forType === DISCORD_APP_TYPE ? ['installation_id', 'channel_id']
+      : (CHANNEL_TYPES[forType]?.fields || []).map(f => f.key);
+    const first = ['name', ...fields].find(k => errs[k]);
+    if (first) {
+      setTimeout(() => {
+        const el = document.getElementById(first === 'name' ? 'channel-name' : 'channel-field-' + first);
+        el?.focus();
+      }, 0);
+    }
+  }
+
+  // Maps an email config 400 from the API onto its field. Returns true when
+  // handled.
+  function showServerFieldError(e) {
+    const parsed = parseEmailConfigError(e?.message);
+    if (!parsed || !parsed.field) return false;
+    if (parsed.field === 'mode' && /not available/.test(e.message)) {
+      setCaps(c => ({ ...c, platform_email: false }));
+    }
+    showErrors({ [parsed.field]: parsed.message }, 'smtp');
+    return true;
+  }
 
   function resetForm() {
     setName(''); setType('webhook'); setConfig({}); setEnabled(true);
-    setEditId(null); setErrors({});
+    setEditId(null); setErrors({}); setHeaderErrors({}); setDeleteBlock(null);
+    setPendingConfirm(null); setOpenedSnapshot('');
+    setVerifyChannel(null); setShownSecret(null); setSecretLeaveWarn(false);
+  }
+
+  // Closing with an uncopied secret on screen warns once; the next close
+  // goes through.
+  function closeModal() {
+    if (shouldWarnBeforeClose(shownSecret, secretLeaveWarn)) {
+      setSecretLeaveWarn(true);
+      return;
+    }
+    setShowModal(false);
+    resetForm();
+  }
+
+  function markSecretCopied() {
+    setShownSecret(s => (s ? { ...s, copied: true } : s));
+    setSecretLeaveWarn(false);
+  }
+
+  function hideRotatedSecret() {
+    if (shouldWarnBeforeClose(shownSecret, secretLeaveWarn)) {
+      setSecretLeaveWarn(true);
+      return;
+    }
+    setShownSecret(null);
+    setSecretLeaveWarn(false);
+  }
+
+  function onSecretRotated(res) {
+    // Update the list in place. A full load() would swap the page for the
+    // loading view, unmount the modal and lose the new secret.
+    setChannels(list => applyRotation(list, res));
+    setShownSecret({ secret: res.signing_secret || '', copied: false, context: 'rotate', channelId: res.id });
+    setSecretLeaveWarn(false);
+    toast('New signing secret created. Copy it now.');
+  }
+
+  function openVerify(ch) {
+    resetForm();
+    setVerifyChannel(ch);
+    setShowModal(true);
+  }
+
+  function onTelegramLinked(res) {
+    announceTelegramLinked(res);
+    toast(res?.chat_title ? 'Linked to ' + res.chat_title : 'Telegram chat linked');
+    setShowModal(false);
+    resetForm();
+    // A full load() would swap the page for the spinner and unmount the
+    // live region before it speaks. The modal is gone, so put focus on a
+    // control that stays.
+    load(true);
+    setTimeout(() => addChannelBtn.current && addChannelBtn.current.focus(), 0);
+  }
+
+  function onVerified() {
+    toast('Number verified. This channel now gets alerts.');
+    closeModal();
+    load();
   }
 
   function openCreate() {
@@ -227,62 +438,164 @@ function ChannelsTab() {
     setShowModal(true);
   }
 
+  // From the Slack workspaces section: a new Slack (YipYap app) channel,
+  // with the workspace preselected.
+  function openCreateSlack(installationId) {
+    resetForm();
+    setType(SLACK_APP_TYPE);
+    setConfig(withSlackInstallation({}, installationId || ''));
+    setShowModal(true);
+  }
+
+  // From the Discord servers section: a new Discord (YipYap app) channel,
+  // with the server preselected when known.
+  function openCreateDiscord(installationId) {
+    resetForm();
+    setType(DISCORD_APP_TYPE);
+    setConfig(newDiscordChannelConfig(installationId));
+    setShowModal(true);
+  }
+
   function openEdit(ch) {
     setEditId(ch.id);
     setName(ch.name);
     setType(ch.type);
-    const cfg = ch.config && typeof ch.config === 'object' ? { ...ch.config } : {};
-    // Stringify object fields for textarea editing
-    if (cfg.headers && typeof cfg.headers === 'object') {
-      cfg.headers = JSON.stringify(cfg.headers, null, 2);
-    }
-    setConfig({ ...cfg, _formatManual: !!ch.config?.format });
+    // JSON fields (event filter, overrides) edit as text; webhook headers
+    // edit as rows whose saved values stay on the server.
+    const cfg = stringifyJsonFields(ch.type, ch.config && typeof ch.config === 'object' ? ch.config : {});
+    if (ch.type === 'webhook') cfg.headers = headersToRows(ch.config?.headers);
+    // Email rows saved before the mode field: a host means their own server.
+    if (ch.type === 'smtp' && !cfg.mode) cfg.mode = cfg.host ? 'smtp' : 'platform';
+    setConfig({ ...cfg, _formatManual: !!ch.config?.format, _urlHost: ch.url_set ? ch.url_host : '', _urlField: ch.url_set ? ch.url_field : '' });
     setEnabled(ch.enabled !== false);
-    setErrors({});
+    setErrors({}); setHeaderErrors({}); setDeleteBlock(null); setPendingConfirm(null);
+    setOpenedSnapshot(formSnapshot({ name: ch.name, type: ch.type, config: cfg, enabled: ch.enabled !== false }));
     setShowModal(true);
   }
 
   function validate() {
     const errs = {};
     if (!name.trim()) errs.name = 'Required';
+    if (type === SLACK_APP_TYPE) Object.assign(errs, validateSlackAppConfig(config));
+    if (type === DISCORD_APP_TYPE) Object.assign(errs, validateDiscordAppConfig(config));
     const typeDef = CHANNEL_TYPES[type];
     if (typeDef) {
-      for (const f of typeDef.fields) {
+      if (type === 'smtp') {
+        Object.assign(errs, validateEmailConfig(config, { maxRecipients: caps.email_max_recipients }));
+      }
+      for (const f of typeDef.custom ? [] : typeDef.fields) {
         if (f.required && !config[f.key]?.toString().trim()) {
           errs[f.key] = 'Required';
         }
-        if (f.type === 'url' && config[f.key] && !/^https?:\/\/.+/.test(config[f.key])) {
+        if (f.type === 'url' && config[f.key] && !isSavedSecret(config[f.key]) && !/^https?:\/\/.+/.test(config[f.key])) {
           errs[f.key] = 'Must be a valid URL';
         }
+        if (f.type === 'json') {
+          const r = parseJsonField(type, f.key, config[f.key]);
+          if (r.error) errs[f.key] = r.error;
+        }
+        if (f.type === 'accepted_replies') {
+          const msg = acceptedRepliesError(config[f.key]);
+          if (msg) errs[f.key] = msg;
+        }
+        if (f.type === 'headers') {
+          const r = rowsToHeaders(config[f.key]);
+          setHeaderErrors(r.errors);
+          if (r.formError) errs[f.key] = r.formError;
+          else if (Object.keys(r.errors).length) errs[f.key] = 'Fix the headers marked below';
+        }
+      }
+      if (isPhoneType(type)) {
+        const n = normalizePhone(config.to);
+        if (n.error) errs.to = n.error;
       }
     }
-    setErrors(errs);
+    showErrors(errs);
     return Object.keys(errs).length === 0;
   }
 
-  async function save() {
+  // confirmedDisable is set when the user has answered the in-form
+  // question about turning off a channel that policies send through.
+  async function save({ confirmedDisable = false } = {}) {
+    // New Telegram channels come from the link code, not this form, so
+    // Enter in the name field asks for a code instead.
+    if (type === 'telegram' && !editId) {
+      if (telegramStart.current) telegramStart.current();
+      return;
+    }
     if (!validate()) return;
-    try {
-      // Parse any JSON string fields back to objects for the API
-      const cfgToSend = { ...config };
-      if (type === 'webhook' && typeof cfgToSend.headers === 'string') {
-        try { cfgToSend.headers = JSON.parse(cfgToSend.headers || '{}'); }
-        catch (_) { cfgToSend.headers = {}; }
+    // Saving closes the modal, so treat it like a close while a rotated
+    // secret is still uncopied.
+    if (shouldWarnBeforeClose(shownSecret, secretLeaveWarn)) {
+      setSecretLeaveWarn(true);
+      return;
+    }
+    if (editId && !confirmedDisable) {
+      const current = channels.find(c => c.id === editId);
+      if (needsDisableConfirm(current?.enabled !== false, enabled, usedByList(current))) {
+        setDeleteBlock(null);
+        setPendingConfirm('disable');
+        return;
       }
+    }
+    setPendingConfirm(null);
+    try {
+      // JSON text fields go to the API as parsed values. validate() has
+      // already refused any that do not parse, so nothing is dropped here.
+      const parsed = parseJsonFields(type, config);
+      if (Object.keys(parsed.errors).length) { showErrors(parsed.errors); return; }
+      const cfgToSend = parsed.config;
       delete cfgToSend._formatManual;
+      delete cfgToSend._urlHost;
+      delete cfgToSend._urlField;
+      if (type === 'webhook') {
+        const h = rowsToHeaders(config.headers).headers;
+        if (h) cfgToSend.headers = h; else delete cfgToSend.headers;
+      }
       if (type === 'telegram') delete cfgToSend.bot_token;
       const body = { name, type, config: cfgToSend, enabled };
-      if (editId) {
-        await patch('/notification-channels/' + editId, body);
-        toast('Channel updated');
-      } else {
-        await post('/notification-channels', body);
-        toast('Channel created');
+      if (type === SLACK_APP_TYPE) body.config = slackAppConfig(cfgToSend);
+      if (type === DISCORD_APP_TYPE) body.config = discordAppConfig(cfgToSend);
+      // Send only the keys the chosen mode allows; the API rejects server
+      // settings on a recipients-only channel.
+      if (type === 'smtp') body.config = emailConfigBody(cfgToSend);
+      // SMS and voice take exactly {"to"}; any other key is a 400.
+      if (isPhoneType(type)) body.config = phoneConfigBody(cfgToSend);
+      const saved = editId
+        ? await patch('/notification-channels/' + editId, body)
+        : await post('/notification-channels', body);
+      // New SMS and voice channels, and saved number changes, come back
+      // pending. Go straight to the verify step instead of closing.
+      if (saved && isPhoneChannel(saved.type) && isUnverified(saved) && canManage) {
+        toast(editId ? 'Channel updated. Verify the number to turn it on.' : 'Channel created. Verify the number to turn it on.');
+        resetForm();
+        setVerifyChannel(saved);
+        load(true);
+        return;
       }
+      // A new webhook channel returns its signing secret once. Keep the
+      // modal open on it so the user can copy it.
+      if (!editId && saved?.signing_secret) {
+        resetForm();
+        setShownSecret({ secret: saved.signing_secret, copied: false, context: 'create', channelId: saved.id });
+        setChannels(list => [...list, withoutSecret(saved)]);
+        return;
+      }
+      toast(editId ? 'Channel updated' : 'Channel created');
       setShowModal(false);
       resetForm();
       load();
     } catch (e) {
+      if (type === 'smtp' && showServerFieldError(e)) return;
+      const formKeys = (CHANNEL_TYPES[type]?.fields || []).map(f => f.key);
+      const fieldErr = e?.status === 400 && (configFieldError(type, e.body, formKeys) || parseChannelServerError(type, e.message));
+      // A header error ("headers.X-Key") also marks that row.
+      const rowKey = fieldErr && type === 'webhook' && headerRowForServerField(config.headers, e.body?.field);
+      if (rowKey) setHeaderErrors({ [rowKey]: { value: fieldErr.message } });
+      if (fieldErr) {
+        showErrors({ [fieldErr.field]: fieldErr.message });
+        return;
+      }
       toast(e?.message || 'Failed to save channel', 'error');
     }
   }
@@ -290,27 +603,122 @@ function ChannelsTab() {
   async function testChannel(id) {
     setTesting(id);
     setTestResult(r => ({ ...r, [id]: null }));
+    setTestNotes(n => { const { [id]: _, ...rest } = n; return rest; });
     try {
-      await post('/notification-channels/' + id + '/test', {});
-      setTestResult(r => ({ ...r, [id]: 'ok' }));
-      toast('Test notification sent');
+      const resp = await post('/notification-channels/' + id + '/test', {});
+      const filtered = testFilteredMessage(resp);
+      if (filtered) {
+        // Not a delivery failure, but nothing arrived either: leave the
+        // button neutral and say why.
+        toast(filtered, 'error');
+      } else {
+        setTestResult(r => ({ ...r, [id]: 'ok' }));
+        toast(testSentMessage(resp));
+        // A successful test clears a failing status on the server.
+        load(true);
+      }
     } catch (e) {
+      const ch0 = channels.find(c => c.id === id);
+      const refusal = testRefusal(e, ch0?.type);
+      if (refusal) {
+        // Not a delivery failure: the test was never sent. Leave the
+        // button neutral and explain under the row.
+        setTestNotes(n => ({ ...n, [id]: refusal }));
+        announce(refusal.message);
+        if (refusal.cooldown) startCooldown(refusal.cooldown);
+        if (refusal.refreshOrg) {
+          // The plan or grace may have changed since login; refresh so the
+          // row badges match what the server enforces. The row note links
+          // to billing, so the page-wide banner would repeat it.
+          clearUpgradePrompt();
+          get('/org').then(o => { if (o) currentOrg.value = o; }).catch(() => {});
+        }
+        setTesting(null);
+        return;
+      }
       setTestResult(r => ({ ...r, [id]: 'fail' }));
-      toast(e?.message || 'Test failed', 'error');
+      // A stored email config that no longer passes the checks (for example
+      // a row saved before encryption was required) cannot be tested until it
+      // is fixed, so open the editor on the field that needs it.
+      const parsed = parseEmailConfigError(e?.message);
+      const ch = channels.find(c => c.id === id);
+      // A URL saved before private addresses were refused fails the same way.
+      const urlErr = ch && perms?.can_manage && testErrorField(ch.type, e?.message);
+      // A setting saved before typed checks (for example a filter stored as
+      // text) is named by the server; open the form on it.
+      const cfgErr = ch && perms?.can_manage && e?.status === 400
+        && configFieldError(ch.type, e.body, (CHANNEL_TYPES[ch.type]?.fields || []).map(f => f.key));
+      if (ch && ch.type === 'smtp' && parsed?.field) {
+        toast('This channel needs an update before it can send. Fix the highlighted field and save.', 'error');
+        openEdit(ch);
+        setTimeout(() => showServerFieldError(e), 0);
+      } else if (urlErr) {
+        toast('This channel points to an address alerts cannot be sent to. Change it and save.', 'error');
+        openEdit(ch);
+        setTimeout(() => showErrors({ [urlErr.field]: urlErr.message }, ch.type), 0);
+      } else if (cfgErr) {
+        toast('This channel has a setting alerts cannot use. Fix the highlighted field and save.', 'error');
+        openEdit(ch);
+        setTimeout(() => showErrors({ [cfgErr.field]: cfgErr.message }, ch.type), 0);
+      } else {
+        // Keep the reason under the row until dismissed or the next Test.
+        const note = testFailureNote(e?.message);
+        setTestNotes(n => ({ ...n, [id]: note }));
+        announce((ch?.name ? ch.name + ': ' : '') + note.message);
+      }
     }
     setTesting(null);
-    setTimeout(() => setTestResult(r => ({ ...r, [id]: null })), 3000);
   }
 
+  // A sent Test clears its button after a few seconds; a failed one stays.
+  useEffect(() => {
+    const timers = Object.entries(testResult)
+      .filter(([, st]) => st && testResultLifetime(st) !== null)
+      .map(([id, st]) => setTimeout(() => setTestResult(r => (r[id] === st ? { ...r, [id]: null } : r)), testResultLifetime(st)));
+    return () => timers.forEach(clearTimeout);
+  }, [testResult]);
+
+  // Dismissing a failure note also resets the Test button.
+  function dismissTestNote(id) {
+    setTestNotes(n => { const { [id]: _, ...rest } = n; return rest; });
+    setTestResult(r => (r[id] === 'fail' ? { ...r, [id]: null } : r));
+    setTimeout(() => document.getElementById('channel-test-' + id)?.focus(), 0);
+  }
+
+  // Delete Channel button: an in-use channel shows the policies that
+  // block it, any other asks in the form before deleting.
+  function requestDelete(id) {
+    const blocked = deleteBlockedBy(channels.find(c => c.id === id));
+    if (blocked) { setPendingConfirm(null); setDeleteBlock(blocked); return; }
+    setDeleteBlock(null);
+    setPendingConfirm('delete');
+  }
+
+  // Returns true only when the channel was deleted, so the caller closes
+  // the modal then and keeps unsaved edits otherwise (refusal or error).
   async function deleteChannel(id) {
-    if (!confirm('Delete this channel?')) return;
+    setDeleting(true);
     try {
       await del('/notification-channels/' + id);
       toast('Channel deleted');
       load();
+      return true;
     } catch (e) {
+      // A policy started using it since the list loaded.
+      const refused = deleteBlockedBy(null, e);
+      if (refused) { setPendingConfirm(null); setDeleteBlock(refused); load(true); return false; }
       toast(e?.message || 'Failed to delete', 'error');
+      return false;
+    } finally {
+      setDeleting(false);
     }
+  }
+
+  // Cancel or dismiss puts focus back on the button that asked.
+  function closeConfirm(focusRef) {
+    setPendingConfirm(null);
+    setDeleteBlock(null);
+    setTimeout(() => focusRef.current?.focus(), 0);
   }
 
   function updateConfig(key, value) {
@@ -321,6 +729,7 @@ function ChannelsTab() {
       }
       return next;
     });
+    if (errors[key]) setErrors(({ [key]: _, ...rest }) => rest);
   }
 
   function handleTypeChange(newType) {
@@ -330,47 +739,221 @@ function ChannelsTab() {
     setConfig(c => {
       const next = {};
       for (const k of newFields) {
-        if (c[k] !== undefined) next[k] = c[k];
+        // 'mode' means different things per type (email vs CloudEvents).
+        // 'to' is a phone number on SMS/voice and addresses on email.
+        const crossesEmail = k === 'to' && (newType === 'smtp') !== (type === 'smtp');
+        if (k !== 'mode' && !crossesEmail && c[k] !== undefined) next[k] = c[k];
       }
       return next;
     });
     setErrors({});
   }
 
-  const typeDef = CHANNEL_TYPES[type];
+  function renderField(f) {
+    const fid = 'channel-field-' + f.key;
+    const req = f.required ? 'true' : undefined;
+    // A URL that holds a credential is write-only: only its host comes back.
+    const urlSaved = f.type === 'url' && isSavedSecret(config[f.key]);
+    const urlReplacing = f.type === 'url' && !urlSaved && !!config._urlHost && config._urlField === f.key;
+    const help = urlSaved
+      ? 'This URL contains a credential, so only its host is shown. Replace it to send alerts to a new address.'
+      : outboundURLHelp(type, f.key, appMeta.value?.edition, f.help);
+    const aria = errors[f.key]
+      ? { 'aria-invalid': 'true', 'aria-describedby': fid + '-error' }
+      : help ? { 'aria-describedby': fid + '-help' } : {};
+    return (
+      <div key={f.key} class={'form-group' + (errors[f.key] ? ' has-error' : '')}>
+        <label for={fid} id={fid + '-label'} class={f.required ? 'required' : undefined}>{f.label}</label>
+        {f.type === 'secret' ? (
+          <SecretInput id={fid} required={f.required} value={config[f.key] || ''} placeholder={f.placeholder}
+            onInput={e => updateConfig(f.key, e.target.value)} />
+        ) : f.type === 'json' ? (
+          <>
+            <textarea id={fid} class="json-input" rows={jsonFieldRows(config[f.key])} spellcheck={false} autocomplete="off"
+              autocapitalize="off" aria-required={req} {...aria} value={typeof config[f.key] === 'string' ? config[f.key] : ''} placeholder={f.placeholder}
+              onInput={e => updateConfig(f.key, e.target.value)}
+              onBlur={e => { const v = prettyJsonField(type, f.key, e.target.value); if (v !== e.target.value) updateConfig(f.key, v); }} />
+            {type === 'cloudevent_http' && f.key === 'event_types' && (
+              <EventTypePicker onAdd={pattern => {
+                const next = addEventTypePattern(config[f.key], pattern);
+                if (next === null) {
+                  showErrors({ [f.key]: 'Fix the list above before adding a pattern' });
+                  return;
+                }
+                updateConfig(f.key, next);
+              }} />
+            )}
+          </>
+        ) : f.type === 'number' ? (
+          <input id={fid} type="number" aria-required={req} {...aria} value={config[f.key] ?? ''} placeholder={f.placeholder}
+            onInput={e => updateConfig(f.key, e.target.value === '' ? '' : +e.target.value)} />
+        ) : f.type === 'webhook_format' ? (
+          <select id={fid} value={config.format || 'generic'} onChange={e => {
+            setConfig(c => ({ ...c, format: e.target.value, _formatManual: true }));
+          }}>
+            {Object.entries(WEBHOOK_FORMATS).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
+        ) : f.type === 'select' ? (
+          <select id={fid} aria-required={req} {...aria} value={config[f.key] || f.default || ''} onChange={e => updateConfig(f.key, e.target.value)}>
+            {(f.options || []).map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        ) : f.type === 'accepted_replies' ? (
+          <AcceptedRepliesEditor id={fid} describedBy={aria['aria-describedby']} invalid={!!errors[f.key]}
+            value={config[f.key]} onChange={v => updateConfig(f.key, v)} />
+        ) : f.type === 'tel' ? (
+          <input id={fid} type="tel" inputMode="tel" autocomplete="tel" aria-required={req} {...aria} value={config[f.key] || ''} placeholder={f.placeholder}
+            onInput={e => updateConfig(f.key, e.target.value)}
+            onBlur={e => { const n = normalizePhone(e.target.value); if (n.value) updateConfig(f.key, formatPhone(n.value)); }} />
+        ) : f.type === 'headers' ? (
+          <WebhookHeadersEditor id={fid} rows={config[f.key]} rowErrors={headerErrors} invalid={!!errors[f.key]}
+            describedBy={aria['aria-describedby']}
+            onChange={(rows, changed) => {
+              updateConfig(f.key, rows);
+              if (headerErrors[changed]) setHeaderErrors(({ [changed]: _, ...rest }) => rest);
+            }} />
+        ) : urlSaved ? (
+          // The stored URL holds a credential and is never sent back.
+          // Replace clears it so a new one can be typed.
+          <div class="saved-url">
+            <input id={fid} type="text" readOnly aria-required={req} {...aria} value={savedURLText(config._urlHost)} />
+            <button type="button" class="btn btn-sm" id={fid + '-replace'} aria-label={'Replace ' + f.label}
+              onClick={() => { updateConfig(f.key, ''); setTimeout(() => document.getElementById(fid)?.focus(), 0); }}>Replace</button>
+          </div>
+        ) : urlReplacing ? (
+          // Replacing a saved URL: offer the way back without a reload.
+          <div class="saved-url">
+            <input id={fid} type="url" aria-required={req} {...aria} value={config[f.key] || ''} placeholder={f.placeholder}
+              autocomplete="off" spellcheck={false} onInput={e => updateConfig(f.key, e.target.value)} />
+            <button type="button" class="btn btn-sm" aria-label={'Keep saved ' + f.label}
+              onClick={() => {
+                // Set directly so webhook format auto-detect does not run.
+                setConfig(c => ({ ...c, [f.key]: CONFIG_SENTINEL }));
+                if (errors[f.key]) setErrors(({ [f.key]: _, ...rest }) => rest);
+                setTimeout(() => document.getElementById(fid + '-replace')?.focus(), 0);
+              }}>Keep saved</button>
+          </div>
+        ) : (
+          <input id={fid} type={f.type === 'url' ? 'url' : 'text'} aria-required={req} {...aria} value={config[f.key] || ''} placeholder={f.placeholder}
+            onInput={e => updateConfig(f.key, e.target.value)} />
+        )}
+        {help && !errors[f.key] && <div class="form-help" id={fid + '-help'}>{help}</div>}
+        {errors[f.key] && <div class="field-error" id={fid + '-error'}>{errors[f.key]}</div>}
+      </div>
+    );
+  }
 
+  const typeDef = CHANNEL_TYPES[type];
+  // A new Telegram channel is created by the bot when the chat sends its
+  // code, so the form has no Create button.
+  const newTelegram = type === 'telegram' && !editId;
+
+  // Called before the loading return so the hook order never changes.
+  const linkedId = useLinkedChannel(channels, loading, toast);
   if (loading) return <LoadingPage />;
+
+  const canManage = !!perms?.can_manage;
+  const canTest = !!perms?.can_test;
+  const accessNote = channelAccessNote(perms);
+  const typeOptions = channelTypeOptions(CHANNEL_TYPES, { edition: appMeta.value?.edition, paid: isPaidPlan.value })
+    .filter(k => k !== SLACK_APP_TYPE || type === SLACK_APP_TYPE || (appMeta.value?.edition !== 'foss' && offerSlackAppType(slackInstallsData.value, !!editId)))
+    .filter(k => k !== DISCORD_APP_TYPE || type === DISCORD_APP_TYPE || (appMeta.value?.edition !== 'foss' && offerDiscordAppType(discordInstallsData.value, !!editId)));
 
   return (
     <div>
       <ToastContainer toasts={toasts} />
+      <TelegramLinkAnnouncer />
+      <SlackWorkspaces canManage={canManage} channels={channels} onAddChannel={openCreateSlack} />
+      <DiscordServers canManage={canManage} channels={channels} onAddChannel={openCreateDiscord} />
       <div class="section-header">
         <h3>Notification Channels</h3>
-        <button class="btn btn-sm btn-primary" onClick={openCreate}>Add Channel</button>
+        {canManage && <button ref={addChannelBtn} class="btn btn-sm btn-primary" onClick={openCreate}>Add Channel</button>}
       </div>
+      {accessNote && (
+        <p class="channels-access-note" id="channels-access-note">
+          {accessNote} Owners and admins set this under Settings, Organization.
+        </p>
+      )}
+      <FailingChannelsNote channels={channels} canManage={canManage} />
+      <PaidChannelsBanner channels={channels} />
+      <div class="channel-sr-live" aria-live="polite" aria-atomic="true">{announcement}</div>
       <div class="settings-list">
         {channels.map(ch => {
-          const summary = getConfigSummary(ch.type, ch.config);
+          const summary = getConfigSummary(ch.type, ch.config, ch);
           const tState = testResult[ch.id];
           const isTesting = testing === ch.id;
+          const cooling = testCooldown(cooldowns, ch.type);
+          const testNote = testNotes[ch.id];
           const testBtnClass = tState === 'ok' ? 'btn btn-xs btn-test-ok'
             : tState === 'fail' ? 'btn btn-xs btn-test-fail'
             : 'btn btn-xs';
           return (
-            <div key={ch.id} class="settings-item" style="cursor: pointer" onClick={() => openEdit(ch)}>
+            // The row click is a mouse shortcut; the Edit button is the
+            // keyboard and screen reader path to the same action.
+            // The row named by the failure email link is focusable so focus
+            // can land on it, and is highlighted until the page reloads.
+            <div key={ch.id} id={channelRowId(ch.id)}
+              class={'settings-item' + (linkedId === ch.id ? ' channel-row-linked' : '')}
+              tabIndex={linkedId === ch.id ? -1 : undefined}
+              aria-current={linkedId === ch.id ? 'location' : undefined}
+              style={canManage ? 'cursor: pointer' : undefined}
+              onClick={canManage ? e => { if (!fromUsageDisclosure(e)) openEdit(ch); } : undefined}>
               <div class="channel-info">
                 <div class="channel-header">
-                  <span class={'channel-dot ' + (ch.enabled ? 'channel-dot-on' : 'channel-dot-off')} />
+                  <span class={'channel-dot ' + (ch.enabled ? 'channel-dot-on' : 'channel-dot-off')} aria-hidden="true" />
                   <strong>{ch.name}</strong>
-                  <span class="label-tag">{(CHANNEL_TYPES[ch.type]?.label) || ch.type}</span>
+                  {!ch.enabled && <span class="label-tag channel-disabled-tag">Disabled</span>}
+                  <span class="label-tag">{(CHANNEL_TYPES[ch.type]?.tag || CHANNEL_TYPES[ch.type]?.label) || ch.type}</span>
+                  <ChannelHealthBadge channel={ch} />
+                  <ChannelPlanBadge channel={ch} />
+                  <UnverifiedTag channel={ch} />
+                  <TelegramNotLinkedTag channel={ch} />
+                  <UnsignedTag channel={ch} />
+                  <SlackAppDisconnectedTag channel={ch} />
+                  <DiscordAppDisconnectedTag channel={ch} />
                 </div>
                 {summary && <span class="channel-summary">{summary}</span>}
+                <ChannelHealthLine channel={ch} />
+                <ChannelPlanLine channel={ch} />
+                <ChannelUsageLine channel={ch} />
+                <ChannelTestNote channel={ch} note={testNote} onDismiss={() => dismissTestNote(ch.id)} />
               </div>
-              <div class="btn-group">
-                <button class={testBtnClass} onClick={e => { e.stopPropagation(); testChannel(ch.id); }} disabled={isTesting}>
-                  {isTesting ? 'Testing\u2026' : tState === 'ok' ? '\u2713 Sent' : tState === 'fail' ? '\u2717 Failed' : 'Test'}
-                </button>
-              </div>
+              {(canTest || canManage) && (
+                <div class="btn-group">
+                  {isTelegramUnlinked(ch) ? (
+                    canManage && (
+                      <button type="button" class="btn btn-xs btn-primary"
+                        aria-label={'Link a Telegram chat to ' + ch.name}
+                        onClick={e => { e.stopPropagation(); openEdit(ch); }}>
+                        Link chat
+                      </button>
+                    )
+                  ) : isUnverified(ch) ? (
+                    canManage && (
+                      <button type="button" class="btn btn-xs btn-primary"
+                        aria-label={'Verify number for ' + ch.name}
+                        onClick={e => { e.stopPropagation(); openVerify(ch); }}>
+                        Verify
+                      </button>
+                    )
+                  ) : canTest && (
+                    <button type="button" id={'channel-test-' + ch.id} class={testBtnClass} aria-label={isTesting ? 'Testing ' + ch.name : tState === 'ok' ? 'Test sent to ' + ch.name : tState === 'fail' ? 'Test failed for ' + ch.name : 'Test ' + ch.name}
+                      aria-describedby={testNote ? channelTestNoteId(ch.id) : undefined}
+                      onClick={e => { e.stopPropagation(); testChannel(ch.id); }} disabled={isTesting || !!cooling}>
+                      {isTesting ? 'Testing\u2026' : tState === 'ok' ? '\u2713 Sent' : tState === 'fail' ? '\u2717 Failed' : 'Test'}
+                    </button>
+                  )}
+                  {canManage && (
+                    <button type="button" class="btn btn-xs" aria-label={'Edit ' + ch.name}
+                      onClick={e => { e.stopPropagation(); openEdit(ch); }}>
+                      Edit
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -378,705 +961,192 @@ function ChannelsTab() {
           <div style="text-align: center; padding: 2rem; color: var(--color-text-muted);">
             <p style="margin-bottom: 1rem;">No notification channels configured yet.</p>
             <p style="margin-bottom: 1rem; font-size: 0.875rem;">
-              Set up a channel to start receiving alerts when your monitors detect issues.
+              {canManage || !perms
+                ? 'Set up a channel to start receiving alerts when your monitors detect issues.'
+                : 'Ask an owner or admin to add one so alerts can reach your team.'}
             </p>
-            <button class="btn btn-primary" onClick={openCreate}>
-              Create Your First Channel
-            </button>
+            {canManage && (
+              <button class="btn btn-primary" onClick={openCreate}>
+                Create Your First Channel
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); resetForm(); }} title={editId ? 'Edit Channel' : 'Add Channel'}>
-        <form onSubmit={e => { e.preventDefault(); save(); }}>
+      <Modal open={showModal} onClose={closeModal}
+        title={verifyChannel ? 'Verify phone number' : shownSecret?.context === 'create' ? 'Channel created' : editId ? 'Edit Channel' : 'Add Channel'}>
+        {shownSecret?.context === 'create' ? (
+          <SigningSecretReveal shown={shownSecret} onCopied={markSecretCopied}
+            warn={secretLeaveWarn} onDone={closeModal} />
+        ) : verifyChannel ? (
+          <PhoneVerifyPanel key={verifyChannel.id} channel={verifyChannel}
+            onVerified={onVerified} onLater={closeModal} />
+        ) : (
+        <form class="channel-form" noValidate onSubmit={e => { e.preventDefault(); save(); }}>
+          {editId && (() => {
+            const current = channels.find(c => c.id === editId);
+            return isUnverified(current)
+              ? <UnverifiedNotice onVerify={canManage ? () => openVerify(current) : null} />
+              : null;
+          })()}
+          <p class="form-required-note"><span aria-hidden="true">*</span> marks a required field.</p>
           <div class={'form-group' + (errors.name ? ' has-error' : '')}>
-            <label class="required">Name</label>
-            <input type="text" value={name} onInput={e => setName(e.target.value)} placeholder="e.g. Ops Slack" />
-            {errors.name && <div class="field-error">{errors.name}</div>}
+            <label class="required" for="channel-name">Name</label>
+            <input id="channel-name" type="text" value={name} aria-required="true"
+              maxLength={type === 'telegram' ? TELEGRAM_NAME_MAX : undefined}
+              aria-invalid={errors.name ? 'true' : undefined} aria-describedby={errors.name ? 'channel-name-error' : undefined}
+              onInput={e => setName(e.target.value)} placeholder="e.g. Ops Slack" />
+            {errors.name && <div class="field-error" id="channel-name-error">{errors.name}</div>}
           </div>
           <div class="form-group">
-            <label class="required">Type</label>
-            <select value={type} onChange={e => handleTypeChange(e.target.value)}>
-              {Object.entries(CHANNEL_TYPES)
-                .filter(([k]) => appMeta.value?.edition !== 'foss' || !['twilio_sms', 'twilio_voice', 'telnyx_sms', 'telnyx_voice'].includes(k))
-                .filter(([k]) => isPaidPlan.value || !['telegram', 'twilio_sms', 'twilio_voice', 'telnyx_sms', 'telnyx_voice', 'cloudevent_http'].includes(k))
-                .filter(([k, v]) => editId || !v.legacy)
-                .map(([k, v]) => (
-                <option key={k} value={k}>{v.label}</option>
-              ))}
-            </select>
+            <label class="required" for="channel-type">Type</label>
+            {/* The API keeps a channel's type fixed after creation. On edit
+                the type shows as a read-only field, which stays in the tab
+                order and is announced, unlike a disabled select. */}
+            {editId ? (
+              <>
+                <input id="channel-type" type="text" readOnly value={CHANNEL_TYPES[type]?.label || type}
+                  aria-describedby="channel-type-help" />
+                <div class="form-help" id="channel-type-help">
+                  The type cannot be changed. To switch, create a new channel and delete this one.
+                </div>
+              </>
+            ) : (
+              <select id="channel-type" value={type} onChange={e => handleTypeChange(e.target.value)}>
+                {typeOptions.map(k => <option key={k} value={k}>{CHANNEL_TYPES[k].label}</option>)}
+              </select>
+            )}
           </div>
 
-          {type === 'telegram' && (
-            <p class="form-help" style="margin-top:-8px; margin-bottom:12px">
-              Add {appMeta.value?.telegram_bot_username
-                ? <a href={`https://t.me/${appMeta.value.telegram_bot_username}`} target="_blank" rel="noopener">@{appMeta.value.telegram_bot_username}</a>
-                : 'the YipYap Telegram bot'} to the chat, send /start, then paste the chat ID it replies with.
+          {editId && isRetiredType(type) && (
+            <p class="channel-legacy-note" role="note">
+              Twilio channels are retired. This one still delivers and you can change its number,
+              but new SMS and voice channels use Telnyx.
             </p>
           )}
 
-          {typeDef && typeDef.fields.map(f => (
-            <div key={f.key} class={'form-group' + (errors[f.key] ? ' has-error' : '')}>
-              <label>{f.label}</label>
-              {f.type === 'secret' ? (
-                <SecretInput value={config[f.key] || ''} placeholder={f.placeholder}
-                  onInput={e => updateConfig(f.key, e.target.value)} />
-              ) : f.type === 'json' ? (
-                <textarea rows="2" value={config[f.key] || ''} placeholder={f.placeholder}
-                  onInput={e => updateConfig(f.key, e.target.value)} />
-              ) : f.type === 'number' ? (
-                <input type="number" value={config[f.key] || ''} placeholder={f.placeholder}
-                  onInput={e => updateConfig(f.key, e.target.value ? +e.target.value : 0)} />
-              ) : f.type === 'webhook_format' ? (
-                <select value={config.format || 'generic'} onChange={e => {
-                  setConfig(c => ({ ...c, format: e.target.value, _formatManual: true }));
-                }}>
-                  {Object.entries(WEBHOOK_FORMATS).map(([k, v]) => (
-                    <option key={k} value={k}>{v.label}</option>
-                  ))}
-                </select>
-              ) : f.type === 'select' ? (
-                <select value={config[f.key] || f.default || ''} onChange={e => updateConfig(f.key, e.target.value)}>
-                  {(f.options || []).map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              ) : f.type === 'accepted_replies' ? (
-                <AcceptedRepliesEditor value={config[f.key]} onChange={v => updateConfig(f.key, v)} />
-              ) : (
-                <input type={f.type === 'url' ? 'url' : 'text'} value={config[f.key] || ''} placeholder={f.placeholder}
-                  onInput={e => updateConfig(f.key, e.target.value)} />
-              )}
-              {f.help && !errors[f.key] && <div class="form-help">{f.help}</div>}
-              {errors[f.key] && <div class="field-error">{errors[f.key]}</div>}
-            </div>
-          ))}
+          {type === 'telegram' && (
+            <TelegramChannelSection
+              key={editId || 'new'}
+              isNew={!editId}
+              channel={editId ? channels.find(c => c.id === editId) : null}
+              name={name}
+              canManage={canManage}
+              botUsername={appMeta.value?.telegram_bot_username}
+              onNeedName={() => {
+                setErrors(e => ({ ...e, name: 'Enter a name first' }));
+                const el = document.getElementById('channel-name');
+                if (el) el.focus();
+              }}
+              startRef={telegramStart}
+              onLinked={onTelegramLinked} />
+          )}
 
+          {(type === 'slack' || type === 'discord') && (
+            <p class="form-help" style="margin-top:-8px; margin-bottom:12px">
+              Alerts sent through your own bot carry an Open in YipYap link instead of Ack
+              and Resolve buttons.
+              {!editId && appMeta.value?.edition !== 'foss' && (type === 'slack'
+                ? offerSlackAppType(slackInstallsData.value, false)
+                : offerDiscordAppType(discordInstallsData.value, false)) && (
+                <>
+                  {' '}
+                  <button type="button" class="btn-link slack-app-switch"
+                    onClick={() => handleTypeChange(type === 'slack' ? SLACK_APP_TYPE : DISCORD_APP_TYPE)}>
+                    {type === 'slack' ? 'Use Slack (YipYap app) instead' : 'Use Discord (YipYap app) instead'}
+                  </button>
+                  {' to get the buttons.'}
+                </>
+              )}
+            </p>
+          )}
+
+          {type === SLACK_APP_TYPE && (
+            <SlackAppChannelFields config={config} errors={errors} canManage={canManage}
+              onChange={next => setConfig(next)} />
+          )}
+
+          {type === DISCORD_APP_TYPE && (
+            <DiscordAppChannelFields config={config} errors={errors} canManage={canManage}
+              onChange={next => setConfig(next)} />
+          )}
+
+          {typeDef && !typeDef.custom && typeDef.fields.map(f => renderField(f))}
+
+          {type === 'smtp' && (
+            <EmailChannelFields config={config} errors={errors} isEdit={!!editId}
+              platformEmail={caps.platform_email} maxRecipients={caps.email_max_recipients}
+              edition={appMeta.value?.edition}
+              setConfig={setConfig}
+              clearErrors={keys => {
+                if (keys.some(k => errors[k])) setErrors(e => Object.fromEntries(Object.entries(e).filter(([k]) => !keys.includes(k))));
+              }} />
+          )}
+
+          {!editId && type === 'webhook' && <SigningCreateNote />}
+
+          {editId && type === 'webhook' && (() => {
+            const current = channels.find(c => c.id === editId);
+            const shown = shownSecret?.context === 'rotate' && shownSecret.channelId === editId ? shownSecret : null;
+            return current
+              ? <SigningSecretSection key={current.id} channel={current} canManage={canManage}
+                  shown={shown} warn={secretLeaveWarn} onRotated={onSecretRotated}
+                  onCopied={markSecretCopied}
+                  onDismiss={hideRotatedSecret} />
+              : null;
+          })()}
+
+          {!newTelegram && (
           <div class="form-group form-check">
             <label>
               <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
               Enabled
             </label>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px">
-            <button type="submit" class="btn btn-primary">{editId ? 'Update' : 'Create'}</button>
+          )}
+          {deleteBlock && (
+            <ChannelDeleteBlocked usedBy={deleteBlock}
+              dirty={!!openedSnapshot && formSnapshot({ name, type, config, enabled }) !== openedSnapshot}
+              onDismiss={() => closeConfirm(deleteBtnRef)} />
+          )}
+          {pendingConfirm === 'delete' && editId && (
+            <InlineConfirm id="channel-delete-confirm" danger busy={deleting}
+              title={deleteConfirmText(channels.find(c => c.id === editId)?.name)}
+              confirmLabel="Delete channel"
+              onCancel={() => closeConfirm(deleteBtnRef)}
+              onConfirm={async () => {
+                if (await deleteChannel(editId)) { setShowModal(false); resetForm(); }
+              }} />
+          )}
+          {pendingConfirm === 'disable' && editId && !enabled && (
+            <InlineConfirm id="channel-disable-confirm" title="Disable a channel that policies use?"
+              confirmLabel="Disable and save"
+              onCancel={() => closeConfirm(saveBtnRef)}
+              onConfirm={() => save({ confirmedDisable: true })}>
+              <p>{disableConfirmText(true, false, usedByList(channels.find(c => c.id === editId)))}</p>
+              <p>Steps with no other enabled channel will not notify anyone until it is enabled again.</p>
+            </InlineConfirm>
+          )}
+          <div class="channel-form-actions">
+            {newTelegram
+              ? <button type="button" class="btn" onClick={closeModal}>Cancel</button>
+              : <button type="submit" class="btn btn-primary" ref={saveBtnRef}>{editId ? 'Update' : 'Create'}</button>}
             {editId && (
-              <button type="button" class="btn btn-danger btn-sm" onClick={() => { deleteChannel(editId); setShowModal(false); resetForm(); }}>
+              <button type="button" class="btn btn-danger btn-sm" ref={deleteBtnRef}
+                aria-expanded={pendingConfirm === 'delete' || !!deleteBlock ? 'true' : 'false'}
+                onClick={() => requestDelete(editId)}>
                 Delete Channel
               </button>
             )}
           </div>
         </form>
-      </Modal>
-    </div>
-  );
-}
-
-/* ─── Escalation Policies ─── */
-function EscalationTab() {
-  const [policies, setPolicies] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', loop: false, max_loops: '' });
-  const [editId, setEditId] = useState(null);
-  const [steps, setSteps] = useState([]);
-  const [editingSteps, setEditingSteps] = useState(null);
-
-  const [channels, setChannels] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [teams, setTeams] = useState([]);
-  const defaultTarget = () => ({ target_type: 'on_call_primary', target_id: '', channel_id: '', simultaneous: true });
-
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await get('/escalation-policies');
-      setPolicies(data.policies || data || []);
-    } catch (_) {}
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  useEffect(() => {
-    async function loadChannels() {
-      try {
-        const data = await get('/notification-channels');
-        setChannels(data.channels || data || []);
-      } catch (_) {}
-    }
-    loadChannels();
-    get('/users').then(d => setUsers(d.users || d || [])).catch(() => {});
-    get('/teams').then(d => setTeams(d.teams || d || [])).catch(() => {});
-  }, []);
-
-  async function save() {
-    const body = {
-      name: form.name,
-      description: form.description,
-      loop: form.loop,
-      max_loops: form.loop && form.max_loops !== '' ? +form.max_loops : null,
-    };
-    if (editId) await patch(`/escalation-policies/${editId}`, body);
-    else await post('/escalation-policies', body);
-    setShowModal(false);
-    setEditId(null);
-    load();
-  }
-
-  async function deletePolicy(id) {
-    if (confirm('Delete this policy?')) {
-      await del(`/escalation-policies/${id}`);
-      load();
-    }
-  }
-
-  async function openSteps(policy) {
-    setEditingSteps(policy.id);
-    try {
-      const detail = await get(`/escalation-policies/${policy.id}`);
-      const loaded = (detail.steps || []).map(s => ({
-        delay_minutes: s.delay_minutes || 0,
-        repeat_count: s.repeat_count || 0,
-        repeat_interval_seconds: s.repeat_interval_seconds || 0,
-        is_terminal: s.is_terminal || false,
-        targets: (s.targets || []).map(t => ({
-          target_type: t.target_type || 'on_call_primary',
-          target_id: t.target_id || '',
-          channel_id: t.channel_id || '',
-          simultaneous: t.simultaneous || false,
-        })),
-      }));
-      setSteps(loaded);
-    } catch (_) {
-      setSteps([]);
-    }
-  }
-
-  async function saveSteps() {
-    await put(`/escalation-policies/${editingSteps}/steps`, { steps });
-    setEditingSteps(null);
-    load();
-  }
-
-  function addStep() {
-    setSteps([...steps, {
-      delay_minutes: 5,
-      repeat_count: 0,
-      repeat_interval_seconds: 0,
-      is_terminal: false,
-      targets: [defaultTarget()],
-    }]);
-  }
-
-  function updateStep(i, patch) {
-    const s = [...steps];
-    s[i] = { ...s[i], ...patch };
-    setSteps(s);
-  }
-
-  function updateTarget(stepIdx, targetIdx, patch) {
-    const s = [...steps];
-    const targets = [...s[stepIdx].targets];
-    targets[targetIdx] = { ...targets[targetIdx], ...patch };
-    s[stepIdx] = { ...s[stepIdx], targets };
-    setSteps(s);
-  }
-
-  function addTarget(stepIdx) {
-    const s = [...steps];
-    s[stepIdx] = { ...s[stepIdx], targets: [...s[stepIdx].targets, defaultTarget()] };
-    setSteps(s);
-  }
-
-  function removeTarget(stepIdx, targetIdx) {
-    const s = [...steps];
-    s[stepIdx] = { ...s[stepIdx], targets: s[stepIdx].targets.filter((_, j) => j !== targetIdx) };
-    setSteps(s);
-  }
-
-  const needsTargetId = (type) => type === 'user' || type === 'team';
-
-  if (loading) return <LoadingPage />;
-
-  return (
-    <div>
-      <div class="section-header">
-        <h3>Escalation Policies</h3>
-        <button class="btn btn-sm btn-primary" onClick={() => {
-          setEditId(null); setForm({ name: '', description: '', loop: false, max_loops: '' }); setShowModal(true);
-        }}>Add Policy</button>
-      </div>
-      <div class="settings-list">
-        {policies.map(p => (
-          <div key={p.id} class="settings-item">
-            <div>
-              <strong>{p.name}</strong>
-              {p.description && <span class="text-muted"> - {p.description}</span>}
-              {p.loop && <span class="label-tag">Loop{p.max_loops != null ? ` (max ${p.max_loops})` : ''}</span>}
-            </div>
-            <div class="btn-group">
-              <button class="btn btn-xs" onClick={() => openSteps(p)}>Steps</button>
-              <button class="btn btn-xs" onClick={() => {
-                setEditId(p.id);
-                setForm({
-                  name: p.name,
-                  description: p.description || '',
-                  loop: p.loop || false,
-                  max_loops: p.max_loops != null ? String(p.max_loops) : '',
-                });
-                setShowModal(true);
-              }}>Edit</button>
-              <button class="btn btn-xs btn-danger" onClick={() => deletePolicy(p.id)}>Delete</button>
-            </div>
-          </div>
-        ))}
-        {policies.length === 0 && <p class="text-muted">No escalation policies yet. Create one to define how alerts are routed to your team.</p>}
-      </div>
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Policy' : 'Add Policy'}>
-        <form onSubmit={e => { e.preventDefault(); save(); }}>
-          <div class="form-group">
-            <label class="required">Name</label>
-            <input type="text" value={form.name} onInput={e => setForm({ ...form, name: e.target.value })} required />
-          </div>
-          <div class="form-group">
-            <label>Description <span class="form-optional">(optional)</span></label>
-            <textarea value={form.description} onInput={e => setForm({ ...form, description: e.target.value })} />
-          </div>
-          <div class="form-group form-check">
-            <label>
-              <input type="checkbox" checked={form.loop}
-                onChange={e => setForm({ ...form, loop: e.target.checked })} />
-              After the last step, restart from step 1
-            </label>
-          </div>
-          {form.loop && (
-            <div class="form-group">
-              <label>Max Loops</label>
-              <input type="number" min="1" value={form.max_loops}
-                onInput={e => setForm({ ...form, max_loops: e.target.value })}
-                placeholder="Leave blank for infinite" />
-            </div>
-          )}
-          <button type="submit" class="btn btn-primary">Save</button>
-        </form>
-      </Modal>
-
-      <Modal open={!!editingSteps} onClose={() => setEditingSteps(null)} title="Escalation Steps">
-        <div class="steps-builder">
-          {steps.map((step, i) => (
-            <div key={i} class="step-item">
-              <div class="step-item-header">
-                <span class="step-number">Step {i + 1}</span>
-                <button class="btn btn-xs btn-danger" onClick={() => setSteps(steps.filter((_, j) => j !== i))}>Remove</button>
-              </div>
-              <div class="form-group">
-                <label>Delay (minutes)</label>
-                <input type="number" min="0" value={step.delay_minutes}
-                  onInput={e => updateStep(i, { delay_minutes: +e.target.value })} />
-              </div>
-              <div class="form-group">
-                <label>Repeat Count</label>
-                <input type="number" min="0" value={step.repeat_count}
-                  onInput={e => updateStep(i, { repeat_count: +e.target.value })} />
-                <p class="text-muted text-xs">How many times to re-notify at this step before escalating</p>
-              </div>
-              {step.repeat_count > 0 && (
-                <div class="form-group">
-                  <label>Repeat Interval (seconds)</label>
-                  <input type="number" min="0" value={step.repeat_interval_seconds}
-                    onInput={e => updateStep(i, { repeat_interval_seconds: +e.target.value })} />
-                </div>
-              )}
-              <div class="form-group form-check">
-                <label>
-                  <input type="checkbox" checked={step.is_terminal}
-                    onChange={e => updateStep(i, { is_terminal: e.target.checked })} />
-                  Stop escalation at this step
-                </label>
-              </div>
-              <div class="step-targets">
-                <label><strong>Targets</strong></label>
-                {(step.targets || []).map((target, ti) => (
-                  <div key={ti} class="target-item">
-                    <div class="form-group">
-                      <label>Target Type</label>
-                      <select value={target.target_type}
-                        onChange={e => updateTarget(i, ti, { target_type: e.target.value, target_id: '' })}>
-                        <option value="on_call_primary">On-Call Primary</option>
-                        <option value="on_call_secondary">On-Call Secondary</option>
-                        <option value="user">User</option>
-                        <option value="team">Team</option>
-                      </select>
-                    </div>
-                    {needsTargetId(target.target_type) && (
-                      <div class="form-group">
-                        <label>{target.target_type === 'user' ? 'User' : 'Team'}</label>
-                        <select value={target.target_id}
-                          onChange={e => updateTarget(i, ti, { target_id: e.target.value })}
-                          required>
-                          <option value="">Select {target.target_type}...</option>
-                          {target.target_type === 'user'
-                            ? users.map(u => <option key={u.id} value={u.id}>{u.email}</option>)
-                            : teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
-                          }
-                        </select>
-                      </div>
-                    )}
-                    <div class="form-group">
-                      <label>Notification Channel</label>
-                      <select value={target.channel_id}
-                        onChange={e => updateTarget(i, ti, { channel_id: e.target.value })}
-                        required>
-                        <option value="">Select channel...</option>
-                        {channels.map(ch => (
-                          <option key={ch.id} value={ch.id}>{ch.name} ({ch.type})</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div class="form-group form-check">
-                      <label>
-                        <input type="checkbox" checked={target.simultaneous}
-                          onChange={e => updateTarget(i, ti, { simultaneous: e.target.checked })} />
-                        Notify all targets at once
-                      </label>
-                    </div>
-                    <button class="btn btn-xs btn-danger" onClick={() => removeTarget(i, ti)}>Remove Target</button>
-                  </div>
-                ))}
-                <button class="btn btn-xs" onClick={() => addTarget(i)}>Add Target</button>
-              </div>
-            </div>
-          ))}
-          <div class="steps-builder-actions">
-            <button class="btn btn-sm" onClick={addStep}>Add Step</button>
-            <button class="btn btn-sm btn-primary" onClick={saveSteps}>Save Steps</button>
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
-
-/* ─── Teams ─── */
-function TeamsTab() {
-  const [teams, setTeams] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '' });
-  const [editId, setEditId] = useState(null);
-  const [membersTeamId, setMembersTeamId] = useState(null);
-  const [members, setMembers] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [memberForm, setMemberForm] = useState({ user_id: '', position: 0 });
-
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await get('/teams');
-      setTeams(data.teams || data || []);
-    } catch (_) {}
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  async function save() {
-    if (editId) await patch(`/teams/${editId}`, form);
-    else await post('/teams', form);
-    setShowModal(false);
-    setEditId(null);
-    load();
-  }
-
-  async function deleteTeam(id) {
-    if (confirm('Delete this team?')) {
-      await del(`/teams/${id}`);
-      load();
-    }
-  }
-
-  async function openMembers(teamId) {
-    setMembersTeamId(teamId);
-    try {
-      const [detail, userData] = await Promise.all([
-        get(`/teams/${teamId}`),
-        users.length ? Promise.resolve(null) : get('/users'),
-      ]);
-      setMembers(detail.members || []);
-      if (userData) setUsers(userData.users || userData || []);
-      const nextPos = (detail.members || []).reduce((max, m) => Math.max(max, m.position || 0), 0) + 1;
-      setMemberForm({ user_id: '', position: nextPos });
-    } catch (_) {
-      setMembers([]);
-    }
-  }
-
-  async function addMember(e) {
-    e.preventDefault();
-    await post(`/teams/${membersTeamId}/members`, { user_id: memberForm.user_id, position: memberForm.position });
-    const detail = await get(`/teams/${membersTeamId}`);
-    setMembers(detail.members || []);
-    const nextPos = (detail.members || []).reduce((max, m) => Math.max(max, m.position || 0), 0) + 1;
-    setMemberForm({ user_id: '', position: nextPos });
-  }
-
-  async function removeMember(userId) {
-    if (!confirm('Remove this member?')) return;
-    await del(`/teams/${membersTeamId}/members/${userId}`);
-    const detail = await get(`/teams/${membersTeamId}`);
-    setMembers(detail.members || []);
-  }
-
-  function closeMembers() {
-    setMembersTeamId(null);
-    setMembers([]);
-  }
-
-  function userEmail(userId) {
-    const u = users.find(u => u.id === userId);
-    return u ? u.email : userId;
-  }
-
-  if (loading) return <LoadingPage />;
-
-  return (
-    <div>
-      <div class="section-header">
-        <h3>Teams</h3>
-        <button class="btn btn-sm btn-primary" onClick={() => { setEditId(null); setForm({ name: '', description: '' }); setShowModal(true); }}>
-          Add Team
-        </button>
-      </div>
-      <div class="settings-list">
-        {teams.map(t => (
-          <div key={t.id} class="settings-item">
-            <div><strong>{t.name}</strong></div>
-            <div class="btn-group">
-              <button class="btn btn-xs" onClick={() => openMembers(t.id)}>Members</button>
-              <button class="btn btn-xs" onClick={() => { setEditId(t.id); setForm({ name: t.name, description: t.description || '' }); setShowModal(true); }}>Edit</button>
-              <button class="btn btn-xs btn-danger" onClick={() => deleteTeam(t.id)}>Delete</button>
-            </div>
-          </div>
-        ))}
-        {teams.length === 0 && <p class="text-muted">No teams yet. Teams group members for on-call rotations and escalation targeting.</p>}
-      </div>
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Team' : 'Add Team'}>
-        <form onSubmit={e => { e.preventDefault(); save(); }}>
-          <div class="form-group">
-            <label>Name</label>
-            <input type="text" value={form.name} onInput={e => setForm({ ...form, name: e.target.value })} required />
-          </div>
-          <div class="form-group">
-            <label>Description</label>
-            <textarea value={form.description} onInput={e => setForm({ ...form, description: e.target.value })} />
-          </div>
-          <button type="submit" class="btn btn-primary">Save</button>
-        </form>
-      </Modal>
-      <Modal open={!!membersTeamId} onClose={closeMembers} title="Team Members">
-        {members.length > 0 ? (
-          <table class="data-table" style="width:100%; margin-bottom: 16px;">
-            <thead>
-              <tr><th>User</th><th>Position</th><th></th></tr>
-            </thead>
-            <tbody>
-              {members.map(m => (
-                <tr key={m.user_id}>
-                  <td><strong>{userEmail(m.user_id)}</strong></td>
-                  <td>{m.position}</td>
-                  <td><button class="btn btn-xs btn-danger" onClick={() => removeMember(m.user_id)}>Remove</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p class="text-muted" style="margin-bottom: 16px;">No members yet. Add one below.</p>
         )}
-        <div style="border-top: 1px solid var(--color-border); padding-top: 16px;">
-          <h4 style="margin-bottom: 12px;">Add Member</h4>
-          <form onSubmit={addMember}>
-            <div class="form-group">
-              <label>User</label>
-              <select value={memberForm.user_id} onChange={e => setMemberForm({ ...memberForm, user_id: e.target.value })} required>
-                <option value="">Select user...</option>
-                {users.filter(u => !members.some(m => m.user_id === u.id)).map(u => (
-                  <option key={u.id} value={u.id}>{u.email}</option>
-                ))}
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Rotation Position</label>
-              <input type="number" min="0" value={memberForm.position}
-                onInput={e => setMemberForm({ ...memberForm, position: +e.target.value })} />
-              <p class="form-help">Lower numbers are earlier in the on-call rotation.</p>
-            </div>
-            <button type="submit" class="btn btn-primary">Add Member</button>
-          </form>
-        </div>
       </Modal>
     </div>
   );
 }
 
-/* ─── Maintenance Windows ─── */
-function MaintenanceTab() {
-  const [windows, setWindows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', start_at: '', end_at: '', monitor_id: '', public: false, suppress_alerts: true, recurrence_type: 'none', recurrence_end_at: '', days_of_week: [], day_of_month: 1 });
-  const [editId, setEditId] = useState(null);
-  const [monitors, setMonitors] = useState([]);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await get('/maintenance-windows');
-      setWindows(data.windows || data || []);
-    } catch (_) {}
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-  useEffect(() => {
-    get('/monitors').then(d => setMonitors(d.monitors || d || [])).catch(() => {});
-  }, []);
-
-  async function save() {
-    const body = {
-      name: form.name,
-      description: form.description,
-      start_at: new Date(form.start_at).toISOString(),
-      end_at: new Date(form.end_at).toISOString(),
-      monitor_id: form.monitor_id || '',
-      public: form.public,
-      suppress_alerts: form.suppress_alerts,
-      recurrence_type: form.recurrence_type || 'none',
-      days_of_week: form.recurrence_type === 'weekly' ? JSON.stringify(form.days_of_week || []) : '[]',
-      day_of_month: form.recurrence_type === 'monthly' ? (form.day_of_month || 1) : 0,
-    };
-    if (form.recurrence_end_at) body.recurrence_end_at = new Date(form.recurrence_end_at).toISOString();
-    else body.recurrence_end_at = '';
-    if (editId) await patch(`/maintenance-windows/${editId}`, body);
-    else await post('/maintenance-windows', body);
-    setShowModal(false);
-    setEditId(null);
-    load();
-  }
-
-  async function deleteWindow(id) {
-    if (confirm('Delete this window?')) { await del(`/maintenance-windows/${id}`); load(); }
-  }
-
-  if (loading) return <LoadingPage />;
-
-  return (
-    <div>
-      <div class="section-header">
-        <h3>Maintenance Windows</h3>
-        <button class="btn btn-sm btn-primary" onClick={() => { setEditId(null); setForm({ name: '', description: '', start_at: '', end_at: '', monitor_id: '', public: false, suppress_alerts: true, recurrence_type: 'none', recurrence_end_at: '', days_of_week: [], day_of_month: 1 }); setShowModal(true); }}>
-          Schedule Maintenance
-        </button>
-      </div>
-      <div class="settings-list">
-        {windows.map(w => (
-          <div key={w.id} class="settings-item">
-            <div>
-              <strong>{w.name}</strong>
-              {w.description && <span class="text-muted"> - {w.description}</span>}
-              <span class="text-muted"> {formatTime(w.start_at)} - {formatTime(w.end_at)}</span>
-              {w.recurrence_type && w.recurrence_type !== 'none' && <span class="badge badge-info" style={{ marginLeft: 6 }}>{w.recurrence_type}</span>}
-            </div>
-            <div class="btn-group">
-              <button class="btn btn-xs btn-danger" onClick={() => deleteWindow(w.id)}>Delete</button>
-            </div>
-          </div>
-        ))}
-        {windows.length === 0 && <p class="text-muted">No maintenance windows scheduled.</p>}
-      </div>
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Schedule Maintenance">
-        <form onSubmit={e => { e.preventDefault(); save(); }}>
-          <div class="form-group">
-            <label>Name</label>
-            <input type="text" value={form.name} onInput={e => setForm({ ...form, name: e.target.value })} required />
-          </div>
-          <div class="form-group">
-            <label>Description</label>
-            <textarea value={form.description} onInput={e => setForm({ ...form, description: e.target.value })} />
-          </div>
-          <div class="form-group">
-            <label>Start</label>
-            <input type="datetime-local" value={form.start_at} onInput={e => setForm({ ...form, start_at: e.target.value })} required />
-          </div>
-          <div class="form-group">
-            <label>End</label>
-            <input type="datetime-local" value={form.end_at} onInput={e => setForm({ ...form, end_at: e.target.value })} required />
-          </div>
-          <div class="form-group">
-            <label>Monitor</label>
-            <select value={form.monitor_id} onChange={e => setForm({ ...form, monitor_id: e.target.value })}>
-              <option value="">All monitors</option>
-              {monitors.map(m => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Recurrence</label>
-            <select value={form.recurrence_type} onChange={e => setForm({ ...form, recurrence_type: e.target.value })}>
-              <option value="none">None (one-time)</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-          </div>
-          {form.recurrence_type === 'weekly' && (
-            <div class="form-group">
-              <label>Days of Week</label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((day, i) => (
-                  <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input type="checkbox" checked={(form.days_of_week || []).includes(i)}
-                      onChange={e => {
-                        const days = [...(form.days_of_week || [])];
-                        if (e.target.checked) { if (!days.includes(i)) days.push(i); }
-                        else { const idx = days.indexOf(i); if (idx >= 0) days.splice(idx, 1); }
-                        setForm({ ...form, days_of_week: days });
-                      }} />
-                    {day}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-          {form.recurrence_type === 'monthly' && (
-            <div class="form-group">
-              <label>Day of Month</label>
-              <input type="number" min="1" max="31" value={form.day_of_month} onInput={e => setForm({ ...form, day_of_month: parseInt(e.target.value) || 1 })} />
-            </div>
-          )}
-          {form.recurrence_type !== 'none' && (
-            <div class="form-group">
-              <label>Recurrence End Date (optional)</label>
-              <input type="datetime-local" value={form.recurrence_end_at} onInput={e => setForm({ ...form, recurrence_end_at: e.target.value })} />
-            </div>
-          )}
-          <div class="form-group form-check">
-            <label>
-              <input type="checkbox" checked={form.public}
-                onChange={e => setForm({ ...form, public: e.target.checked })} />
-              Show on public status page
-            </label>
-          </div>
-          <div class="form-group form-check">
-            <label>
-              <input type="checkbox" checked={form.suppress_alerts}
-                onChange={e => setForm({ ...form, suppress_alerts: e.target.checked })} />
-              Suppress alert notifications
-            </label>
-          </div>
-          <button type="submit" class="btn btn-primary">Save</button>
-        </form>
-      </Modal>
-    </div>
-  );
-}
 
 /* ─── Status Pages ─── */
 function MonitorConfig({ monitor, orgMonitors, onUpdate, onRemove }) {
@@ -1148,7 +1218,7 @@ function MonitorConfig({ monitor, orgMonitors, onUpdate, onRemove }) {
             );
           })()}
           {(currentOrg.value?.plan || 'free') === 'free' && (
-            <p class="form-help">Free plan supports 24h only. <a href="/settings/billing">Upgrade</a> for more periods.</p>
+            <p class="form-help">Free plan supports 24h only. <UpgradeLink fallback="Ask an owner or admin to upgrade for more periods.">Upgrade</UpgradeLink>{isOrgAdmin(currentUser.value?.role) && ' for more periods.'}</p>
           )}
         </div>
       )}
@@ -1158,6 +1228,8 @@ function MonitorConfig({ monitor, orgMonitors, onUpdate, onRemove }) {
 }
 
 function StatusPageTab() {
+  // Viewers are read-only (decision core-billing-org#5).
+  const writer = canWrite(currentUser.value?.role);
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -1340,7 +1412,7 @@ function StatusPageTab() {
   const plan = org?.plan || 'free';
   const atLimit = plan === 'free' || (plan === 'pro' && pages.length >= 2);
   const limitMessage = plan === 'free'
-    ? 'Upgrade to create status pages'
+    ? (isOrgAdmin(currentUser.value?.role) ? 'Upgrade to create status pages' : 'Status pages need a paid plan. Ask an owner or admin to upgrade.')
     : plan === 'pro' && pages.length >= 2
       ? 'Pro plan limited to 2 status pages'
       : null;
@@ -1421,14 +1493,14 @@ function StatusPageTab() {
       <ToastContainer toasts={toasts} />
       <div class="section-header">
         <h3>Status Pages</h3>
-        {atLimit
+        {!writer ? null : atLimit
           ? <span class="text-muted" style="font-size: 0.875rem;">{limitMessage}</span>
           : <button class="btn btn-sm btn-primary" onClick={() => { closeModal(); setShowModal(true); }}>Create Status Page</button>
         }
       </div>
       <div class="settings-list">
         {pages.map(page => (
-          <div key={page.id} class="settings-item" style="cursor: pointer;" onClick={() => openEdit(page)}>
+          <div key={page.id} class="settings-item" style={writer ? 'cursor: pointer;' : undefined} onClick={writer ? () => openEdit(page) : undefined}>
             <div>
               <strong>{page.name}</strong>
               <span class="text-muted"> /{page.slug}</span>
@@ -1439,8 +1511,9 @@ function StatusPageTab() {
             </div>
             <div class="btn-group" onClick={e => e.stopPropagation()}>
               <a class="btn btn-xs" href={`${window.location.origin}/${org?.slug}/status/${page.slug}`} target="_blank" rel="noopener">View →</a>
-              <button class="btn btn-xs" onClick={() => openLayout(page.id)}>Layout</button>
-              <button class="btn btn-xs btn-danger" onClick={() => deletePage(page.id)}>Delete</button>
+              {writer && <button class="btn btn-xs" aria-label={`Edit status page ${page.name}`} onClick={() => openEdit(page)}>Edit</button>}
+              {writer && <button class="btn btn-xs" onClick={() => openLayout(page.id)}>Layout</button>}
+              {writer && <button class="btn btn-xs btn-danger" onClick={() => deletePage(page.id)}>Delete</button>}
             </div>
           </div>
         ))}
@@ -1482,101 +1555,6 @@ function StatusPageTab() {
   );
 }
 
-/* ─── API Keys ─── */
-function APIKeysTab() {
-  const [keys, setKeys] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [newKeyName, setNewKeyName] = useState('');
-  const [newKeyScopes, setNewKeyScopes] = useState('');
-  const [newKeyExpires, setNewKeyExpires] = useState('');
-  const [createdKey, setCreatedKey] = useState(null);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await get('/org/api-keys');
-      setKeys(data.api_keys || data || []);
-    } catch (_) {}
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  async function create() {
-    const body = { name: newKeyName };
-    if (newKeyScopes.trim()) {
-      body.scopes = newKeyScopes.split(',').map(s => s.trim()).filter(Boolean);
-    }
-    if (newKeyExpires) {
-      body.expires_at = new Date(newKeyExpires).toISOString();
-    }
-    const res = await post('/org/api-keys', body);
-    setCreatedKey(res.key || res.api_key || res);
-    setNewKeyName('');
-    setNewKeyScopes('');
-    setNewKeyExpires('');
-    load();
-  }
-
-  async function revoke(id) {
-    if (confirm('Revoke this API key?')) {
-      await del(`/org/api-keys/${id}`);
-      load();
-    }
-  }
-
-  if (loading) return <LoadingPage />;
-
-  return (
-    <div>
-      <div class="section-header">
-        <h3>API Keys</h3>
-        <button class="btn btn-sm btn-primary" onClick={() => { setCreatedKey(null); setNewKeyName(''); setNewKeyScopes(''); setNewKeyExpires(''); setShowModal(true); }}>
-          Create Key
-        </button>
-      </div>
-      <div class="settings-list">
-        {keys.map(k => (
-          <div key={k.id} class="settings-item">
-            <div>
-              <strong>{k.name}</strong>
-              <span class="text-muted"> - Created {formatTime(k.created_at)}</span>
-              {k.last_used_at && <span class="text-muted"> - Last used: {formatTime(k.last_used_at)}</span>}
-            </div>
-            <button class="btn btn-xs btn-danger" onClick={() => revoke(k.id)}>Revoke</button>
-          </div>
-        ))}
-        {keys.length === 0 && <p class="text-muted">No API keys yet. Create one to access the YipYap API programmatically.</p>}
-      </div>
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Create API Key">
-        {createdKey ? (
-          <div>
-            <p>Your new API key (copy it now, it won't be shown again):</p>
-            <code class="api-key-display">{typeof createdKey === 'string' ? createdKey : createdKey.key || JSON.stringify(createdKey)}</code>
-            <button class="btn btn-sm" onClick={() => setShowModal(false)}>Done</button>
-          </div>
-        ) : (
-          <form onSubmit={e => { e.preventDefault(); create(); }}>
-            <div class="form-group">
-              <label>Key Name</label>
-              <input type="text" value={newKeyName} onInput={e => setNewKeyName(e.target.value)} required placeholder="e.g. CI Pipeline" />
-            </div>
-            <div class="form-group">
-              <label>Scopes</label>
-              <input type="text" value={newKeyScopes} onInput={e => setNewKeyScopes(e.target.value)} placeholder="e.g. monitors:read, alerts:write" />
-            </div>
-            <div class="form-group">
-              <label>Expires At</label>
-              <input type="date" value={newKeyExpires} onInput={e => setNewKeyExpires(e.target.value)} />
-            </div>
-            <button type="submit" class="btn btn-primary">Create</button>
-          </form>
-        )}
-      </Modal>
-    </div>
-  );
-}
-
 /* ─── SSO / OIDC ─── */
 function SSOTab() {
   const [connections, setConnections] = useState([]);
@@ -1590,6 +1568,7 @@ function SSOTab() {
     scopes: 'openid,email,profile', auto_provision: true, default_role: 'member',
     enabled: true,
   });
+  const { toasts, toast } = useToast();
 
   async function load() {
     setLoading(true);
@@ -1618,8 +1597,14 @@ function SSOTab() {
       ...form,
       scopes: form.scopes.split(',').map(s => s.trim()).filter(Boolean),
     };
-    if (editId) await patch(`/org/oidc-connections/${editId}`, body);
-    else await post('/org/oidc-connections', body);
+    try {
+      if (editId) await patch(`/org/oidc-connections/${editId}`, body);
+      else await post('/org/oidc-connections', body);
+    } catch (err) {
+      // Keep the modal open so the user can correct the form.
+      if (!err.readonly) toast(err.message || 'Could not save the SSO connection', 'error');
+      return;
+    }
     setShowModal(false);
     setEditId(null);
     resetForm();
@@ -1627,9 +1612,12 @@ function SSOTab() {
   }
 
   async function deleteConn(id) {
-    if (confirm('Delete this SSO connection?')) {
+    if (!confirm('Delete this SSO connection?')) return;
+    try {
       await del(`/org/oidc-connections/${id}`);
       load();
+    } catch (err) {
+      if (!err.readonly) toast(err.message || 'Could not delete the SSO connection', 'error');
     }
   }
 
@@ -1653,6 +1641,7 @@ function SSOTab() {
 
   return (
     <div>
+      <ToastContainer toasts={toasts} />
       <div class="section-header">
         <h3>SSO Connections</h3>
         <button class="btn btn-sm btn-primary" onClick={() => { setEditId(null); resetForm(); setShowModal(true); }}>
@@ -1751,410 +1740,6 @@ function SSOTab() {
           <button type="submit" class="btn btn-primary">Save</button>
         </form>
       </Modal>
-    </div>
-  );
-}
-
-/* ─── Members ─── */
-function MembersTab() {
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showInvite, setShowInvite] = useState(false);
-  const [showTransfer, setShowTransfer] = useState(false);
-  const [resetTarget, setResetTarget] = useState(null);
-  const [resetPassword, setResetPassword] = useState('');
-  const [inviteForm, setInviteForm] = useState({ email: '', password: '', role: 'member' });
-  const [saving, setSaving] = useState(false);
-  const { toasts, toast } = useToast();
-  const role = currentUser.value?.role;
-  const isOwnerOrAdmin = role === 'owner' || role === 'admin';
-
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await get('/users');
-      setMembers(data.users || data || []);
-    } catch (_) {}
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  async function invite(e) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await post('/users', inviteForm);
-      toast('Member invited');
-      setShowInvite(false);
-      setInviteForm({ email: '', password: '', role: 'member' });
-      load();
-    } catch (err) {
-      toast(err.message || 'Failed to invite', 'error');
-    }
-    setSaving(false);
-  }
-
-  async function changeRole(userId, newRole) {
-    try {
-      await patch(`/users/${userId}`, { role: newRole });
-      toast('Role updated');
-      load();
-    } catch (err) {
-      toast(err.message || 'Failed to update role', 'error');
-    }
-  }
-
-  async function removeMember(userId) {
-    if (!confirm('Remove this member?')) return;
-    try {
-      await del(`/users/${userId}`);
-      toast('Member removed');
-      load();
-    } catch (err) {
-      toast(err.message || 'Failed to remove', 'error');
-    }
-  }
-
-  async function resetMemberPassword(e) {
-    e.preventDefault();
-    if (!resetTarget) return;
-    setSaving(true);
-    try {
-      await post(`/users/${resetTarget.id}/reset-password`, { temporary_password: resetPassword });
-      toast(`Temporary password set for ${resetTarget.email}. Share it securely; they must change it at next login.`);
-      setResetTarget(null);
-      setResetPassword('');
-    } catch (err) {
-      toast(err.message || 'Failed to reset password', 'error');
-    }
-    setSaving(false);
-  }
-
-  async function transferOwnership(e) {
-    e.preventDefault();
-    const targetId = e.target.elements.target.value;
-    if (!targetId) return;
-    setSaving(true);
-    try {
-      await post('/org/transfer-ownership', { target_user_id: targetId });
-      toast('Ownership transferred');
-      setShowTransfer(false);
-      load();
-    } catch (err) {
-      toast(err.message || 'Failed to transfer', 'error');
-    }
-    setSaving(false);
-  }
-
-  if (loading) return <LoadingPage />;
-
-  const owner = members.find(m => m.role === 'owner');
-  const admins = members.filter(m => m.role === 'admin');
-  const freeLimited = appMeta.value?.billing_enabled && currentOrg.value?.plan === 'free' && members.length >= 5;
-
-  return (
-    <div>
-      <ToastContainer toasts={toasts} />
-      <div class="section-header">
-        <h3>Members</h3>
-        {isOwnerOrAdmin && (
-          freeLimited
-            ? <a href="/settings/billing" class="btn btn-sm btn-primary">Upgrade to add more members</a>
-            : <button class="btn btn-sm btn-primary" onClick={() => setShowInvite(true)}>Invite Member</button>
-        )}
-      </div>
-      <div class="settings-list">
-        <table class="data-table" style="width:100%">
-          <thead>
-            <tr><th>Email</th><th>Name</th><th>Role</th><th>Joined</th><th>Actions</th></tr>
-          </thead>
-          <tbody>
-            {members.map(m => (
-              <tr key={m.id}>
-                <td>{m.email}</td>
-                <td>{m.name || ''}</td>
-                <td>
-                  {isOwnerOrAdmin && m.id !== currentUser.value?.id && m.role !== 'owner' ? (
-                    <select value={m.role} onChange={e => changeRole(m.id, e.target.value)}>
-                      <option value="member">Member</option>
-                      <option value="admin">Admin</option>
-                      {role === 'owner' && <option value="owner">Owner</option>}
-                    </select>
-                  ) : (
-                    m.role
-                  )}
-                </td>
-                <td>{formatTime(m.created_at)}</td>
-                <td>
-                  <div class="btn-group">
-                    {isOwnerOrAdmin && m.id !== currentUser.value?.id && m.role !== 'owner' && (
-                      <>
-                        <button class="btn btn-xs" onClick={() => { setResetTarget(m); setResetPassword(''); }}>Reset password</button>
-                        <button class="btn btn-xs btn-danger" onClick={() => removeMember(m.id)}>Remove</button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {members.length === 0 && <p class="text-muted">No members found.</p>}
-      </div>
-      {role === 'owner' && admins.length > 0 && (
-        <div style="margin-top: 1rem;">
-          <button class="btn btn-sm" onClick={() => setShowTransfer(true)}>Transfer Ownership</button>
-        </div>
-      )}
-      <Modal open={showInvite} onClose={() => setShowInvite(false)} title="Invite Member">
-        <form onSubmit={invite}>
-          <div class="form-group">
-            <label>Email</label>
-            <input type="email" value={inviteForm.email} onInput={e => setInviteForm({ ...inviteForm, email: e.target.value })} required />
-          </div>
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" value={inviteForm.password} onInput={e => setInviteForm({ ...inviteForm, password: e.target.value })} required />
-          </div>
-          <div class="form-group">
-            <label>Role</label>
-            <select value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value })}>
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <button type="submit" class="btn btn-primary" disabled={saving}>{saving ? 'Inviting...' : 'Invite'}</button>
-        </form>
-      </Modal>
-      <Modal open={!!resetTarget} onClose={() => setResetTarget(null)} title="Reset Password">
-        <p class="text-muted" style="margin-bottom: 1rem;">
-          Set a temporary password for <strong>{resetTarget?.email}</strong>. They will be required to change it at next login. Share it with them securely.
-        </p>
-        <form onSubmit={resetMemberPassword}>
-          <div class="form-group">
-            <label>Temporary Password</label>
-            <input type="password" value={resetPassword} onInput={e => setResetPassword(e.target.value)} required />
-          </div>
-          <button type="submit" class="btn btn-primary" disabled={saving}>{saving ? 'Resetting...' : 'Reset Password'}</button>
-        </form>
-      </Modal>
-      <Modal open={showTransfer} onClose={() => setShowTransfer(false)} title="Transfer Ownership">
-        <p class="text-muted" style="margin-bottom: 1rem;">Select an admin to become the new owner. You will be demoted to admin.</p>
-        <form onSubmit={transferOwnership}>
-          <div class="form-group">
-            <label>New Owner</label>
-            <select name="target" required>
-              <option value="">Select admin...</option>
-              {admins.map(a => <option key={a.id} value={a.id}>{a.email}</option>)}
-            </select>
-          </div>
-          <button type="submit" class="btn btn-primary btn-danger" disabled={saving}>{saving ? 'Transferring...' : 'Transfer Ownership'}</button>
-        </form>
-      </Modal>
-    </div>
-  );
-}
-
-/* ─── Billing ─── */
-function BillingTab() {
-  const [billing, setBilling] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [billingEmail, setBillingEmail] = useState('');
-  const [saving, setSaving] = useState(false);
-  const { toasts, toast } = useToast();
-  const role = currentUser.value?.role;
-  const isOwnerOrAdmin = role === 'owner' || role === 'admin';
-
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await get('/billing');
-      setBilling(data);
-      setBillingEmail(data.billing_email || '');
-    } catch (_) {}
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  async function upgrade(plan) {
-    setSaving(true);
-    try {
-      const res = await post('/billing/checkout', plan ? { plan } : {});
-      if (res.url && (res.url.startsWith('https://') || res.url.startsWith('http://'))) {
-        window.location.href = res.url;
-      }
-    } catch (err) {
-      toast(err.message || 'Failed to start checkout', 'error');
-    }
-    setSaving(false);
-  }
-
-  async function openPortal() {
-    setSaving(true);
-    try {
-      const res = await post('/billing/portal', {});
-      if (res.url) window.location.href = res.url;
-    } catch (err) {
-      toast(err.message || 'Failed to open portal', 'error');
-    }
-    setSaving(false);
-  }
-
-  async function toggleEnterprise() {
-    setSaving(true);
-    try {
-      if (billing.has_enterprise) {
-        await del('/billing/enterprise');
-        toast('Enterprise removed');
-      } else {
-        await post('/billing/enterprise', {});
-        toast('Enterprise added');
-      }
-      load();
-    } catch (err) {
-      toast(err.message || 'Failed to update enterprise', 'error');
-    }
-    setSaving(false);
-  }
-
-  async function saveBillingEmail(e) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await patch('/billing', { billing_email: billingEmail });
-      toast('Billing email updated');
-    } catch (err) {
-      toast(err.message || 'Failed to update', 'error');
-    }
-    setSaving(false);
-  }
-
-  if (currentOrg.value?.plan === 'promo') {
-    return (
-      <div>
-        <ToastContainer toasts={toasts} />
-        <div class="card">
-          <div class="section-header">
-            <h3>Promotional Account</h3>
-            <span class="badge" style="background: var(--color-info); color: white;">PROMO</span>
-          </div>
-          <p style="color: var(--color-text-secondary); margin: 8px 0 16px">
-            Your organization has a promotional account with full Enterprise features.
-          </p>
-          {appMeta.value?.promo_expires_at && (
-            <div class="form-group">
-              <label>Expires</label>
-              <p>{new Date(appMeta.value.promo_expires_at).toLocaleDateString()}</p>
-            </div>
-          )}
-          {appMeta.value?.promo_days_remaining != null && (
-            <div class="form-group">
-              <label>Days Remaining</label>
-              <p>{appMeta.value.promo_expiring ?
-                <span style="color: var(--color-warning); font-weight: 600">{appMeta.value.promo_days_remaining} days (grace period)</span> :
-                <span>{appMeta.value.promo_days_remaining} days</span>
-              }</p>
-            </div>
-          )}
-          <div style="margin-top: 16px; border-top: 1px solid var(--color-border); padding-top: 16px">
-            <p style="margin-bottom: 12px">Ready to upgrade to a paid plan?</p>
-            <div class="btn-group">
-              <button class="btn btn-primary" onClick={() => upgrade('pro')} disabled={saving}>Upgrade to Pro</button>
-              <button class="btn btn-outline" onClick={() => upgrade('enterprise')} disabled={saving}>Upgrade to Enterprise</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (loading) return <LoadingPage />;
-  if (!billing) return <ErrorMessage error="Failed to load billing" onRetry={load} />;
-
-  const isFree = billing.plan === 'free';
-
-  // Format price from cents (e.g. 1500 -> "$15")
-  function fmtPrice(cents, currency) {
-    if (!cents) return '';
-    const amt = (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
-    const sym = (currency || 'usd') === 'usd' ? '$' : currency?.toUpperCase() + ' ';
-    return `${sym}${amt}`;
-  }
-  const seatPrice = fmtPrice(billing.seat_price_cents, billing.seat_currency);
-  const entPrice = fmtPrice(billing.ent_price_cents, billing.ent_currency);
-  const seatLabel = seatPrice ? `${seatPrice}/seat/mo` : 'paid';
-  const entLabel = entPrice ? `${entPrice}/mo` : 'enterprise';
-
-  return (
-    <div>
-      <ToastContainer toasts={toasts} />
-      {billing.status === 'past_due' && (
-        <div class="payment-banner" style="margin-bottom: 1rem; border-radius: var(--radius-sm);">
-          Payment failed. Update your payment method to avoid service interruption.
-        </div>
-      )}
-      <h3>Billing</h3>
-      <Card>
-        <div class="form-group">
-          <label>Current Plan</label>
-          <p><strong>{isFree ? 'Free' : billing.has_enterprise ? 'Paid + Enterprise' : 'Paid'}</strong> {!isFree && seatPrice && <span class="text-muted">{billing.has_enterprise ? `(${seatLabel} + ${entLabel})` : `(${seatLabel})`}</span>}</p>
-        </div>
-        {isFree ? (
-          isOwnerOrAdmin && (
-            <button class="btn btn-primary" onClick={upgrade} disabled={saving}>
-              {saving ? 'Redirecting...' : `Upgrade to Paid${seatPrice ? ` (${seatLabel})` : ''}`}
-            </button>
-          )
-        ) : (
-          <>
-            <div class="form-group">
-              <label>Seats</label>
-              <p>{billing.seat_count || 0}</p>
-            </div>
-            {billing.has_enterprise && (
-              <div class="form-group">
-                <label>Enterprise</label>
-                <p>Enabled</p>
-              </div>
-            )}
-            {billing.period_end && !billing.period_end.startsWith('0001') && (
-              <div class="form-group">
-                <label>Current Period Ends</label>
-                <p>{formatTime(billing.period_end)}</p>
-              </div>
-            )}
-            {(billing.sms_used != null || billing.voice_used != null) && (
-              <div class="form-group">
-                <label>Usage This Period</label>
-                <p>
-                  {billing.sms_used != null && <span>SMS: {billing.sms_used} </span>}
-                  {billing.voice_used != null && <span>Voice: {billing.voice_used}</span>}
-                </p>
-              </div>
-            )}
-            {isOwnerOrAdmin && (
-              <div class="btn-group" style="margin-top: 0.5rem;">
-                <button class="btn btn-primary" onClick={openPortal} disabled={saving}>Manage Subscription</button>
-                <button class="btn btn-sm" onClick={toggleEnterprise} disabled={saving}>
-                  {billing.has_enterprise ? 'Remove Enterprise' : `Add Enterprise${entPrice ? ` (${entLabel})` : ''}`}
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </Card>
-      {!isFree && (
-        <Card class="mt-1" style="margin-top: 1rem;">
-          <h4>Billing Email</h4>
-          <form onSubmit={saveBillingEmail}>
-            <div class="form-group">
-              <label>Email</label>
-              <input type="email" value={billingEmail} onInput={e => setBillingEmail(e.target.value)} placeholder="billing@company.com" />
-            </div>
-            <button type="submit" class="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
-          </form>
-        </Card>
-      )}
     </div>
   );
 }
@@ -2294,100 +1879,6 @@ function DataTab() {
   );
 }
 
-/* ─── Org Profile ─── */
-function OrgTab() {
-  const org = currentOrg.value;
-  const [form, setForm] = useState({ name: org?.name || '', slug: org?.slug || '', oncall_display: org?.oncall_display || 'email' });
-  const [saving, setSaving] = useState(false);
-  const [orgSettings, setOrgSettings] = useState({});
-  const [settingsLoading, setSettingsLoading] = useState(true);
-  const { toasts, toast } = useToast();
-
-  useEffect(() => {
-    // Best-effort: the org form renders regardless, and the settings section
-    // has its own loading spinner. A failure here just shows default toggles.
-    get('/org/settings').then(data => {
-      setOrgSettings(data || {});
-    }).catch(() => {}).finally(() => setSettingsLoading(false));
-  }, []);
-
-  async function save(e) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await patch('/org', form);
-      currentOrg.value = { ...currentOrg.value, ...form };
-      toast('Organization saved');
-    } catch (err) {
-      toast(err.message || 'Failed to save organization', 'error');
-    }
-    setSaving(false);
-  }
-
-  async function toggleSetting(key) {
-    const current = orgSettings[key] === 'true';
-    const newVal = current ? 'false' : 'true';
-    try {
-      const updated = await put('/org/settings', { ...orgSettings, [key]: newVal });
-      setOrgSettings(updated || { ...orgSettings, [key]: newVal });
-    } catch (err) {
-      toast(err.message || 'Failed to update setting', 'error');
-    }
-  }
-
-  return (
-    <div>
-      <ToastContainer toasts={toasts} />
-      <h3>Organization</h3>
-      <Card>
-        <form onSubmit={save}>
-          <div class="form-group">
-            <label>Organization Name</label>
-            <input type="text" value={form.name} onInput={e => setForm({ ...form, name: e.target.value })} />
-          </div>
-          <div class="form-group">
-            <label>Slug</label>
-            <input type="text" value={form.slug} onInput={e => setForm({ ...form, slug: e.target.value })} />
-          </div>
-          <div class="form-group">
-            <label>On-Call Display</label>
-            <select value={form.oncall_display} onChange={e => setForm({ ...form, oncall_display: e.target.value })}>
-              <option value="email">Email</option>
-              <option value="name">Name</option>
-            </select>
-          </div>
-          <button type="submit" class="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </form>
-      </Card>
-
-      <h3 style="margin-top: 24px">Alert & Monitor Settings</h3>
-      <Card>
-        {settingsLoading ? (
-          <LoadingPage />
-        ) : (
-          <>
-            <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px">
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0">
-                <input type="checkbox" checked={orgSettings.mute_new_monitors === 'true'} onChange={() => toggleSetting('mute_new_monitors')} />
-                Auto-mute new monitors
-              </label>
-              <span class="text-muted" style="font-size: 0.8rem">New monitors start muted. Unmute them when ready to receive alerts.</span>
-            </div>
-            <div class="form-group" style="display: flex; align-items: center; gap: 12px">
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0">
-                <input type="checkbox" checked={orgSettings.incident_auto_resolve === 'true'} onChange={() => toggleSetting('incident_auto_resolve')} />
-                Auto-resolve incidents when all linked alerts recover
-              </label>
-            </div>
-          </>
-        )}
-      </Card>
-    </div>
-  );
-}
-
 /* ─── cloudevent_http accepted-replies editor ─── */
 
 // The config shape for accepted_replies is:
@@ -2510,7 +2001,39 @@ function enforceGates(cfg) {
   return { ...cfg, types: kept };
 }
 
-function AcceptedRepliesEditor({ value, onChange }) {
+// Lists the outbound CloudEvent types under the Event Types Filter box, with
+// a button per family that adds its pattern to the list.
+function EventTypePicker({ onAdd }) {
+  return (
+    <details class="event-type-picker">
+      <summary>Event types you can filter on</summary>
+      {CLOUDEVENT_TYPE_GROUPS.map(g => (
+        <div key={g.pattern} class="event-type-group">
+          <div class="event-type-group-head">
+            <span class="event-type-group-label">{g.label}</span>
+            <button type="button" class="btn btn-sm btn-secondary" onClick={() => onAdd(g.pattern)}
+              aria-label={'Add ' + g.pattern + ' to the filter'}>
+              Add <code>{g.pattern}</code>
+            </button>
+          </div>
+          <ul>
+            {g.types.map(t => <li key={t}><code>{t}</code></li>)}
+          </ul>
+        </div>
+      ))}
+    </details>
+  );
+}
+
+// Number inputs for reply caps. Whole numbers only: the API refuses
+// decimals, and validate() says so before save.
+function capValue(raw) {
+  if (raw === '') return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : raw;
+}
+
+function AcceptedRepliesEditor({ id, describedBy, invalid, value, onChange }) {
   const cfg = normalizeAcceptedReplies(value);
 
   const commit = (next) => onChange(enforceGates(next));
@@ -2540,7 +2063,9 @@ function AcceptedRepliesEditor({ value, onChange }) {
   };
 
   return (
-    <div class="accepted-replies-editor">
+    <div class="accepted-replies-editor" id={id} role="group" tabIndex={-1}
+      aria-labelledby={id ? id + '-label' : undefined} aria-describedby={describedBy}
+      aria-invalid={invalid ? 'true' : undefined}>
       {REPLY_GROUPS.map((g) => {
         const gatedByTrust = g.requires_trust && !cfg.trust_elevated;
         const gatedByDeregister = g.requires_deregister && !cfg.allow_deregister;
@@ -2589,18 +2114,19 @@ function AcceptedRepliesEditor({ value, onChange }) {
                         {r.cap_key && (
                           <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
                             <span class="text-muted" style="font-size:0.8em">Cap:</span>
-                            <input type="number" min="0"
+                            <input type="number" min="0" step="1" inputMode="numeric"
+                              aria-label={r.label + ' cap in ' + r.cap_label + ', 0 for the default of ' + r.cap_default}
                               value={cfg[r.cap_key] || ''}
                               placeholder={r.cap_default}
                               disabled={disabled}
-                              onInput={(e) => setCap(r.cap_key, e.target.value ? +e.target.value : 0)}
+                              onInput={(e) => setCap(r.cap_key, capValue(e.target.value))}
                               style="width:90px" />
                             <span class="text-muted" style="font-size:0.8em">{r.cap_label} (0 = default {r.cap_default})</span>
                           </div>
                         )}
                         {r.warning && checked && !disabled && (
-                          <div style="margin-top:6px;padding:8px 10px;border-radius:6px;background:#fff4e5;border:1px solid #f5a623;color:#8a4b00;font-weight:600;font-size:0.85em">
-                            ⚠ High blast radius: disabling a monitor stops all alerts from it. There is no automatic re-enable.
+                          <div class="reply-blast-warning" role="note">
+                            High blast radius: disabling a monitor stops all alerts from it. There is no automatic re-enable.
                           </div>
                         )}
                       </span>
@@ -2616,9 +2142,9 @@ function AcceptedRepliesEditor({ value, onChange }) {
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
         <label style="display:flex;align-items:center;gap:6px">
           Rate limit:
-          <input type="number" min="0" value={cfg.rate_limit || ''}
+          <input type="number" min="0" step="1" inputMode="numeric" value={cfg.rate_limit || ''}
             placeholder="60"
-            onInput={(e) => commit({ ...cfg, rate_limit: e.target.value ? +e.target.value : 0 })}
+            onInput={(e) => commit({ ...cfg, rate_limit: capValue(e.target.value) })}
             style="width:80px" />
           <span class="text-muted" style="font-size:0.8em">replies / min per reply type (0 = default 60)</span>
         </label>

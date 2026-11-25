@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,12 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
-	"github.com/YipYap-run/YipYap-FOSS/internal/checker"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // MonitorChangeKind describes what happened to a monitor.
@@ -95,29 +92,25 @@ func (h *MonitorHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-fetch latest check status for all monitors (1 query).
+	// Latest check, recent checks and labels are each one batched query, so
+	// the query count does not grow with the number of monitors (mon-18).
 	ids := make([]string, len(monitors))
 	for i, m := range monitors {
 		ids[i] = m.ID
 	}
 	latestChecks, _ := h.store.Checks().GetLatestByMonitors(r.Context(), ids)
 
-	// Fetch last 20 checks per monitor for uptime bar and percentage.
-	recentChecksMap := make(map[string][]*domain.MonitorCheck, len(ids))
-	for _, id := range ids {
-		checks, err := h.store.Checks().ListByMonitor(r.Context(), id, store.CheckFilter{
-			ListParams: store.ListParams{Limit: 20},
-		})
-		if err == nil {
-			recentChecksMap[id] = checks
-		}
+	// Last 20 checks per monitor for the uptime bar and percentage.
+	recentChecksMap, err := h.store.Checks().ListRecentByMonitors(r.Context(), ids, 20)
+	if err != nil {
+		recentChecksMap = nil
 	}
 
-	// Batch-fetch labels for all monitors.
-	for _, m := range monitors {
-		labels, err := h.store.Monitors().GetLabels(r.Context(), m.ID)
-		if err == nil && len(labels) > 0 {
-			m.Labels = labels
+	if labelsByMonitor, err := h.store.Monitors().GetLabelsByMonitors(r.Context(), ids); err == nil {
+		for _, m := range monitors {
+			if labels := labelsByMonitor[m.ID]; len(labels) > 0 {
+				m.Labels = labels
+			}
 		}
 	}
 
@@ -202,69 +195,22 @@ func (h *MonitorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SSRF protection: reject monitors targeting private/internal IPs.
-	if m.Config != nil {
-		if err := validateMonitorTarget(m.Type, m.Config); err != nil {
-			errorResponse(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	// Reject dangerous URI schemes in runbook_url.
-	if err := validateRunbookURL(m.RunbookURL); err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Soft-validate ServiceID: if set on creation, it must reference a
-	// service in the caller's org. No-op in FOSS where the catalog is
-	// disabled (the helper returns true to bypass).
-	if m.ServiceID != "" {
-		if !serviceExistsInOrg(r.Context(), h.store, claims.OrgID, m.ServiceID) {
-			errorResponse(w, http.StatusBadRequest, "service_id does not reference a service in this org")
-			return
-		}
-	}
-
-	// Enforce tier limits.
 	org, err := h.store.Orgs().GetByID(r.Context(), claims.OrgID)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to get org")
 		return
 	}
-	minInterval := domain.MinCheckIntervalSeconds(org.Plan)
-	if m.IntervalSeconds == 0 {
-		m.IntervalSeconds = minInterval
-	}
-	if m.IntervalSeconds < minInterval {
-		errorResponse(w, http.StatusForbidden, fmt.Sprintf(
-			"minimum check interval for your plan is %ds. Upgrade for faster checks", minInterval))
+
+	// Same checks and server-side fields as bulk import.
+	if err := prepareNewMonitor(r.Context(), h.store, org, &m, time.Now().UTC().Truncate(time.Second)); err != nil {
+		writeMonitorPrepareError(w, err)
 		return
 	}
 
 	// Monitor limit check (plan-aware).
-	if err := checkMonitorLimit(r.Context(), h.store, claims.OrgID, org); err != nil {
+	if err := checkMonitorLimitN(r.Context(), h.store, claims.OrgID, org, 1); err != nil {
 		errorResponse(w, http.StatusForbidden, err.Error())
 		return
-	}
-
-	now := time.Now().UTC().Truncate(time.Second)
-	m.ID = uuid.New().String()
-	m.OrgID = claims.OrgID
-	m.CreatedAt = now
-	m.UpdatedAt = now
-
-	if m.Type == domain.MonitorHeartbeat {
-		b := make([]byte, 16)
-		_, _ = rand.Read(b)
-		m.HeartbeatToken = hex.EncodeToString(b)
-	}
-
-	// Check if org has mute_new_monitors enabled.
-	if sp, ok := h.store.(store.OrgSettingsProvider); ok {
-		if val, err := sp.OrgSettings().Get(r.Context(), claims.OrgID, "mute_new_monitors"); err == nil && val == "true" {
-			m.Muted = true
-		}
 	}
 
 	if err := h.store.Monitors().Create(r.Context(), &m); err != nil {
@@ -288,88 +234,61 @@ func (h *MonitorHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req domain.Monitor
+	var req monitorPatch
 	if err := decodeBody(r, &req); err != nil {
 		errorResponse(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	// SSRF protection: reject monitors targeting private/internal IPs.
-	if req.Config != nil {
-		if err := validateMonitorTarget(m.Type, req.Config); err != nil {
-			errorResponse(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	if err := validateRunbookURL(req.RunbookURL); err != nil {
+	if err := req.validate(m); err != nil {
 		errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if req.Name != "" {
-		m.Name = req.Name
-	}
-	if req.Config != nil {
-		m.Config = req.Config
-	}
-	if req.IntervalSeconds > 0 {
-		org, err := h.store.Orgs().GetByID(r.Context(), claims.OrgID)
-		if err == nil {
-			minInterval := domain.MinCheckIntervalSeconds(org.Plan)
-			if req.IntervalSeconds < minInterval {
-				errorResponse(w, http.StatusForbidden, fmt.Sprintf(
-					"minimum check interval for your plan is %ds. Upgrade for faster checks", minInterval))
-				return
-			}
-		}
-		m.IntervalSeconds = req.IntervalSeconds
-	}
-	if req.TimeoutSeconds > 0 {
-		m.TimeoutSeconds = req.TimeoutSeconds
-	}
-	if req.IntegrationKey != "" {
-		m.IntegrationKey = req.IntegrationKey
-	}
-	// The fields below are unconditionally copied (empty string / zero
-	// value clears them). Earlier revisions only copied them on a
-	// non-empty value, which meant the form's "Service: None" or
-	// cleared-runbook-URL choices silently no-op'd at the API layer,
-	// the values appeared to revert in the UI on next load.
-	m.EscalationPolicyID = req.EscalationPolicyID
-	m.GroupID = req.GroupID
-	m.RunbookURL = req.RunbookURL
-	m.ServiceID = req.ServiceID
-	m.DownSeverity = req.DownSeverity
-	m.DegradedSeverity = req.DegradedSeverity
-	m.LatencyWarningMS = req.LatencyWarningMS
-	m.LatencyCriticalMS = req.LatencyCriticalMS
-	m.Enabled = req.Enabled
-	if len(req.Regions) > 0 {
-		m.Regions = req.Regions
-	}
-	// Description is always set (empty string clears it).
-	m.Description = req.Description
-	m.AutoResolve = req.AutoResolve
-	m.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-
-	// Soft-validate ServiceID: if non-empty, ensure it points to a
-	// service in the caller's org. Available only in non-FOSS builds
-	// where the catalog exists; FOSS no-ops via the build-tagged helper.
-	if m.ServiceID != "" {
-		if !serviceExistsInOrg(r.Context(), h.store, claims.OrgID, m.ServiceID) {
-			errorResponse(w, http.StatusBadRequest, "service_id does not reference a service in this org")
+	// SSRF protection: reject monitors targeting private/internal IPs.
+	if req.hasConfig() {
+		if err := validateMonitorTarget(m.Type, req.Config); err != nil {
+			writeMonitorTargetError(w, err)
 			return
 		}
 	}
+	if req.RunbookURL != nil {
+		if err := validateRunbookURL(*req.RunbookURL); err != nil {
+			errorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if req.IntervalSeconds != nil {
+		org, err := h.store.Orgs().GetByID(r.Context(), claims.OrgID)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, "failed to get org")
+			return
+		}
+		if err := checkIntervalFloor(org, *req.IntervalSeconds); err != nil {
+			errorResponse(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
+
+	// Validate only the references this request changes, so a monitor
+	// whose policy or group was since deleted can still be edited.
+	// Escalation policy, group and service must belong to the caller's
+	// org (the service check is a no-op in FOSS).
+	changed := req.changedRefs(m)
+	if err := validateMonitorRefs(r.Context(), h.store, claims.OrgID, &changed); err != nil {
+		errorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	req.apply(m)
+	m.UpdatedAt = time.Now().UTC().Truncate(time.Second)
 
 	if err := h.store.Monitors().Update(r.Context(), m); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to update monitor")
 		return
 	}
 	if req.Labels != nil {
-		_ = h.store.Monitors().SetLabels(r.Context(), m.ID, req.Labels)
-		m.Labels = req.Labels
+		_ = h.store.Monitors().SetLabels(r.Context(), m.ID, *req.Labels)
+		m.Labels = *req.Labels
 	}
 	h.notifyChange(MonitorUpdated, m.ID)
 	jsonResponse(w, http.StatusOK, m)
@@ -781,7 +700,10 @@ func (h *MonitorHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := r.URL.Query().Get("token")
-	if subtle.ConstantTimeCompare([]byte(token), []byte(m.HeartbeatToken)) != 1 {
+	// An empty stored token must never authenticate: ConstantTimeCompare
+	// of two empty strings returns 1.
+	if m.HeartbeatToken == "" || token == "" ||
+		subtle.ConstantTimeCompare([]byte(token), []byte(m.HeartbeatToken)) != 1 {
 		errorResponse(w, http.StatusUnauthorized, "invalid heartbeat token")
 		return
 	}
@@ -814,50 +736,6 @@ func (h *MonitorHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// validateMonitorTarget performs SSRF validation for the monitor's target host(s)
-// based on the monitor type. Returns an error if the target is private/internal.
-func validateMonitorTarget(monitorType domain.MonitorType, config json.RawMessage) error {
-	switch monitorType {
-	case domain.MonitorHTTP:
-		var cfg struct {
-			URL string `json:"url"`
-		}
-		if json.Unmarshal(config, &cfg) == nil && cfg.URL != "" {
-			return checker.ValidateHTTPTarget(cfg.URL)
-		}
-	case domain.MonitorTCP:
-		var cfg struct {
-			Host string `json:"host"`
-		}
-		if json.Unmarshal(config, &cfg) == nil && cfg.Host != "" {
-			return checker.ValidateTarget(cfg.Host)
-		}
-	case domain.MonitorPing:
-		var cfg struct {
-			Host string `json:"host"`
-		}
-		if json.Unmarshal(config, &cfg) == nil && cfg.Host != "" {
-			return checker.ValidateTarget(cfg.Host)
-		}
-	case domain.MonitorDNS:
-		var cfg struct {
-			Hostname   string `json:"hostname"`
-			Nameserver string `json:"nameserver,omitempty"`
-		}
-		if json.Unmarshal(config, &cfg) == nil {
-			if cfg.Nameserver != "" {
-				if err := checker.ValidateTarget(cfg.Nameserver); err != nil {
-					return err
-				}
-			}
-			if cfg.Hostname != "" {
-				return checker.ValidateTarget(cfg.Hostname)
-			}
-		}
-	}
-	return nil
 }
 
 // validateRunbookURL rejects dangerous URI schemes (javascript:, data:, etc.)

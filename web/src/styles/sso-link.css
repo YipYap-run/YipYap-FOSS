@@ -1,0 +1,149 @@
+/* SSO account linking: sign-in notice, link banner, Settings list. */
+
+:root {
+  --sso-link-error-text: #991b1b;
+  --sso-link-ok-bg: #ecfdf5;
+  --sso-link-ok-text: #064e3b;
+  --sso-link-ok-border: #10b981;
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --sso-link-error-text: #fecaca;
+  --sso-link-ok-bg: #064e3b;
+  --sso-link-ok-text: #d1fae5;
+  --sso-link-ok-border: #059669;
+}
+
+/* Sign-in page notice */
+.sso-link-notice {
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.sso-link-notice p + p {
+  margin-top: 4px;
+}
+
+/* In-app banner */
+.sso-link-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.sso-link-banner-ok {
+  background: var(--sso-link-ok-bg);
+  color: var(--sso-link-ok-text);
+  border-color: var(--sso-link-ok-border);
+}
+
+.sso-link-banner a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.sso-link-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.sso-link-title {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.sso-link-error {
+  margin-top: 6px;
+  color: var(--sso-link-error-text);
+  font-weight: 600;
+}
+
+.sso-link-error-text {
+  color: var(--sso-link-error-text);
+  font-weight: 600;
+  flex: 1 1 320px;
+}
+
+.sso-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 24px minimum target (WCAG 2.2 target size). */
+.sso-link-btn {
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.8125rem;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.sso-link-btn:focus-visible,
+.sso-link-banner a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .sso-link-actions {
+    width: 100%;
+  }
+
+  .sso-link-actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* Settings, Security: linked identities */
+.sso-links-list .settings-item {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sso-links-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+/* Focus moves here after an unlink; the heading is not a control. */
+#sso-links-heading:focus {
+  outline: none;
+}
+
+#sso-callback-title:focus {
+  outline: none;
+}
+
+.sso-callback-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

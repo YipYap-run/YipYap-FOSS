@@ -209,6 +209,7 @@ func TestValidateControlPlaneHTTPTarget_OptInAllowsPrivate(t *testing.T) {
 // stdlib only unwraps the IPv4-MAPPED form via To4(). An attacker could
 // phrase the EC2 metadata IP as ::169.254.169.254 to bypass SSRF gating.
 func TestValidateControlPlaneHTTPTarget_BlocksIPv4CompatV6(t *testing.T) {
+	withStrictTargets(t)
 	origCP := AllowPrivateControlPlaneTargets
 	AllowPrivateControlPlaneTargets = false
 	defer func() { AllowPrivateControlPlaneTargets = origCP }()

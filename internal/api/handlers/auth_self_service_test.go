@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
@@ -110,6 +111,27 @@ func TestChangePassword(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("wrong password: expected 401, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("rejects a short or unchanged new password", func(t *testing.T) {
+		token3 := selfServiceRegisterAndGetToken(t, ts, "PwOrg3", "pw3@test.com", "correctpass")
+		for _, newPw := range []string{"short", "correctpass"} {
+			body, _ := json.Marshal(map[string]string{
+				"current_password": "correctpass",
+				"new_password":     newPw,
+			})
+			req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v1/auth/password", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token3)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("new password %q: expected 400, got %d", newPw, resp.StatusCode)
+			}
 		}
 	})
 }
@@ -233,15 +255,13 @@ func loginAndGetToken(t *testing.T, ts *httptest.Server, email, password string)
 	return result.Token
 }
 
-// createMember creates a user via POST /api/v1/users and returns the created user.
+// createMember invites a member (no SMTP, so the response carries the
+// accept link), accepts the invite with the given password and returns the
+// new user.
 func createMember(t *testing.T, ts *httptest.Server, ownerToken, email, password string) *domain.User {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{
-		"email":    email,
-		"password": password,
-		"role":     "member",
-	})
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/users", bytes.NewReader(body))
+	body, _ := json.Marshal(map[string]string{"email": email, "role": "member"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/users/invites", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+ownerToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -250,13 +270,48 @@ func createMember(t *testing.T, ts *httptest.Server, ownerToken, email, password
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create member: expected 201, got %d", resp.StatusCode)
+		t.Fatalf("invite member: expected 201, got %d", resp.StatusCode)
 	}
-	var user domain.User
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+	var invited struct {
+		AcceptURL string `json:"accept_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&invited); err != nil {
 		t.Fatal(err)
 	}
-	return &user
+	_, token, ok := strings.Cut(invited.AcceptURL, "token=")
+	if !ok {
+		t.Fatalf("no accept link in invite response: %q", invited.AcceptURL)
+	}
+	acceptBody, _ := json.Marshal(map[string]string{"token": token, "password": password})
+	resp2, err := http.Post(ts.URL+"/api/v1/invites/accept", "application/json", bytes.NewReader(acceptBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp2.Body.Close() }()
+	if resp2.StatusCode != http.StatusCreated {
+		t.Fatalf("accept invite: expected 201, got %d", resp2.StatusCode)
+	}
+	loginToken := loginAndGetToken(t, ts, email, password)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer "+loginToken)
+	resp3, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp3.Body.Close() }()
+	var list struct {
+		Users []domain.User `json:"users"`
+	}
+	if err := json.NewDecoder(resp3.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	for i := range list.Users {
+		if list.Users[i].Email == email {
+			return &list.Users[i]
+		}
+	}
+	t.Fatalf("member %s not listed after accepting the invite", email)
+	return nil
 }
 
 func TestAdminResetPassword(t *testing.T) {

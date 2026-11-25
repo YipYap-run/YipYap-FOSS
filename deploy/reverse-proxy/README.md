@@ -27,6 +27,24 @@ on the YipYap side (see [Configuration](https://github.com/YipYap-run/YipYap-FOS
 to the CIDR of your proxy network, or real client IPs will be reported as
 the proxy address.
 
+How YipYap picks the client IP when the peer is a trusted proxy:
+
+- `CF-Connecting-IP` is used only when the peer is inside Cloudflare's
+  published ranges (enable them with the `cloudflare` keyword). From any
+  other proxy it is ignored, so a client cannot spoof it through Caddy,
+  nginx or Traefik. The examples also strip it.
+- `X-Forwarded-For` is read from the right. Entries inside
+  `YIPYAP_TRUSTED_PROXY_CIDRS` are skipped, and the first address outside
+  that list is the client. Anything to its left is client-controlled and
+  ignored.
+- `X-Real-IP` is used only when there is no `X-Forwarded-For` header.
+- A value that is not a plain IP address is rejected, and the proxy's own
+  address is used instead.
+
+Keep `YIPYAP_TRUSTED_PROXY_CIDRS` as narrow as possible. Trusting a whole
+private range (for example `172.16.0.0/12` on a docker host) lets any
+container on that range forge client IPs and bypass per-IP rate limits.
+
 ## TLS certificates
 
 The examples assume certificates already exist at the paths shown. For

@@ -36,9 +36,11 @@ func (c *DNSChecker) Check(ctx context.Context, config json.RawMessage) (*Result
 		PreferGo: true,
 	}
 	if cfg.Nameserver != "" {
+		// The nameserver is a dialed target, so it goes through the same
+		// resolve-once guard as HTTP and TCP checks (mon-4).
+		nameserver := net.JoinHostPort(cfg.Nameserver, "53")
 		resolver.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{}
-			return d.DialContext(ctx, "udp", cfg.Nameserver+":53")
+			return monitorDialContext(ctx, network, nameserver)
 		}
 	}
 

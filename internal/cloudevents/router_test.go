@@ -256,7 +256,7 @@ func TestRouter_JobMessageContainsFullEnvelope(t *testing.T) {
 	b := bus.NewChannel()
 	defer func() { _ = b.Close() }()
 
-	seedChannel(t, s, org.ID, "cloudevent_http", "sink",
+	sink := seedChannel(t, s, org.ID, "cloudevent_http", "sink",
 		`{"sink_url":"https://a.example/"}`, true)
 
 	cap := &jobCapture{}
@@ -290,8 +290,8 @@ func TestRouter_JobMessageContainsFullEnvelope(t *testing.T) {
 		t.Errorf("roundtrip Type = %q, want %q", roundtrip.Type(), wantType)
 	}
 
-	// DedupeKey is org-prefixed with the event ID.
-	wantDedupe := org.ID + "-" + wantID
+	// DedupeKey is per org, channel and event.
+	wantDedupe := "ce:" + org.ID + ":" + sink.ID + ":" + wantID
 	if job.DedupeKey != wantDedupe {
 		t.Errorf("job.DedupeKey = %q, want %q", job.DedupeKey, wantDedupe)
 	}

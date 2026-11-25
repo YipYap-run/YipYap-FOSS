@@ -7,6 +7,6 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-func userHasMFA(_ context.Context, _ store.Store, _ *domain.User) (bool, []string) {
-	return false, nil
+func userHasMFA(_ context.Context, _ store.Store, _ *domain.User) (bool, []string, error) {
+	return false, nil, nil
 }

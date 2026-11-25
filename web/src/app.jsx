@@ -1,17 +1,22 @@
 import { useEffect } from 'preact/hooks';
 import Router from 'preact-router';
-import { authLoading, isLoggedIn, loadUser, appMeta } from './state/auth';
+import { authLoading, isLoggedIn, loadUser, appMeta, currentUser } from './state/auth';
 import { currentPath } from './state/route';
 import { clearUpgradePrompt } from './state/upgrade';
 import { Layout } from './components/layout';
+import { MFAEnrollmentScreen, SecondFactorChallengePage } from './edition/mfa-ui';
+import { mfaBlocked, mfaEnrollmentHold } from './edition/mfa';
+import { passwordChangeRequired } from './state/session';
+import { PasswordChangeScreen } from './components/password-change-required';
 import { LoginPage } from './pages/auth/login';
 import { RegisterPage } from './pages/auth/register';
 import { VerifyEmailPage } from './pages/auth/verify-email';
 import { VerifyEmailSentPage } from './pages/auth/verify-email-sent';
 import { SSOCallbackPage } from './pages/auth/sso-callback';
-import MFAChallenge from './pages/auth/mfa-challenge';
 import { ForgotPasswordPage } from './pages/auth/forgot-password';
 import { ResetPasswordPage } from './pages/auth/reset-password';
+import { ConfirmEmailChangePage, CancelEmailChangePage } from './pages/auth/email-change';
+import { AcceptInvitePage } from './pages/auth/accept-invite';
 import { AccountRecoverPage } from './pages/account/recover';
 import { ConfirmDeletePage } from './pages/account/confirm-delete';
 import { ConfirmRecoverPage } from './pages/account/confirm-recover';
@@ -38,6 +43,15 @@ function AuthGuard({ children }) {
   if (!isLoggedIn.value) {
     if (typeof window !== 'undefined') window.location.href = '/login';
     return null;
+  }
+  // An admin reset the password. The server checks this before org MFA, so
+  // it comes first here too.
+  if (passwordChangeRequired.value || currentUser.value?.force_password_change) {
+    return <PasswordChangeScreen />;
+  }
+  // Org MFA grace period is over: only MFA setup and sign-out are allowed.
+  if (mfaBlocked.value || mfaEnrollmentHold.value) {
+    return <MFAEnrollmentScreen />;
   }
   return <Layout>{children}</Layout>;
 }
@@ -70,9 +84,14 @@ export function App() {
       <VerifyEmailPage path="/verify-email" />
       <VerifyEmailSentPage path="/verify-email-sent" />
       <SSOCallbackPage path="/auth/sso-callback" />
-      <MFAChallenge path="/auth/mfa-challenge" />
+      <SecondFactorChallengePage path="/auth/mfa-challenge" />
       <ForgotPasswordPage path="/forgot-password" />
       <ResetPasswordPage path="/reset-password" />
+      <ConfirmEmailChangePage path="/confirm-email-change" />
+      <CancelEmailChangePage path="/cancel-email-change" />
+      <AcceptInvitePage path="/invite/accept" />
+      {/* Older invite links used /accept-invite. */}
+      <AcceptInvitePage path="/accept-invite" />
       <AccountRecoverPage path="/account/recover" />
       <ConfirmDeletePage path="/account/confirm-delete" />
       <ConfirmRecoverPage path="/account/confirm-recover" />

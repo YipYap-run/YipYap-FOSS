@@ -12,13 +12,13 @@ import (
 
 // mockNotifier implements Notifier for testing.
 type mockNotifier struct {
-	channel    string
-	maxConc    int
-	sendFn     func(ctx context.Context, job domain.NotificationJob) (string, error)
-	sentCount  atomic.Int64
+	channel   string
+	maxConc   int
+	sendFn    func(ctx context.Context, job domain.NotificationJob) (string, error)
+	sentCount atomic.Int64
 }
 
-func (m *mockNotifier) Channel() string    { return m.channel }
+func (m *mockNotifier) Channel() string     { return m.channel }
 func (m *mockNotifier) MaxConcurrency() int { return m.maxConc }
 func (m *mockNotifier) Send(ctx context.Context, job domain.NotificationJob) (string, error) {
 	m.sentCount.Add(1)
@@ -56,8 +56,12 @@ func TestWorkerPool_RetryThenSucceed(t *testing.T) {
 	defer cancel()
 
 	pool.Start(ctx)
-	pool.Submit(domain.NotificationJob{ID: "j1", Channel: "test"})
-	pool.Stop()
+	if err := pool.Submit(domain.NotificationJob{ID: "j1", Channel: "test"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	if attempts.Load() != int64(failTimes+1) {
 		t.Fatalf("expected %d attempts, got %d", failTimes+1, attempts.Load())
@@ -95,8 +99,12 @@ func TestWorkerPool_DeadLetter(t *testing.T) {
 	defer cancel()
 
 	pool.Start(ctx)
-	pool.Submit(domain.NotificationJob{ID: "j-dead", Channel: "test"})
-	pool.Stop()
+	if err := pool.Submit(domain.NotificationJob{ID: "j-dead", Channel: "test"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	if deadLetterCalled.Load() != 1 {
 		t.Fatalf("expected dead letter to be called once, got %d", deadLetterCalled.Load())

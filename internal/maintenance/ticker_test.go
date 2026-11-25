@@ -109,23 +109,27 @@ func TestTicker_EmitsStartedOnSchedule(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	mw := &domain.MaintenanceWindow{
-		ID: uuid.New().String(), OrgID: org.ID, Name: "now",
-		StartAt: now.Add(-1 * time.Minute), EndAt: now.Add(1 * time.Hour),
+		ID: uuid.New().String(), OrgID: org.ID, Name: "soon",
+		StartAt: now.Add(1 * time.Minute), EndAt: now.Add(1 * time.Hour),
 		RecurrenceType: "none", DaysOfWeek: "[]", CreatedAt: now,
 	}
 	if err := s.MaintenanceWindows().Create(context.Background(), mw); err != nil {
 		t.Fatal(err)
 	}
 
-	// First tick: window is active, should emit started.
-	tk.poll(context.Background(), now)
-	if got := em.snapshot(); len(got) != 1 || got[0].Type != types.TypeMaintenanceStartedV1 {
-		t.Fatalf("expected 1 started emit, got %+v", got)
+	tk.prime(context.Background(), now)
+	if got := em.snapshot(); len(got) != 0 {
+		t.Fatalf("prime should not emit, got %+v", got)
 	}
 
-	// Steady-state tick: nothing new.
+	tk.poll(context.Background(), now.Add(2*time.Minute))
+	got := em.snapshot()
+	if len(got) != 1 || got[0].Type != types.TypeMaintenanceStartedV1 {
+		t.Fatalf("expected 1 started on schedule, got %+v", got)
+	}
+
 	em.reset()
-	tk.poll(context.Background(), now.Add(1*time.Second))
+	tk.poll(context.Background(), now.Add(3*time.Minute))
 	if got := em.snapshot(); len(got) != 0 {
 		t.Fatalf("expected 0 emits on steady-state tick, got %+v", got)
 	}
@@ -146,12 +150,10 @@ func TestTicker_EmitsEndedOnSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Currently active.
-	tk.poll(context.Background(), now)
-	if got := em.snapshot(); len(got) != 1 || got[0].Type != types.TypeMaintenanceStartedV1 {
-		t.Fatalf("expected 1 started, got %+v", got)
+	tk.prime(context.Background(), now)
+	if got := em.snapshot(); len(got) != 0 {
+		t.Fatalf("prime should not emit, got %+v", got)
 	}
-	em.reset()
 
 	// Advance past EndAt.
 	tk.poll(context.Background(), now.Add(10*time.Minute))
@@ -183,7 +185,7 @@ func TestTicker_EmitsEndedEarly_WhenDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tk.poll(context.Background(), now)
+	tk.prime(context.Background(), now)
 	em.reset()
 
 	// Delete row out from under the ticker (simulate a direct-DB delete or a
@@ -220,6 +222,11 @@ func TestTicker_Recurring(t *testing.T) {
 	}
 	if err := s.MaintenanceWindows().Create(context.Background(), mw); err != nil {
 		t.Fatal(err)
+	}
+
+	tk.prime(context.Background(), base.Add(-1*time.Minute))
+	if got := em.snapshot(); len(got) != 0 {
+		t.Fatalf("prime should not emit, got %+v", got)
 	}
 
 	// During today's active hour: started.
@@ -264,6 +271,7 @@ func TestTicker_StartedPayloadShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	tk.prime(context.Background(), now.Add(-2*time.Minute))
 	tk.poll(context.Background(), now)
 	got := em.snapshot()
 	if len(got) != 1 {
@@ -283,5 +291,39 @@ func TestTicker_StartedPayloadShape(t *testing.T) {
 	// Ensure the payload marshals cleanly (sanity check for JSON shape).
 	if _, err := json.Marshal(d); err != nil {
 		t.Fatalf("marshal: %v", err)
+	}
+}
+
+func TestTicker_RestartDoesNotDuplicateStarted(t *testing.T) {
+	s, org := newTestStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	mw := &domain.MaintenanceWindow{
+		ID: uuid.New().String(), OrgID: org.ID, Name: "ongoing",
+		StartAt: now.Add(-10 * time.Minute), EndAt: now.Add(1 * time.Hour),
+		RecurrenceType: "none", DaysOfWeek: "[]", CreatedAt: now,
+	}
+	if err := s.MaintenanceWindows().Create(context.Background(), mw); err != nil {
+		t.Fatal(err)
+	}
+
+	first := &fakeEmitter{}
+	NewTicker(s, first, time.Second).prime(context.Background(), now)
+	if got := first.snapshot(); len(got) != 0 {
+		t.Fatalf("first boot emitted %+v", got)
+	}
+
+	second := &fakeEmitter{}
+	restarted := NewTicker(s, second, time.Second)
+	restarted.prime(context.Background(), now.Add(time.Minute))
+	restarted.poll(context.Background(), now.Add(2*time.Minute))
+	if got := second.snapshot(); len(got) != 0 {
+		t.Fatalf("restart emitted %+v", got)
+	}
+
+	restarted.poll(context.Background(), now.Add(2*time.Hour))
+	got := second.snapshot()
+	if len(got) != 1 || got[0].Type != types.TypeMaintenanceEndedV1 {
+		t.Fatalf("expected 1 ended after restart, got %+v", got)
 	}
 }

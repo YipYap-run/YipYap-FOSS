@@ -2,6 +2,19 @@ package bus
 
 import "context"
 
+// AlertBroadcastPrefix is prepended to an alert subject to form the core
+// broadcast subject that PublishAlert also publishes on. It must stay outside
+// every JetStream stream's subjects: a stream captures plain core publishes on
+// its subjects too, which stored each alert twice before. (core-16)
+const AlertBroadcastPrefix = "ws."
+
+// AlertBroadcastSubject returns the broadcast subject for an alert subject,
+// e.g. "alert.trigger" becomes "ws.alert.trigger". Broadcast listeners (the
+// WebSocket hub) subscribe here instead of on the durable subject.
+func AlertBroadcastSubject(subject string) string {
+	return AlertBroadcastPrefix + subject
+}
+
 type subscription struct {
 	handler Handler
 	queue   string // empty for broadcast subscribers
@@ -32,10 +45,11 @@ type Bus interface {
 	PublishDurable(ctx context.Context, subject string, data []byte, msgID string) error
 
 	// PublishAlert publishes an alert lifecycle event (alert.trigger,
-	// alert.recover, alert.ack) to both the durable stream (for the
-	// escalation engine's pull consumer) and the core broadcast channel
-	// (for the WebSocket hub). On non-durable buses this collapses to a
-	// single publish so embedded deployments do not deliver it twice.
+	// alert.recover, alert.ack) on its subject for the escalation engine's
+	// pull consumer, and once more on AlertBroadcastSubject(subject) for
+	// broadcast listeners such as the WebSocket hub. The broadcast subject
+	// sits outside the ALERTS stream, so a durable bus stores exactly one
+	// copy of each event. (core-16)
 	PublishAlert(ctx context.Context, subject string, data []byte, msgID string) error
 
 	// PullSubscribe creates a durable pull-based consumer on the given

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -40,6 +42,119 @@ func validateRecurrenceFields(recType, daysOfWeek string, dayOfMonth int) error 
 		}
 	}
 	return nil
+}
+
+// parseRecurrenceEnd parses an optional recurrence_end_at value. An empty
+// string clears it.
+func parseRecurrenceEnd(v string) (*time.Time, error) {
+	if v == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return nil, fmt.Errorf("invalid recurrence_end_at format")
+	}
+	return &t, nil
+}
+
+// windowTimes carries the time fields a create or update request may set.
+// The SPA sends wall-clock values (start_local, end_local,
+// recurrence_end_local) plus timezone and the server resolves them in that
+// zone. API clients may still send absolute RFC3339 start_at / end_at /
+// recurrence_end_at. A local value wins over its absolute counterpart.
+type windowTimes struct {
+	Timezone           *string    `json:"timezone"`
+	StartAt            *time.Time `json:"start_at"`
+	EndAt              *time.Time `json:"end_at"`
+	RecurrenceEndAt    *string    `json:"recurrence_end_at"`
+	StartLocal         *string    `json:"start_local"`
+	EndLocal           *string    `json:"end_local"`
+	RecurrenceEndLocal *string    `json:"recurrence_end_local"`
+}
+
+// apply resolves the request's times onto mw. Fields the request leaves out
+// keep their current values. Changing only the timezone keeps the stored
+// instants; send the local values too to keep the wall-clock times.
+func (wt *windowTimes) apply(mw *domain.MaintenanceWindow) error {
+	if wt.Timezone != nil {
+		loc, err := domain.LoadMaintenanceLocation(*wt.Timezone)
+		if err != nil {
+			return err
+		}
+		mw.Timezone = loc.String()
+	}
+	if mw.Timezone == "" {
+		mw.Timezone = domain.DefaultMaintenanceTimezone
+	}
+	loc := mw.Location()
+
+	if wt.StartLocal != nil && *wt.StartLocal != "" {
+		t, err := domain.ParseMaintenanceLocal(*wt.StartLocal, loc)
+		if err != nil {
+			return fmt.Errorf("start_local %v", err)
+		}
+		mw.StartAt = t
+	} else if wt.StartAt != nil {
+		mw.StartAt = wt.StartAt.UTC()
+	}
+	if wt.EndLocal != nil && *wt.EndLocal != "" {
+		t, err := domain.ParseMaintenanceLocal(*wt.EndLocal, loc)
+		if err != nil {
+			return fmt.Errorf("end_local %v", err)
+		}
+		mw.EndAt = t
+	} else if wt.EndAt != nil {
+		mw.EndAt = wt.EndAt.UTC()
+	}
+	switch {
+	case wt.RecurrenceEndLocal != nil:
+		if *wt.RecurrenceEndLocal == "" {
+			mw.RecurrenceEndAt = nil
+			break
+		}
+		t, err := domain.ParseMaintenanceLocal(*wt.RecurrenceEndLocal, loc)
+		if err != nil {
+			return fmt.Errorf("recurrence_end_local %v", err)
+		}
+		mw.RecurrenceEndAt = &t
+	case wt.RecurrenceEndAt != nil:
+		t, err := parseRecurrenceEnd(*wt.RecurrenceEndAt)
+		if err != nil {
+			return err
+		}
+		mw.RecurrenceEndAt = t
+	}
+	return nil
+}
+
+// Length limits match the settings form's maxlength attributes. They are
+// counted in characters so non-Latin names get the same room.
+const (
+	maxMaintenanceNameLen        = 200
+	maxMaintenanceDescriptionLen = 2000
+)
+
+// validateWindow checks the fields shared by create and update.
+func validateWindow(mw *domain.MaintenanceWindow) error {
+	if strings.TrimSpace(mw.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	if utf8.RuneCountInString(mw.Name) > maxMaintenanceNameLen {
+		return fmt.Errorf("name must be %d characters or fewer", maxMaintenanceNameLen)
+	}
+	if utf8.RuneCountInString(mw.Description) > maxMaintenanceDescriptionLen {
+		return fmt.Errorf("description must be %d characters or fewer", maxMaintenanceDescriptionLen)
+	}
+	if mw.StartAt.IsZero() || mw.EndAt.IsZero() {
+		return fmt.Errorf("start_at and end_at are required")
+	}
+	if !mw.EndAt.After(mw.StartAt) {
+		return fmt.Errorf("end_at must be after start_at")
+	}
+	if mw.RecurrenceEndAt != nil && mw.RecurrenceEndAt.Before(mw.StartAt) {
+		return fmt.Errorf("recurrence_end_at must not be before start_at")
+	}
+	return validateRecurrenceFields(mw.RecurrenceType, mw.DaysOfWeek, mw.DayOfMonth)
 }
 
 type MaintenanceHandler struct {
@@ -81,6 +196,17 @@ func scheduledEnd(mw *domain.MaintenanceWindow) time.Time {
 	return time.Time{}
 }
 
+// monitorInOrg reports whether monitorID is empty (an org-wide window) or
+// names a monitor owned by orgID. Callers return 404 otherwise so a foreign
+// monitor id is indistinguishable from a missing one.
+func (h *MaintenanceHandler) monitorInOrg(r *http.Request, monitorID, orgID string) bool {
+	if monitorID == "" {
+		return true
+	}
+	m, err := h.store.Monitors().GetByID(r.Context(), monitorID)
+	return err == nil && m != nil && m.OrgID == orgID
+}
+
 func (h *MaintenanceHandler) List(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r.Context())
 	params := paginationFromQuery(r)
@@ -109,24 +235,58 @@ func (h *MaintenanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *MaintenanceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r.Context())
-	var mw domain.MaintenanceWindow
-	if err := decodeBody(r, &mw); err != nil {
+	// Decode into a request struct rather than domain.MaintenanceWindow so
+	// recurrence_end_at can be "" or null (time.Time rejects ""), matching
+	// Update.
+	var req struct {
+		windowTimes
+		Name           string `json:"name"`
+		Description    string `json:"description"`
+		MonitorID      string `json:"monitor_id"`
+		Public         bool   `json:"public"`
+		SuppressAlerts *bool  `json:"suppress_alerts"`
+		RecurrenceType string `json:"recurrence_type"`
+		DaysOfWeek     string `json:"days_of_week"`
+		DayOfMonth     int    `json:"day_of_month"`
+	}
+	if err := decodeBody(r, &req); err != nil {
 		errorResponse(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	mw.ID = uuid.New().String()
-	mw.OrgID = claims.OrgID
-	mw.CreatedBy = claims.UserID
-	mw.CreatedAt = now
+	mw := domain.MaintenanceWindow{
+		ID:             uuid.New().String(),
+		OrgID:          claims.OrgID,
+		MonitorID:      req.MonitorID,
+		Name:           strings.TrimSpace(req.Name),
+		Description:    req.Description,
+		Public:         req.Public,
+		SuppressAlerts: true,
+		RecurrenceType: req.RecurrenceType,
+		DaysOfWeek:     req.DaysOfWeek,
+		DayOfMonth:     req.DayOfMonth,
+		CreatedAt:      now,
+		CreatedBy:      claims.UserID,
+	}
+	if req.SuppressAlerts != nil {
+		mw.SuppressAlerts = *req.SuppressAlerts
+	}
+	if err := req.apply(&mw); err != nil {
+		errorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if mw.RecurrenceType == "" {
 		mw.RecurrenceType = "none"
 	}
 	if mw.DaysOfWeek == "" {
 		mw.DaysOfWeek = "[]"
 	}
-	if err := validateRecurrenceFields(mw.RecurrenceType, mw.DaysOfWeek, mw.DayOfMonth); err != nil {
+	if err := validateWindow(&mw); err != nil {
 		errorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !h.monitorInOrg(r, mw.MonitorID, claims.OrgID) {
+		errorResponse(w, http.StatusNotFound, "monitor not found")
 		return
 	}
 
@@ -166,16 +326,15 @@ func (h *MaintenanceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	pre := *mw
 
 	var req struct {
-		Name            *string    `json:"name"`
-		Description     *string    `json:"description"`
-		StartAt         *time.Time `json:"start_at"`
-		EndAt           *time.Time `json:"end_at"`
-		Public          *bool      `json:"public"`
-		SuppressAlerts  *bool      `json:"suppress_alerts"`
-		RecurrenceType  *string    `json:"recurrence_type"`
-		RecurrenceEndAt *string    `json:"recurrence_end_at"`
-		DaysOfWeek      *string    `json:"days_of_week"`
-		DayOfMonth      *int       `json:"day_of_month"`
+		windowTimes
+		Name           *string `json:"name"`
+		Description    *string `json:"description"`
+		MonitorID      *string `json:"monitor_id"`
+		Public         *bool   `json:"public"`
+		SuppressAlerts *bool   `json:"suppress_alerts"`
+		RecurrenceType *string `json:"recurrence_type"`
+		DaysOfWeek     *string `json:"days_of_week"`
+		DayOfMonth     *int    `json:"day_of_month"`
 	}
 	if err := decodeBody(r, &req); err != nil {
 		errorResponse(w, http.StatusBadRequest, "invalid request body")
@@ -187,11 +346,8 @@ func (h *MaintenanceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil {
 		mw.Description = *req.Description
 	}
-	if req.StartAt != nil {
-		mw.StartAt = *req.StartAt
-	}
-	if req.EndAt != nil {
-		mw.EndAt = *req.EndAt
+	if req.MonitorID != nil {
+		mw.MonitorID = *req.MonitorID
 	}
 	if req.Public != nil {
 		mw.Public = *req.Public
@@ -202,17 +358,9 @@ func (h *MaintenanceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.RecurrenceType != nil {
 		mw.RecurrenceType = *req.RecurrenceType
 	}
-	if req.RecurrenceEndAt != nil {
-		if *req.RecurrenceEndAt == "" {
-			mw.RecurrenceEndAt = nil
-		} else {
-			t, err := time.Parse(time.RFC3339, *req.RecurrenceEndAt)
-			if err != nil {
-				errorResponse(w, http.StatusBadRequest, "invalid recurrence_end_at format")
-				return
-			}
-			mw.RecurrenceEndAt = &t
-		}
+	if err := req.apply(mw); err != nil {
+		errorResponse(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if req.DaysOfWeek != nil {
 		mw.DaysOfWeek = *req.DaysOfWeek
@@ -220,8 +368,12 @@ func (h *MaintenanceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.DayOfMonth != nil {
 		mw.DayOfMonth = *req.DayOfMonth
 	}
-	if err := validateRecurrenceFields(mw.RecurrenceType, mw.DaysOfWeek, mw.DayOfMonth); err != nil {
+	if err := validateWindow(mw); err != nil {
 		errorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.MonitorID != nil && !h.monitorInOrg(r, mw.MonitorID, claims.OrgID) {
+		errorResponse(w, http.StatusNotFound, "monitor not found")
 		return
 	}
 

@@ -1,0 +1,241 @@
+/* Slack workspaces section at the top of the Channels tab. */
+
+:root {
+  --slack-app-ok-fg: #065f46;
+  --slack-app-ok-border: #10b981;
+  --slack-app-err-fg: #991b1b;
+  --slack-app-err-border: #ef4444;
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --slack-app-ok-fg: #6ee7b7;
+  --slack-app-ok-border: #047857;
+  --slack-app-err-fg: #fca5a5;
+  --slack-app-err-border: #b91c1c;
+}
+
+.slack-app {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.slack-app-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.slack-app-head h3 {
+  margin: 0;
+}
+
+.slack-app-head h3:focus {
+  outline: none;
+}
+
+.slack-app-muted,
+.slack-app-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.slack-app-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.slack-app-item + .slack-app-item {
+  border-top: 1px solid var(--color-border);
+}
+
+.slack-app-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  flex-wrap: wrap;
+}
+
+.slack-app-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.slack-app-name {
+  overflow-wrap: anywhere;
+}
+
+.slack-app-meta {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.slack-app-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 12px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--slack-app-err-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-down-bg);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.slack-app-confirm p {
+  margin: 0;
+}
+
+.slack-app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.slack-app-msg {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.slack-app-msg-success {
+  background: var(--color-up-bg);
+  border-color: var(--slack-app-ok-border);
+  color: var(--slack-app-ok-fg);
+}
+
+.slack-app-msg-info {
+  background: var(--color-muted-bg);
+}
+
+.slack-app-msg-error {
+  background: var(--color-down-bg);
+  border-color: var(--slack-app-err-border);
+  color: var(--slack-app-err-fg);
+}
+
+.slack-app-msg:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Keep buttons at least 24px tall (WCAG 2.2 target size). */
+.slack-app .btn {
+  min-height: 32px;
+}
+
+.slack-app .btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Buttons beside a message or a list row (Discord servers). */
+.slack-app-msg .slack-app-actions,
+.slack-app-row > .slack-app-actions {
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .slack-app {
+    padding: 12px;
+  }
+
+  .slack-app-row > .slack-app-actions {
+    flex: 1 1 100%;
+  }
+
+  .slack-app-row > .slack-app-actions .btn {
+    flex: 1 1 0;
+  }
+
+  .slack-app-head .btn,
+  .slack-app-row .btn,
+  .slack-app-actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* Also defined in phone-verify.css; repeated so this file stands alone. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Channel form for "Slack (YipYap app)". */
+.slack-app-channel-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.slack-app-channel-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* "Workspace disconnected" tag in the channel list. Same red pair as the
+   error message above (above 4.5:1 on --color-down-bg in every theme). */
+.label-tag.tag-slack-disconnected {
+  background: var(--color-down-bg);
+  color: var(--slack-app-err-fg);
+  border: 1px solid var(--slack-app-err-border);
+  font-weight: 600;
+}
+
+/* "Use Slack (YipYap app) instead" in the own-bot help line. A text link
+   look in the text color (the orange primary is under 4.5:1 on white),
+   underlined so it reads as a link, with a 24px target. */
+.btn-link.slack-app-switch {
+  display: inline;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  min-height: 24px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.btn-link.slack-app-switch:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

@@ -2,6 +2,9 @@ import { useState, useEffect } from 'preact/hooks';
 import { get, post, patch, del } from '../../api/client';
 import { PageHeader, SearchInput, LoadingPage, ErrorMessage, EmptyState, Modal } from '../../components/ui';
 import { safeHref } from '../../utils/url';
+import { currentUser } from '../../state/auth';
+import { canWrite } from '../../state/permissions.mjs';
+import { ViewOnlyNote } from '../../components/view-only-note';
 
 const DEFAULT_FORM = {
   name: '',
@@ -152,10 +155,13 @@ export function ServiceListPage() {
   const teamMap = {};
   teams.forEach(t => { teamMap[t.id] = t.name; });
 
+  const writer = canWrite(currentUser.value?.role);
+
   return (
     <div class="services-page">
       <PageHeader title="Services" subtitle={`${services.length} services`}
-        actions={<button class="btn btn-primary" onClick={openCreate}>New Service</button>} />
+        actions={writer && <button class="btn btn-primary" onClick={openCreate}>New Service</button>} />
+      <ViewOnlyNote />
 
       <div class="filters-bar">
         <SearchInput value={search} onInput={setSearch} placeholder="Search services..." />
@@ -163,7 +169,7 @@ export function ServiceListPage() {
 
       {filtered.length === 0 ? (
         <EmptyState title="No services found"
-          description={search ? 'Try adjusting your search' : 'Create your first service to get started'} />
+          description={search ? 'Try adjusting your search' : writer ? 'Create your first service to get started' : 'No services yet. Owners, admins and members can add them.'} />
       ) : (
         <div class="monitor-list">
           {filtered.map(s => (

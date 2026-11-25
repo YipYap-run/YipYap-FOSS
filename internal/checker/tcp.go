@@ -26,10 +26,11 @@ func (c *TCPChecker) Check(ctx context.Context, config json.RawMessage) (*Result
 	if !ok {
 		deadline = time.Now().Add(10 * time.Second)
 	}
-	timeout := time.Until(deadline)
+	dialCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
 
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", addr, timeout)
+	conn, err := monitorDialContext(dialCtx, "tcp", addr)
 	latency := time.Since(start)
 
 	result := &Result{

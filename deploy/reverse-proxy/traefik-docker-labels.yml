@@ -14,6 +14,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-acme:/data
+    networks:
+      - proxy
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
@@ -37,9 +39,16 @@ services:
       YIPYAP_DB_DSN: /data/yipyap.db
       YIPYAP_JWT_SECRET: ${YIPYAP_JWT_SECRET}
       YIPYAP_NOTIFICATION_KEY: ${YIPYAP_NOTIFICATION_KEY}
-      YIPYAP_TRUSTED_PROXY_CIDRS: "172.16.0.0/12"
+      # Trust only the Traefik container's network. Do not use a broad
+      # range such as 172.16.0.0/12: every other container on the host's
+      # docker networks would be able to spoof client IPs. Pin the subnet
+      # below in the "proxy" network definition and keep the two in sync.
+      YIPYAP_TRUSTED_PROXY_CIDRS: "172.30.250.0/29"
+    networks:
+      - proxy
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
       - "traefik.http.routers.yipyap.rule=Host(`yipyap.example.com`)"
       - "traefik.http.routers.yipyap.entrypoints=websecure"
       - "traefik.http.routers.yipyap.tls.certresolver=letsencrypt"
@@ -50,6 +59,15 @@ services:
       - "traefik.http.middlewares.yipyap-sec-headers.headers.contenttypenosniff=true"
       - "traefik.http.middlewares.yipyap-sec-headers.headers.framedeny=true"
       - "traefik.http.middlewares.yipyap-sec-headers.headers.referrerpolicy=strict-origin-when-cross-origin"
+
+# A small dedicated network shared only by Traefik and YipYap, so the
+# trusted proxy range above covers Traefik and nothing else.
+networks:
+  proxy:
+    name: proxy
+    ipam:
+      config:
+        - subnet: 172.30.250.0/29
 
 volumes:
   traefik-acme:

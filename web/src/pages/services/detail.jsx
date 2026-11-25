@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'preact/hooks';
 import { get, post, del } from '../../api/client';
-import { PageHeader, Card, LoadingPage, ErrorMessage } from '../../components/ui';
+import { PageHeader, Card, LoadingPage, ErrorMessage, useToast, ToastContainer } from '../../components/ui';
+import { currentUser } from '../../state/auth';
+import { canWrite } from '../../state/permissions.mjs';
+import { ViewOnlyNote } from '../../components/view-only-note';
 import { safeHref } from '../../utils/url';
 
 export function ServiceDetailPage({ id }) {
@@ -9,6 +12,7 @@ export function ServiceDetailPage({ id }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
+  const { toasts, toast } = useToast();
 
   // Link form state
   const [linkLabel, setLinkLabel] = useState('');
@@ -38,32 +42,42 @@ export function ServiceDetailPage({ id }) {
 
   useEffect(() => { load(); }, [id]);
 
+  // Runs a write and reports a failure as a toast instead of an unhandled
+  // rejection. Returns true on success.
+  async function attempt(fn, failMsg) {
+    try {
+      await fn();
+      return true;
+    } catch (err) {
+      if (!err.readonly) toast(err.message || failMsg, 'error');
+      return false;
+    }
+  }
+
   async function addLink(e) {
     e.preventDefault();
     if (!linkLabel.trim() || !linkUrl.trim()) return;
-    await post(`/services/${id}/links`, { label: linkLabel, url_template: linkUrl });
+    if (!await attempt(() => post(`/services/${id}/links`, { label: linkLabel, url_template: linkUrl }), 'Could not add the link')) return;
     setLinkLabel('');
     setLinkUrl('');
     load();
   }
 
   async function removeLink(linkId) {
-    await del(`/services/${id}/links/${linkId}`);
-    load();
+    if (await attempt(() => del(`/services/${id}/links/${linkId}`), 'Could not delete the link')) load();
   }
 
   async function addDependency(e) {
     e.preventDefault();
     if (!depServiceId || !depRelationship.trim()) return;
-    await post(`/services/${id}/dependencies`, { depends_on_service_id: depServiceId, relationship: depRelationship });
+    if (!await attempt(() => post(`/services/${id}/dependencies`, { depends_on_service_id: depServiceId, relationship: depRelationship }), 'Could not add the dependency')) return;
     setDepServiceId('');
     setDepRelationship('');
     load();
   }
 
   async function removeDependency(depId) {
-    await del(`/services/${id}/dependencies/${depId}`);
-    load();
+    if (await attempt(() => del(`/services/${id}/dependencies/${depId}`), 'Could not delete the dependency')) load();
   }
 
   if (loading) return <LoadingPage />;
@@ -75,17 +89,22 @@ export function ServiceDetailPage({ id }) {
   const dependents = service.dependents || [];
   const monitors = service.monitors || [];
 
+  // Viewers are read-only, so they never enter edit mode.
+  const writer = canWrite(currentUser.value?.role);
+
   return (
     <div class="service-detail">
+      <ToastContainer toasts={toasts} />
       <PageHeader
         title={service.name}
         subtitle={service.slug}
-        actions={
+        actions={writer && (
           <button class={`btn btn-sm ${editing ? 'btn-primary' : ''}`} onClick={() => setEditing(!editing)}>
             {editing ? 'Done' : 'Edit'}
           </button>
-        }
+        )}
       />
+      <ViewOnlyNote />
 
       <div class="detail-grid">
         {/* Service Info */}
@@ -140,7 +159,7 @@ export function ServiceDetailPage({ id }) {
                 <tr>
                   <th>Label</th>
                   <th>URL</th>
-                  {editing && <th></th>}
+                  {writer && editing && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -152,7 +171,7 @@ export function ServiceDetailPage({ id }) {
                         ? <a href={safeHref(l.url_template)} target="_blank" rel="noopener">{l.url_template}</a>
                         : <span>{l.url_template}</span>}
                     </td>
-                    {editing && (
+                    {writer && editing && (
                       <td>
                         <button class="btn btn-xs btn-danger" onClick={() => removeLink(l.id)}>Delete</button>
                       </td>
@@ -164,10 +183,10 @@ export function ServiceDetailPage({ id }) {
           ) : (
             <p class="text-muted">No links yet</p>
           )}
-          {editing && (
+          {writer && editing && (
             <form onSubmit={addLink} class="form-group" style="margin-top:.75rem;display:flex;gap:.5rem;align-items:flex-end">
-              <input type="text" placeholder="Label" value={linkLabel} onInput={e => setLinkLabel(e.target.value)} />
-              <input type="text" placeholder="URL" value={linkUrl} onInput={e => setLinkUrl(e.target.value)} />
+              <input type="text" aria-label="Link label" placeholder="Label" value={linkLabel} onInput={e => setLinkLabel(e.target.value)} />
+              <input type="text" aria-label="Link URL" placeholder="URL" value={linkUrl} onInput={e => setLinkUrl(e.target.value)} />
               <button type="submit" class="btn btn-sm btn-primary">Add</button>
             </form>
           )}
@@ -182,7 +201,7 @@ export function ServiceDetailPage({ id }) {
                 <tr>
                   <th>Service</th>
                   <th>Relationship</th>
-                  {editing && <th></th>}
+                  {writer && editing && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -190,7 +209,7 @@ export function ServiceDetailPage({ id }) {
                   <tr key={d.id}>
                     <td><a href={`/services/${d.depends_on_service_id}`}>{d.service_name}</a></td>
                     <td>{d.relationship}</td>
-                    {editing && (
+                    {writer && editing && (
                       <td>
                         <button class="btn btn-xs btn-danger" onClick={() => removeDependency(d.id)}>Delete</button>
                       </td>
@@ -202,15 +221,15 @@ export function ServiceDetailPage({ id }) {
           ) : (
             <p class="text-muted">No dependencies</p>
           )}
-          {editing && (
+          {writer && editing && (
             <form onSubmit={addDependency} class="form-group" style="margin-top:.75rem;display:flex;gap:.5rem;align-items:flex-end">
-              <select value={depServiceId} onChange={e => setDepServiceId(e.target.value)}>
+              <select aria-label="Service this one depends on" value={depServiceId} onChange={e => setDepServiceId(e.target.value)}>
                 <option value="">Select service...</option>
                 {allServices.map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
-              <input type="text" placeholder="Relationship" value={depRelationship} onInput={e => setDepRelationship(e.target.value)} />
+              <input type="text" aria-label="Relationship" placeholder="Relationship" value={depRelationship} onInput={e => setDepRelationship(e.target.value)} />
               <button type="submit" class="btn btn-sm btn-primary">Add</button>
             </form>
           )}

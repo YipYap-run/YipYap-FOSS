@@ -13,16 +13,20 @@ import (
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/api"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
+	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
 	"github.com/YipYap-run/YipYap-FOSS/internal/checker"
 	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
 	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/reply"
 	replyhandlers "github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/reply/handlers"
 	"github.com/YipYap-run/YipYap-FOSS/internal/config"
+	"github.com/YipYap-run/YipYap-FOSS/internal/contactmethod"
 	"github.com/YipYap-run/YipYap-FOSS/internal/crypto"
 	"github.com/YipYap-run/YipYap-FOSS/internal/escalation"
 	"github.com/YipYap-run/YipYap-FOSS/internal/jobs"
 	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
+	"github.com/YipYap-run/YipYap-FOSS/internal/maintenance"
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
+	"github.com/YipYap-run/YipYap-FOSS/internal/promo"
 	"github.com/YipYap-run/YipYap-FOSS/internal/seed"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 	"github.com/YipYap-run/YipYap-FOSS/internal/support"
@@ -40,14 +44,34 @@ func run() error {
 	cfg := config.Load()
 	cloudevents.SetPublicBaseURL(cfg.PublicBaseURL)
 
-	// Validate required config.
-	if cfg.JWTSecret == "" {
-		log.Fatal("YIPYAP_JWT_SECRET is required")
+	// Resolve the JWT signing secret. When YIPYAP_JWT_SECRET is unset, a
+	// random one is generated once and kept in the data dir. Placeholder or
+	// short values are refused. The secret itself is never logged.
+	jwtSecret, jwtSrc, jwtPath, err := config.ResolveJWTSecret(config.JWTSecretOptions{
+		Configured:    cfg.JWTSecret,
+		DataDir:       cfg.ResolveDataDir(),
+		AllowGenerate: true,
+	})
+	if err != nil {
+		return err
+	}
+	cfg.JWTSecret = jwtSecret
+	switch jwtSrc {
+	case config.JWTSecretFromGenerated:
+		log.Printf("%s is not set; generated a JWT secret and stored it in %s. Back up this file: deleting it signs everyone out.", config.JWTSecretEnv, jwtPath)
+	case config.JWTSecretFromFile:
+		log.Printf("%s is not set; using the JWT secret stored in %s", config.JWTSecretEnv, jwtPath)
+	}
+
+	if err := setupOperatorCaps(); err != nil {
+		return err
 	}
 
 	if cfg.RegistrationEnabled {
 		log.Println("WARNING: Public registration is enabled. Set YIPYAP_REGISTRATION_ENABLED=false to disable.")
 	}
+
+	applyOperatorLimits(cfg)
 
 	checker.AllowPrivateTargets = cfg.AllowPrivateTargets
 	checker.AllowPrivateControlPlaneTargets = cfg.AllowPrivateControlPlaneTargets
@@ -81,9 +105,8 @@ func run() error {
 
 	// 2. Auth.
 	jwt := auth.NewJWTIssuer([]byte(cfg.JWTSecret), cfg.JWTExpiry)
-	apiKeySecret := cfg.APIKeySecret
-	if apiKeySecret == "" {
-		apiKeySecret = cfg.JWTSecret
+	apiKeySecret, apiKeyFallback := cfg.APIKeyHMACSecret()
+	if apiKeyFallback {
 		log.Println("WARNING: YIPYAP_API_KEY_SECRET is not set; falling back to JWT secret for API key HMAC. Set a dedicated secret for better key isolation.")
 	}
 	apiKeyHasher := auth.NewAPIKeyHasher([]byte(apiKeySecret))
@@ -129,13 +152,31 @@ func run() error {
 	// 6. Escalation engine.
 	engine := escalation.NewEngine(db, msgBus, envelope, nil)
 	engine.SetCloudEventEmitter(cePublisher)
+	// Signed acknowledge links in SMS, email, Pushover, ntfy and webhook
+	// payloads. Needs YIPYAP_PUBLIC_BASE_URL; without it no link is sent.
+	if ackLinks := escalation.SignedAckLinks(jwt, cfg.PublicBaseURL); ackLinks != nil {
+		engine.SetAckLinker(ackLinks)
+	} else {
+		log.Println("YIPYAP_PUBLIC_BASE_URL is not set: notifications will not carry acknowledge links")
+	}
 
 	// 7. Notification dispatcher.
 	var decrypt notify.DecryptFunc
 	if envelope != nil {
 		decrypt = envelope.Decrypt
 	}
-	dispatcher, cehttpProvider := setupDispatcher(msgBus, db, decrypt, cfg)
+	mail := mailer.New(mailer.Config{
+		Host:     cfg.SMTPHost,
+		Port:     cfg.SMTPPort,
+		Username: cfg.SMTPUser,
+		Password: cfg.SMTPPass,
+		From:     cfg.SMTPFrom,
+	})
+	// One recorder for sent and failed outcomes. It emails org owners when
+	// a channel keeps failing (a no-op without SMTP).
+	recorder := notify.NewRecorder(db,
+		notify.WithChannelAlerts(notify.NewChannelAlerts(db, mail, cfg.PublicBaseURL)))
+	dispatcher, cehttpProvider := setupDispatcher(msgBus, db, decrypt, cfg, recorder)
 
 	// Phase-2 reply pipeline: outbound registry → dispatcher → handlers.
 	// The cehttp provider records every outbound event into the registry
@@ -166,7 +207,11 @@ func run() error {
 			}
 		}),
 	)
-	replyhandlers.RegisterAll(replyDispatcher, db)
+	var resolveCipher contactmethod.Cipher
+	if envelope != nil {
+		resolveCipher = contactmethod.Cipher{Enc: envelope.Encrypt, Dec: envelope.Decrypt}
+	}
+	replyhandlers.RegisterAll(replyDispatcher, db, escalation.NewResolveFanout(db, msgBus, resolveCipher))
 	cehttpProvider.SetOutboundRegistry(replyRegistry)
 	cehttpProvider.SetReplyDispatcher(replyDispatcher)
 
@@ -177,18 +222,21 @@ func run() error {
 	}
 
 	// 9. HTTP server.
-	mail := mailer.New(mailer.Config{
-		Host:     cfg.SMTPHost,
-		Port:     cfg.SMTPPort,
-		Username: cfg.SMTPUser,
-		Password: cfg.SMTPPass,
-		From:     cfg.SMTPFrom,
-	})
+	if mail != nil {
+		engine.SetQuotaMailer(mail, cfg.PublicBaseURL)
+	}
 	billingClient, billingWebhookSecret := wiring.InitBilling(cfg)
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	maintenanceTicker := maintenance.NewTicker(db, cePublisher, maintenance.DefaultInterval)
+	go maintenanceTicker.Run(runCtx)
 	support.StartEscalation(runCtx, db, msgBus, mail, cfg.PublicBaseURL, jwt)
 	support.StartSurveys(runCtx, db, msgBus, mail, cfg.PublicBaseURL, jwt)
+	// Promo lifecycle: expiry warning emails and the downgrade to Free.
+	promo.Start(runCtx, db, mail, cfg.PublicBaseURL)
+	// Owner emails when paid channels start and end their grace after a
+	// downgrade. A no-op without SMTP or in the FOSS build.
+	notify.StartPaidChannelNotices(runCtx, db, mail, cfg.PublicBaseURL)
 	srv := api.NewServer(db, jwt, msgBus, wsHub, billingClient, billingWebhookSecret, cfg.PublicBaseURL, api.ServerOptions{
 		TestSender:            dispatcher,
 		RegistrationEnabled:   cfg.RegistrationEnabled,
@@ -196,13 +244,20 @@ func run() error {
 		OpsToken:              cfg.OpsToken,
 		Mailer:                mail,
 		APIKeyHasher:          apiKeyHasher,
+		APIKeyMaxTTL:          cfg.APIKeyMaxTTL,
 		DiscordPublicKey:      cfg.DiscordPublicKey,
 		SlackSigningSecret:    cfg.SlackSigningSecret,
+		SlackClientID:         cfg.SlackClientID,
+		SlackClientSecret:     cfg.SlackClientSecret,
+		DiscordClientID:       cfg.DiscordClientID,
+		DiscordClientSecret:   cfg.DiscordClientSecret,
+		DiscordBotToken:       cfg.DiscordBotToken,
 		TelegramWebhookSecret: cfg.TelegramWebhookSecret,
 		TelegramBotToken:      cfg.TelegramBotToken,
 		TelegramBotUsername:   cfg.TelegramBotUsername,
 		TwilioAuthToken:       cfg.TwilioAuthToken,
 		TelnyxWebhookSecret:   cfg.TelnyxWebhookSecret,
+		PhoneVerifySender:     phoneVerifySender(cfg),
 		TrustedProxyNets:      api.ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs),
 		LifecycleCtx:          runCtx,
 	})
@@ -221,9 +276,16 @@ func run() error {
 	if err := sched.Start(runCtx); err != nil {
 		return fmt.Errorf("scheduler start: %w", err)
 	}
-	engine.Start(runCtx)
+	if err := engine.Start(runCtx); err != nil {
+		return fmt.Errorf("escalation engine start: %w", err)
+	}
 	if err := dispatcher.Start(runCtx); err != nil {
 		return fmt.Errorf("dispatcher start: %w", err)
+	}
+	// Record dead-lettered notifications on the alert timeline and on
+	// the channel's delivery health.
+	if err := notify.StartDeadLetterConsumer(msgBus, recorder); err != nil {
+		return fmt.Errorf("dead letter consumer: %w", err)
 	}
 
 	// CloudEvent router: bridges events.cloudevents.out.> onto notify.request
@@ -243,6 +305,15 @@ func run() error {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Println("shutting down...")
+		// Drain the notification pools before cancelling runCtx so queued
+		// jobs are sent rather than abandoned. Anything left at the
+		// deadline stays in the outbox for the next start.
+		bus.StopConsuming(msgBus)
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if err := dispatcher.Stop(drainCtx); err != nil {
+			log.Printf("notification drain: %v", err)
+		}
+		drainCancel()
 		cancel()
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -251,8 +322,7 @@ func run() error {
 			log.Printf("shutdown error: %v", err)
 		}
 		// A4-N-2: tear down the long-lived dispatcher sweepers so they
-		// don't outlive the parent process. ceConsumerCache.Close is
-		// invoked via the LifecycleCtx wiring in api.NewServer.
+		// don't outlive the parent process.
 		replyDispatcher.Close()
 	}()
 
@@ -264,7 +334,6 @@ func run() error {
 	// Wait for background services to stop.
 	sched.Stop()
 	engine.Stop()
-	dispatcher.Stop()
 
 	log.Println("yipyap stopped")
 	return nil

@@ -29,3 +29,5 @@ profile.cov
 go.work
 go.work.sum
 yipyap.db*
+
+jwt_secret

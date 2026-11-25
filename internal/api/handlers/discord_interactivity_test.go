@@ -1,3 +1,7 @@
+// The generic Discord click handler serves /webhooks/discord only in
+// self-hosted builds. SaaS routes that path to the platform app handler,
+// covered by discord_app_full_test.go and discord_app_routes_full_test.go.
+
 package handlers_test
 
 import (
@@ -32,9 +36,6 @@ func discordInteraction(t *testing.T, interactionType int, customID, userID stri
 	}
 	return string(data)
 }
-
-// discordTestPrivateKey is set by setupEventsTestServer via the matching public key.
-var discordTestPrivateKey ed25519.PrivateKey
 
 func postDiscordWebhook(t *testing.T, baseURL, body string) *http.Response {
 	t.Helper()

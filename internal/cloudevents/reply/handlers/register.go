@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"context"
+
 	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/reply"
+	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
+
+type ResolveFanout func(ctx context.Context, alert *domain.Alert)
 
 // RegisterAll constructs and registers all reply handlers against the given
 // dispatcher. Phase-2 provides the three read-only handlers (claimed,
@@ -14,7 +19,7 @@ import (
 // production do not need to retain them.
 //
 // If either d or s is nil, RegisterAll is a no-op and returns nil.
-func RegisterAll(d *reply.Dispatcher, s store.Store) []reply.Handler {
+func RegisterAll(d *reply.Dispatcher, s store.Store, resolves ResolveFanout) []reply.Handler {
 	if d == nil || s == nil {
 		return nil
 	}
@@ -29,7 +34,7 @@ func RegisterAll(d *reply.Dispatcher, s store.Store) []reply.Handler {
 		NewDeduplicatedHandler(s),
 		NewEscalatedHandler(s),
 		NewRemediationStartedHandler(s),
-		NewRemediationResultHandler(s),
+		NewRemediationResultHandler(s, resolves),
 		NewOwnershipHandler(s),
 		NewAckWithContextHandler(s),
 		NewRouteHandler(s),

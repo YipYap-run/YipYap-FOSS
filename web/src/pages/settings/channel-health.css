@@ -1,0 +1,83 @@
+/* Channel delivery health (settings > channels). The Failing badge is a
+   text label, so status does not rely on color. Text uses the main or
+   secondary tone on a tinted background for 4.5:1 in every theme. */
+.settings-item .channel-info {
+  min-width: 0;
+}
+
+.channel-header {
+  flex-wrap: wrap;
+}
+
+.channel-health-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.channel-health-down {
+  background: var(--color-down-bg);
+  border-color: var(--color-down);
+}
+
+.channel-health-line {
+  display: block;
+  padding-left: 16px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.channel-health-line-failing {
+  color: var(--color-text);
+}
+
+.channel-failing-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-down);
+  background: var(--color-down-bg);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  border-radius: 4px;
+}
+
+/* The row the owner failure email links to. The tint and side bar mark
+   it; the focus outline uses the main text color for 3:1 against the
+   surface in every theme. */
+.settings-item.channel-row-linked {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary);
+  box-shadow: inset 4px 0 0 var(--color-primary);
+}
+
+.settings-item.channel-row-linked:focus {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .settings-item.channel-row-linked {
+    transition: background-color 0.3s ease;
+  }
+}
+
+/* Text for screen readers only (the badge's "Delivery status:" prefix). */
+.channel-health-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

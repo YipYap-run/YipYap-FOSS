@@ -22,9 +22,10 @@ type SlackConfig struct {
 
 // Slack delivers notifications via the Slack chat.postMessage API.
 type Slack struct {
-	fallback SlackConfig
-	decrypt  notify.DecryptFunc
-	client   *http.Client
+	fallback   SlackConfig
+	decrypt    notify.DecryptFunc
+	client     *http.Client
+	consoleURL string
 }
 
 // NewSlack creates a Slack notifier.
@@ -34,6 +35,14 @@ func NewSlack(fallback SlackConfig, decrypt notify.DecryptFunc) *Slack {
 		decrypt:  decrypt,
 		client:   &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// WithConsoleURL sets the public YipYap base URL used for the "Open in
+// YipYap" link on each message. Empty leaves the link out unless the job
+// carries its own AckURL.
+func (s *Slack) WithConsoleURL(base string) *Slack {
+	s.consoleURL = strings.TrimRight(base, "/")
+	return s
 }
 
 func (s *Slack) Channel() string    { return "slack" }
@@ -47,6 +56,53 @@ func (s *Slack) Send(ctx context.Context, job domain.NotificationJob) (string, e
 
 	const url = "https://slack.com/api/chat.postMessage"
 
+	blocks := slackMessageBlocks(job, s.consoleURL)
+
+	payload := map[string]any{
+		"channel": cfg.ChannelID,
+		"blocks":  blocks,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal slack payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build slack request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+cfg.BotToken)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("slack POST: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+		TS    string `json:"ts"`
+	}
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode slack response: %w", err)
+	}
+	if !result.OK {
+		return "", fmt.Errorf("slack API error: %s", result.Error)
+	}
+	return result.TS, nil
+}
+
+// slackMessageBlocks builds the Block Kit body for an alert message.
+//
+// Channels on this provider post with the org's own bot token, so Slack
+// sends any button clicks to that org's app, not to YipYap. Ack and Resolve
+// buttons would look live but do nothing, so the message carries an
+// "Open in YipYap" link instead (notif-12).
+func slackMessageBlocks(job domain.NotificationJob, consoleURL string) []map[string]any {
 	blocks := []map[string]any{
 		{
 			"type": "section",
@@ -113,62 +169,16 @@ func (s *Slack) Send(ctx context.Context, job domain.NotificationJob) (string, e
 		})
 	}
 
-	blocks = append(blocks, map[string]any{
-		"type": "actions",
-		"elements": []map[string]any{
-			{
-				"type":      "button",
-				"text":      map[string]string{"type": "plain_text", "text": "Acknowledge"},
-				"action_id": "ack_alert",
-				"value":     job.AlertID,
-				"style":     "primary",
+	if link := alertConsoleLink(consoleURL, job); link != "" {
+		blocks = append(blocks, map[string]any{
+			"type": "context",
+			"elements": []map[string]any{
+				{"type": "mrkdwn", "text": fmt.Sprintf("<%s|Open in YipYap>", link)},
 			},
-			{
-				"type":      "button",
-				"text":      map[string]string{"type": "plain_text", "text": "Resolve"},
-				"action_id": "resolve_alert",
-				"value":     job.AlertID,
-				"style":     "danger",
-			},
-		},
-	})
-
-	payload := map[string]any{
-		"channel": cfg.ChannelID,
-		"blocks":  blocks,
+		})
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal slack payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("build slack request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Authorization", "Bearer "+cfg.BotToken)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("slack POST: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	var result struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-		TS    string `json:"ts"`
-	}
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("decode slack response: %w", err)
-	}
-	if !result.OK {
-		return "", fmt.Errorf("slack API error: %s", result.Error)
-	}
-	return result.TS, nil
+	return blocks
 }
 
 // slackInteractionPayload represents a Slack block_actions interaction callback.

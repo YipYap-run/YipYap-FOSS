@@ -89,10 +89,13 @@ func (r *Router) SetMetrics(m *telemetry.Metrics) {
 // implementation's handler goroutines.
 func (r *Router) Start(ctx context.Context) error {
 	return r.bus.PullSubscribe(routerSubject, routerQueueGroup, func(hctx context.Context, msg *bus.Msg) error {
-		r.handle(hctx, msg.Subject, msg.Data)
-		// Always ack: router failures are logged and the message is
-		// considered delivered. The fan-out job publish is best-effort per
-		// channel, so a redelivery cannot fix a route failure on its own.
+		if err := r.handle(hctx, msg.Subject, msg.Data); err != nil {
+			// Returning the error naks the event for redelivery. Fan-out
+			// job IDs and dedupe keys are derived from (channel, event),
+			// so a redelivery does not double-send to channels that
+			// already got the event.
+			return err
+		}
 		return msg.Ack()
 	})
 }
@@ -101,8 +104,12 @@ func (r *Router) Start(ctx context.Context) error {
 // teardown; the caller disposes of the bus to release the subscription.
 func (r *Router) Stop() {}
 
-// handle processes one CloudEvent delivery.
-func (r *Router) handle(ctx context.Context, subject string, data []byte) {
+// handle processes one CloudEvent delivery. It returns an error when the
+// event should be redelivered: the channel lookup failed, or a fan-out job
+// for some channel could be neither enqueued in the outbox nor published.
+// Permanent problems (malformed subject, a channel config that cannot be
+// encoded) are logged and return nil.
+func (r *Router) handle(ctx context.Context, subject string, data []byte) error {
 	ctx, span := tracer.Start(ctx, "cloudevents.router.fanout")
 	defer span.End()
 	span.SetAttributes(attribute.String("subject", subject))
@@ -120,7 +127,7 @@ func (r *Router) handle(ctx context.Context, subject string, data []byte) {
 	if !ok {
 		slog.Warn("cloudevent-router: malformed subject", "subject", subject)
 		span.SetAttributes(attribute.String("error", "malformed subject"))
-		return
+		return nil
 	}
 	span.SetAttributes(attribute.String("org.id", orgID))
 
@@ -128,10 +135,11 @@ func (r *Router) handle(ctx context.Context, subject string, data []byte) {
 	if err != nil {
 		slog.Error("cloudevent-router: list channels", "org_id", orgID, "error", err)
 		span.RecordError(err)
-		return
+		return fmt.Errorf("cloudevent-router: list channels for org %s: %w", orgID, err)
 	}
 
 	matched := 0
+	var failed int
 	defer func() {
 		span.SetAttributes(attribute.Int("channels.matched", matched))
 	}()
@@ -152,12 +160,18 @@ func (r *Router) handle(ctx context.Context, subject string, data []byte) {
 			continue
 		}
 
-		// Extract CE ID for dedup; fall back to channel ID + subject hash
-		// if the envelope cannot be parsed.
+		// Job ID and dedupe key are stable per (channel, event) so that a
+		// redelivered event maps to the same outbox row, JetStream msg ID
+		// and dedupe claim. The key includes the channel ID so each
+		// cloudevent_http channel in the org gets its own delivery.
 		ceID := extractEventID(data)
+		if ceID == "" {
+			ceID = uuid.NewSHA1(uuid.NameSpaceOID, data).String()
+		}
+		jobKey := fmt.Sprintf("ce:%s:%s:%s", orgID, ch.ID, ceID)
 
 		job := domain.NotificationJob{
-			ID:      uuid.New().String(),
+			ID:      uuid.NewSHA1(routerJobNamespace, []byte(jobKey)).String(),
 			AlertID: "",
 			OrgID:   orgID,
 			Channel: "cloudevent_http",
@@ -169,8 +183,10 @@ func (r *Router) handle(ctx context.Context, subject string, data []byte) {
 			// passed through verbatim. The cloudevent_http provider
 			// re-parses it to honor event_types filters and drive the
 			// ce.Event HTTP send.
-			Message:   string(data),
-			DedupeKey: fmt.Sprintf("%s-%s", orgID, ceID),
+			Message:     string(data),
+			DedupeKey:   jobKey,
+			ChannelID:   ch.ID,
+			ChannelName: ch.Name,
 		}
 
 		payload, err := json.Marshal(job)
@@ -181,19 +197,36 @@ func (r *Router) handle(ctx context.Context, subject string, data []byte) {
 
 		// Dual-write: outbox for durability, bus for fast-path delivery.
 		// Mirrors the Engine pattern so the existing outbox poller will
-		// reclaim a stuck job if the dispatcher crashes mid-send.
+		// reclaim a stuck job if the dispatcher crashes mid-send. The job
+		// is safe once either write lands.
+		enqueued := false
 		if r.outbox != nil {
 			if err := r.outbox.Enqueue(ctx, job.ID, string(payload)); err != nil {
-				slog.Warn("cloudevent-router: outbox enqueue", "error", err)
+				slog.Warn("cloudevent-router: outbox enqueue", "job_id", job.ID, "error", err)
+			} else {
+				enqueued = true
 			}
 		}
 
 		if err := r.bus.PublishDurable(ctx, "notify.request", payload, job.ID); err != nil {
 			slog.Error("cloudevent-router: publish notify.request",
 				"job_id", job.ID, "channel_id", ch.ID, "error", err)
+			if !enqueued {
+				failed++
+			}
 		}
 	}
+
+	if failed > 0 {
+		err := fmt.Errorf("cloudevent-router: %d of %d channel jobs were not queued", failed, matched)
+		span.RecordError(err)
+		return err
+	}
+	return nil
 }
+
+// routerJobNamespace scopes the name-based UUIDs used as fan-out job IDs.
+var routerJobNamespace = uuid.MustParse("6f1d6f5e-3c47-4b8e-9a43-2b1c8e0b7a51")
 
 // encodeConfig prepends the version byte used by the notify provider config
 // decoder: 0x00 for plaintext, 0x01 for envelope-encrypted.

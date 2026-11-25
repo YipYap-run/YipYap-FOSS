@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { verifyEmail, resendVerification } from '../../state/auth';
+import { FormError } from '../../components/ui';
 
 export function VerifyEmailPage() {
   const [state, setState] = useState('verifying'); // verifying | ok | error
@@ -66,7 +67,7 @@ export function VerifyEmailPage() {
 
         {state === 'error' && (
           <>
-            <div class="form-error">{message}</div>
+            <FormError>{message}</FormError>
             <p class="auth-hint">
               The link may have expired. Enter your email below to get a new one.
             </p>

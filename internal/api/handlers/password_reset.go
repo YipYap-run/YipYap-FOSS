@@ -5,7 +5,9 @@ import (
 	"net/http"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
+	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
+	"github.com/YipYap-run/YipYap-FOSS/internal/session"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
@@ -14,6 +16,15 @@ type PasswordResetHandler struct {
 	jwt           *auth.JWTIssuer
 	mailer        *mailer.Mailer
 	publicBaseURL string
+	// sendMail replaces mailer.Send in tests that inspect outgoing mail.
+	sendMail func(to, subject, body string) error
+}
+
+func (h *PasswordResetHandler) send(to, subject, body string) error {
+	if h.sendMail != nil {
+		return h.sendMail(to, subject, body)
+	}
+	return h.mailer.Send(to, subject, body)
 }
 
 func NewPasswordResetHandler(s store.Store, jwt *auth.JWTIssuer, m *mailer.Mailer, publicBaseURL string) *PasswordResetHandler {
@@ -33,13 +44,25 @@ func (h *PasswordResetHandler) ForgotPassword(w http.ResponseWriter, r *http.Req
 	var req struct {
 		Email string `json:"email"`
 	}
-	if err := decodeBody(r, &req); err != nil || req.Email == "" {
+	if err := decodeBody(r, &req); err != nil {
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	req.Email = domain.NormalizeEmail(req.Email)
+	if req.Email == "" {
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	user, err := h.store.Users().GetByEmail(r.Context(), req.Email)
 	if err != nil || user == nil {
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	// Members of an org that enforces SSO have no password to reset. The
+	// response stays the same so it does not reveal the account exists.
+	if ssoResetBlocked(r.Context(), h.store, user) {
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
@@ -60,7 +83,7 @@ func (h *PasswordResetHandler) ForgotPassword(w http.ResponseWriter, r *http.Req
 		"If you did not request this, you can safely ignore this email."
 
 	go func() {
-		if err := h.mailer.Send(user.Email, subject, body); err != nil {
+		if err := h.send(user.Email, subject, body); err != nil {
 			log.Printf("password-reset: failed to send email to user %s: %v", user.ID, err)
 		}
 	}()
@@ -82,8 +105,7 @@ func (h *PasswordResetHandler) ResetPassword(w http.ResponseWriter, r *http.Requ
 		errorResponse(w, http.StatusBadRequest, "token and password are required")
 		return
 	}
-	if len(req.Password) < 8 {
-		errorResponse(w, http.StatusBadRequest, "password must be at least 8 characters")
+	if !checkPasswordPolicy(w, req.Password) {
 		return
 	}
 
@@ -100,7 +122,7 @@ func (h *PasswordResetHandler) ResetPassword(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Verify email hasn't changed since the token was issued.
-	if user.Email != claims.Role {
+	if user.Email != domain.NormalizeEmail(claims.Role) {
 		errorResponse(w, http.StatusUnauthorized, "reset token is no longer valid")
 		return
 	}
@@ -108,6 +130,16 @@ func (h *PasswordResetHandler) ResetPassword(w http.ResponseWriter, r *http.Requ
 	// Verify password hasn't already been reset (single-use enforcement).
 	if auth.PasswordResetNonce(user.PasswordHash) != claims.Nonce {
 		errorResponse(w, http.StatusUnauthorized, "reset token is no longer valid")
+		return
+	}
+
+	// A link sent before the org turned on Enforce SSO must not set a
+	// password afterwards.
+	if ssoResetBlocked(r.Context(), h.store, user) {
+		jsonResponse(w, http.StatusForbidden, map[string]string{
+			"error": "your organization requires single sign-on, so this account has no password to reset. Use Sign in with SSO.",
+			"code":  "sso_required",
+		})
 		return
 	}
 
@@ -121,6 +153,13 @@ func (h *PasswordResetHandler) ResetPassword(w http.ResponseWriter, r *http.Requ
 	user.ForcePasswordChange = false
 	if err := h.store.Users().Update(r.Context(), user); err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to update password")
+		return
+	}
+	// A reset means the old password may be known to someone else: sign
+	// out every session.
+	if err := session.RevokeAll(r.Context(), h.store, user.ID, ""); err != nil {
+		log.Printf("reset password: revoke sessions for %s: %v", user.ID, err)
+		errorResponse(w, http.StatusInternalServerError, "password updated, but signing out existing sessions failed")
 		return
 	}
 

@@ -1,8 +1,70 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { get, post, patch, del, put } from '../../api/client';
 import { PageHeader, Card, StatusBadge, StatusDot, SearchInput, LoadingPage, ErrorMessage, EmptyState, Modal, MiniUptimeBar, useToast, ToastContainer } from '../../components/ui';
-import { currentOrg, appMeta } from '../../state/auth';
+import { currentOrg, currentUser, appMeta } from '../../state/auth';
+import { canWrite } from '../../state/permissions.mjs';
+import { ViewOnlyNote } from '../../components/view-only-note';
+import { UpgradeLink } from '../../components/upgrade-link';
 import { useFormDraft } from '../../hooks/useFormDraft';
+
+import { monitorLimits, serverMessageParts } from '../../utils/plan-limits';
+import './monitors.css';
+
+function currentLimits() {
+  return monitorLimits(appMeta.value, currentOrg.value);
+}
+
+// The interval floor the form enforces. An existing monitor saved under an
+// older, lower floor (for example before a downgrade) keeps its interval,
+// so the form accepts that value too.
+function intervalFloor(originalInterval) {
+  const min = currentLimits().minInterval;
+  return originalInterval > 0 && originalInterval < min ? originalInterval : min;
+}
+
+function IntervalHelp({ originalInterval }) {
+  const lim = currentLimits();
+  const min = lim.minInterval;
+  const legacy = originalInterval > 0 && originalInterval < min
+    ? <> This monitor checks every {originalInterval}s, below the current minimum. It keeps that interval until you change it.</>
+    : null;
+  if (lim.source === 'server') {
+    return <p id="mon-interval-help" class="form-help">Minimum on this server: {min}s.{legacy}</p>;
+  }
+  if (!lim.plan) {
+    return <p id="mon-interval-help" class="form-help">Your plan's minimum is checked when you save.{legacy}</p>;
+  }
+  if (lim.plan === 'free') {
+    return (
+      <p id="mon-interval-help" class="form-help">
+        Free plan minimum: {min}s (5 min).{legacy}{' '}
+        {appMeta.value?.billing_enabled && <><UpgradeLink fallback="Ask an owner or admin to upgrade for faster checks.">Upgrade</UpgradeLink> for faster checks.</>}
+      </p>
+    );
+  }
+  return <p id="mon-interval-help" class="form-help">Minimum for your plan: {min}s.{legacy}</p>;
+}
+
+// ServerMessage renders an API error as text, with links to the hosted
+// product made clickable. It never uses innerHTML.
+function ServerMessage({ message }) {
+  return serverMessageParts(message).map((p, i) => (p.href
+    ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer">{p.text}</a>
+    : <span key={i}>{p.text}</span>));
+}
+
+// MonitorCapNote explains why New Monitor is unavailable when the org is at
+// its monitor cap. The SaaS free plan shows an upgrade link in the header
+// instead, so this covers the FOSS operator cap and plans with no upgrade.
+function MonitorCapNote({ count, max, source }) {
+  return (
+    <p class="monitor-cap-note" id="monitor-cap-note">
+      {source === 'server'
+        ? <>This server allows up to {max} monitors per organization, and you have {count}. Ask your server administrator to raise the limit, or delete a monitor you no longer need.</>
+        : <>Your plan allows up to {max} monitors, and you have {count}. Delete a monitor you no longer need, or contact support to raise the limit.</>}
+    </p>
+  );
+}
 
 const DEFAULT_FORM = {
   name: '',
@@ -121,89 +183,136 @@ function parseConfigToForm(monitor) {
   return base;
 }
 
-function TypeConfigFields({ form, setForm }) {
-  const set = (key, val) => setForm({ ...form, [key]: val });
+// Maps the config path the API names in a 400 ("field") to the form key of
+// the input that holds it. Host fields depend on the monitor type.
+export function targetErrorKey(type, field) {
+  switch (field) {
+    case 'config.url': return 'http_url';
+    case 'config.host': return type === 'ping' ? 'ping_host' : 'tcp_host';
+    case 'config.hostname': return 'dns_hostname';
+    case 'config.nameserver': return 'dns_nameserver';
+    default: return '';
+  }
+}
+
+// Collects the server's field errors that belong to target inputs, keyed by
+// form key. Returns null when the error names none of them.
+function targetErrorsFrom(type, err) {
+  const fields = (err && err.body && err.body.fields) || {};
+  const out = {};
+  for (const [field, msg] of Object.entries(fields)) {
+    const key = targetErrorKey(type, field);
+    if (key) out[key] = msg;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// A labelled target input with its hint and server error wired up for
+// assistive tech (label for, aria-invalid, aria-describedby).
+function TargetInput({ id, label, required, type = 'text', value, onInput, placeholder, error, hint, inputMode }) {
+  const errId = `${id}-err`;
+  const hintId = `${id}-hint`;
+  const describedBy = [error ? errId : '', hint ? hintId : ''].filter(Boolean).join(' ') || undefined;
+  return (
+    <div class={`form-group${error ? ' has-error' : ''}`}>
+      <label for={id} class={required ? 'required' : undefined}>{label}</label>
+      <input id={id} type={type} value={value} onInput={onInput} required={required}
+        aria-required={required ? 'true' : undefined} placeholder={placeholder}
+        inputMode={inputMode} autoComplete="off" spellCheck={false} autoCapitalize="off"
+        aria-invalid={error ? 'true' : undefined} aria-describedby={describedBy} />
+      {error && <p id={errId} class="field-error">{error}</p>}
+      {hint && <p id={hintId} class="form-help">{hint}</p>}
+    </div>
+  );
+}
+
+function TypeConfigFields({ form, setForm, errors = {}, clearError }) {
+  const set = (key, val) => {
+    setForm({ ...form, [key]: val });
+    if (errors[key] && clearError) clearError(key);
+  };
+  // Checks run from the YipYap servers. On SaaS that means the target must
+  // be public; self-hosted installs may allow private targets.
+  const publicHint = appMeta.value?.edition === 'foss'
+    ? ''
+    : 'Checks run from YipYap servers, so the host must be reachable from the public internet.';
 
   switch (form.type) {
     case 'http':
       return (
         <>
+          <TargetInput id="mon-http-url" label="URL" required type="url" value={form.http_url}
+            onInput={e => set('http_url', e.target.value)} placeholder="https://example.com"
+            error={errors.http_url} hint={publicHint} inputMode="url" />
           <div class="form-group">
-            <label class="required">URL</label>
-            <input type="url" value={form.http_url} onInput={e => set('http_url', e.target.value)} required placeholder="https://example.com" />
-          </div>
-          <div class="form-group">
-            <label>Method</label>
-            <select value={form.http_method} onChange={e => set('http_method', e.target.value)}>
+            <label for="mon-http-method">Method</label>
+            <select id="mon-http-method" value={form.http_method} onChange={e => set('http_method', e.target.value)}>
               {['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'PATCH'].map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           <div class="form-group">
-            <label>Expected Status</label>
-            <input type="number" value={form.http_expected_status} onInput={e => set('http_expected_status', e.target.value)} />
+            <label for="mon-http-status">Expected Status</label>
+            <input id="mon-http-status" type="number" value={form.http_expected_status} onInput={e => set('http_expected_status', e.target.value)} />
           </div>
           <div class="form-group">
-            <label>Body Match <span class="form-optional">(optional)</span></label>
-            <input type="text" value={form.http_body_match} onInput={e => set('http_body_match', e.target.value)} placeholder="Optional substring to match in response" />
+            <label for="mon-http-body-match">Body Match <span class="form-optional">(optional)</span></label>
+            <input id="mon-http-body-match" type="text" value={form.http_body_match} onInput={e => set('http_body_match', e.target.value)} placeholder="Optional substring to match in response" />
           </div>
           <div class="form-group">
-            <label>Headers (JSON) <span class="form-optional">(optional)</span></label>
-            <input type="text" value={form.http_headers} onInput={e => set('http_headers', e.target.value)} placeholder='{"Authorization": "Bearer ..."}' />
+            <label for="mon-http-headers">Headers (JSON) <span class="form-optional">(optional)</span></label>
+            <input id="mon-http-headers" type="text" value={form.http_headers} onInput={e => set('http_headers', e.target.value)} placeholder='{"Authorization": "Bearer ..."}' />
           </div>
           <div class="form-group">
-            <label>Body</label>
-            <textarea rows="3" value={form.http_body} onInput={e => set('http_body', e.target.value)} placeholder="Optional request body" />
+            <label for="mon-http-body">Body</label>
+            <textarea id="mon-http-body" rows="3" value={form.http_body} onInput={e => set('http_body', e.target.value)} placeholder="Optional request body" />
           </div>
         </>
       );
     case 'tcp':
       return (
         <>
+          <TargetInput id="mon-tcp-host" label="Host" required value={form.tcp_host}
+            onInput={e => set('tcp_host', e.target.value)} placeholder="example.com"
+            error={errors.tcp_host} hint={publicHint} />
           <div class="form-group">
-            <label class="required">Host</label>
-            <input type="text" value={form.tcp_host} onInput={e => set('tcp_host', e.target.value)} required placeholder="example.com" />
-          </div>
-          <div class="form-group">
-            <label class="required">Port</label>
-            <input type="number" value={form.tcp_port} onInput={e => set('tcp_port', e.target.value)} required placeholder="443" />
+            <label for="mon-tcp-port" class="required">Port</label>
+            <input id="mon-tcp-port" type="number" min="1" max="65535" value={form.tcp_port} onInput={e => set('tcp_port', e.target.value)} required aria-required="true" placeholder="443" />
           </div>
         </>
       );
     case 'ping':
       return (
-        <div class="form-group">
-          <label class="required">Host</label>
-          <input type="text" value={form.ping_host} onInput={e => set('ping_host', e.target.value)} required placeholder="example.com" />
-        </div>
+        <TargetInput id="mon-ping-host" label="Host" required value={form.ping_host}
+          onInput={e => set('ping_host', e.target.value)} placeholder="example.com"
+          error={errors.ping_host} hint={publicHint} />
       );
     case 'dns':
       return (
         <>
+          <TargetInput id="mon-dns-hostname" label="Hostname" required value={form.dns_hostname}
+            onInput={e => set('dns_hostname', e.target.value)} placeholder="example.com"
+            error={errors.dns_hostname} />
           <div class="form-group">
-            <label class="required">Hostname</label>
-            <input type="text" value={form.dns_hostname} onInput={e => set('dns_hostname', e.target.value)} required placeholder="example.com" />
-          </div>
-          <div class="form-group">
-            <label>Record Type</label>
-            <select value={form.dns_record_type} onChange={e => set('dns_record_type', e.target.value)}>
+            <label for="mon-dns-type">Record Type</label>
+            <select id="mon-dns-type" value={form.dns_record_type} onChange={e => set('dns_record_type', e.target.value)}>
               {['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'].map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div class="form-group">
-            <label>Expected</label>
-            <input type="text" value={form.dns_expected} onInput={e => set('dns_expected', e.target.value)} placeholder="Optional expected value" />
+            <label for="mon-dns-expected">Expected</label>
+            <input id="mon-dns-expected" type="text" value={form.dns_expected} onInput={e => set('dns_expected', e.target.value)} placeholder="Optional expected value" />
           </div>
-          <div class="form-group">
-            <label>Nameserver</label>
-            <input type="text" value={form.dns_nameserver} onInput={e => set('dns_nameserver', e.target.value)} placeholder="Optional, e.g. 8.8.8.8" />
-          </div>
+          <TargetInput id="mon-dns-nameserver" label={<>Nameserver <span class="form-optional">(optional)</span></>}
+            value={form.dns_nameserver} onInput={e => set('dns_nameserver', e.target.value)}
+            placeholder="e.g. 8.8.8.8" error={errors.dns_nameserver}
+            hint={publicHint ? 'Leave blank to use the default resolver. A custom nameserver must be reachable from the public internet.' : ''} />
         </>
       );
     case 'heartbeat':
       return (
         <div class="form-group">
-          <label>Grace Period (seconds)</label>
-          <input type="number" value={form.heartbeat_grace_period} onInput={e => set('heartbeat_grace_period', e.target.value)} />
+          <label for="mon-hb-grace">Grace Period (seconds)</label>
+          <input id="mon-hb-grace" type="number" value={form.heartbeat_grace_period} onInput={e => set('heartbeat_grace_period', e.target.value)} />
         </div>
       );
     default:
@@ -290,6 +399,16 @@ export function MonitorListPage() {
   const [policies, setPolicies] = useState([]);
   const [services, setServices] = useState([]);
   const [saving, setSaving] = useState(false);
+  // Server-side target errors, keyed by form key (http_url, tcp_host, ...).
+  const [targetErrors, setTargetErrors] = useState({});
+  const formRef = useRef(null);
+  // A save error that is not about one target input (an operator cap, the
+  // plan interval floor, a bad value). Shown at the top of the form.
+  const [formError, setFormError] = useState('');
+  const formErrorRef = useRef(null);
+  // The interval the edited monitor had when the form opened, so an
+  // unchanged interval below today's floor is left alone on save.
+  const [originalInterval, setOriginalInterval] = useState(0);
   const [matchRules, setMatchRules] = useState([]);
   const [monitorStates, setMonitorStates] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -311,8 +430,16 @@ export function MonitorListPage() {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const data = await get('/monitors');
-      const list = data.monitors || data || [];
+      // The list endpoint pages at 100 at most. Fetch every page so orgs
+      // with more monitors see all of them, and the cap count is right.
+      const list = [];
+      const pageSize = 100;
+      for (let offset = 0; ; offset += pageSize) {
+        const data = await get(`/monitors?limit=${pageSize}&offset=${offset}`);
+        const page = data?.monitors || data || [];
+        list.push(...page);
+        if (page.length < pageSize || offset >= 10000) break;
+      }
       setMonitors(list);
       // Drop placeholders the (eventually consistent) list now includes.
       setOptimistic(prev => prev.filter(o => !list.some(m => m.id === o.id)));
@@ -377,13 +504,16 @@ export function MonitorListPage() {
 
   // Auto-open edit modal when navigated with ?edit=<id>
   useEffect(() => {
-    if (!loading && monitors.length > 0) {
+    if (!loading && monitors.length > 0 && canWrite(currentUser.value?.role)) {
       const params = new URLSearchParams(window.location.search);
       const editParam = params.get('edit');
       if (editParam) {
         const m = monitors.find(mon => mon.id === editParam);
         if (m) {
           setEditId(m.id);
+          setTargetErrors({});
+          setFormError('');
+          setOriginalInterval(m.interval_seconds || 0);
           setForm(parseConfigToForm(m));
           loadPolicies();
           loadServices();
@@ -396,6 +526,9 @@ export function MonitorListPage() {
   }, [loading, monitors]);
 
   function openCreate() {
+    setTargetErrors({});
+    setFormError('');
+    setOriginalInterval(0);
     setEditId(null);
     setForm({ ...DEFAULT_FORM });
     setMatchRules([]);
@@ -409,6 +542,9 @@ export function MonitorListPage() {
   function openEdit(e, monitor) {
     e.preventDefault();
     e.stopPropagation();
+    setTargetErrors({});
+    setFormError('');
+    setOriginalInterval(monitor.interval_seconds || 0);
     setEditId(monitor.id);
     setForm(parseConfigToForm(monitor));
     loadPolicies();
@@ -430,6 +566,8 @@ export function MonitorListPage() {
 
   async function save() {
     setSaving(true);
+    setTargetErrors({});
+    setFormError('');
     try {
       const body = {
         name: form.name,
@@ -443,9 +581,11 @@ export function MonitorListPage() {
         description: form.description || '',
         auto_resolve: !!form.auto_resolve,
       };
-      if (form.latency_warning_ms) body.latency_warning_ms = +form.latency_warning_ms;
-      if (form.latency_critical_ms) body.latency_critical_ms = +form.latency_critical_ms;
-      if (form.escalation_policy_id) body.escalation_policy_id = form.escalation_policy_id;
+      // PATCH keeps any field the body leaves out, so send the cleared
+      // values explicitly (0 / '') or a cleared field would not save.
+      body.latency_warning_ms = +form.latency_warning_ms || 0;
+      body.latency_critical_ms = +form.latency_critical_ms || 0;
+      body.escalation_policy_id = form.escalation_policy_id || '';
       body.group_id = form.group_id || '';
       // Always send these so an empty value clears the prior selection
       // (picking "Service: None" or wiping the runbook URL must persist).
@@ -469,6 +609,12 @@ export function MonitorListPage() {
         body.labels = labels;
       } else {
         body.labels = {};
+      }
+
+      // PATCH keeps omitted fields. Leave an unchanged interval out, so a
+      // monitor saved under an older, lower floor can still be edited.
+      if (editId && originalInterval && body.interval_seconds === originalInterval) {
+        delete body.interval_seconds;
       }
 
       let monitorId = editId;
@@ -518,11 +664,34 @@ export function MonitorListPage() {
       closeModal();
       load(true);
     } catch (err) {
-      toast(err.message || 'Failed to save monitor', 'error');
+      // A refused target is shown next to its input, and focus moves there
+      // so keyboard and screen reader users land on the problem.
+      const fieldErrs = targetErrorsFrom(form.type, err);
+      // Anything else (an operator cap, the interval floor, a bad value)
+      // goes at the top of the form, where it stays until the next save.
+      if (fieldErrs) {
+        setTargetErrors(fieldErrs);
+      } else if (err.readonly) {
+        // The API client already showed the read-only toast.
+      } else {
+        setFormError(err.message || 'Could not save the monitor. Try again.');
+      }
     } finally {
       setSaving(false);
     }
   }
+
+  useEffect(() => {
+    if (!formRef.current || Object.keys(targetErrors).length === 0) return;
+    const el = formRef.current.querySelector('[aria-invalid="true"]');
+    if (el && el.focus) el.focus();
+  }, [targetErrors]);
+
+  // Move focus to a form-level error so keyboard and screen reader users
+  // hear it without hunting for it.
+  useEffect(() => {
+    if (formError && formErrorRef.current) formErrorRef.current.focus();
+  }, [formError]);
 
   async function handleDelete() {
     if (!editId) return;
@@ -622,18 +791,36 @@ export function MonitorListPage() {
     return true;
   });
 
+  // Viewers are read-only: no create or edit controls.
+  const writer = canWrite(currentUser.value?.role);
+  // Monitor cap: the plan limit on SaaS, the operator setting in FOSS.
+  // The server enforces it; this keeps people from filling in a form that
+  // can only be refused.
+  const limits = currentLimits();
+  const monitorCount = displayMonitors.length;
+  const atCap = limits.maxMonitors > 0 && monitorCount >= limits.maxMonitors;
+  const canUpgrade = atCap && limits.source === 'plan' && appMeta.value?.billing_enabled;
+  const countLabel = `${monitorCount} ${monitorCount === 1 ? 'monitor' : 'monitors'}`;
+
   return (
     <div class="monitors-page">
       <ToastContainer toasts={toasts} />
-      <PageHeader title="Monitors" subtitle={`${displayMonitors.length} monitors`}
+      <PageHeader title="Monitors"
+        subtitle={limits.maxMonitors > 0 ? `${monitorCount} of ${limits.maxMonitors} monitors` : countLabel}
         actions={
-          appMeta.value?.billing_enabled && currentOrg.value?.plan === 'free' && monitors.length >= 10
-            ? <a href="/settings/billing" class="btn btn-primary">Upgrade to add more monitors</a>
-            : <div style="display: flex; gap: 8px;">
-                <button class="btn" data-readonly-block onClick={openGroupCreate}>New Group</button>
-                <button class="btn btn-primary" data-readonly-block onClick={openCreate}>New Monitor</button>
-              </div>
+          !writer ? null
+          : <div class="monitors-actions">
+              <button class="btn" data-readonly-block onClick={openGroupCreate}>New Group</button>
+              {canUpgrade
+                ? <UpgradeLink class="btn btn-primary" fallback="Monitor limit reached. Ask an owner or admin to upgrade.">Upgrade to add more monitors</UpgradeLink>
+                : <button class="btn btn-primary" data-readonly-block onClick={openCreate}
+                          disabled={atCap} aria-describedby={atCap ? 'monitor-cap-note' : undefined}>
+                    New Monitor
+                  </button>}
+            </div>
         } />
+      {atCap && !canUpgrade && <MonitorCapNote count={monitorCount} max={limits.maxMonitors} source={limits.source} />}
+      <ViewOnlyNote />
 
       <div class="filters-bar">
         <SearchInput value={search} onInput={setSearch} placeholder="Search monitors..." />
@@ -667,7 +854,7 @@ export function MonitorListPage() {
 
       {filtered.length === 0 ? (
         <EmptyState title="No monitors found"
-          description={search || typeFilter ? 'Try adjusting your filters' : 'Create your first monitor to get started'} />
+          description={search || typeFilter ? 'Try adjusting your filters' : writer ? 'Create your first monitor to get started' : 'No monitors yet. Owners, admins and members can add them.'} />
       ) : groupView && groups.length > 0 ? (
         <div class="monitor-list">
           {groups.map(g => {
@@ -681,7 +868,7 @@ export function MonitorListPage() {
                   <StatusDot status={worstStatus(groupMonitors)} />
                   <strong style="flex: 1;">{g.name}</strong>
                   <span style="font-size: 0.8125rem; color: var(--color-text-muted);">{groupMonitors.length} monitors</span>
-                  <button class="btn btn-xs" onClick={e => { e.stopPropagation(); openGroupEdit(g); }}>Edit</button>
+                  {writer && <button class="btn btn-xs" aria-label={`Edit group ${g.name}`} onClick={e => { e.stopPropagation(); openGroupEdit(g); }}>Edit</button>}
                   <span style="font-size: 0.75rem;">{collapsed ? '\u25B6' : '\u25BC'}</span>
                 </div>
                 {!collapsed && groupMonitors.map(m => <MonitorCard key={m.id} m={m} openEdit={openEdit} />)}
@@ -715,52 +902,61 @@ export function MonitorListPage() {
             <button type="button" class="btn btn-sm" onClick={discardDraft}>Discard</button>
           </div>
         )}
-        <form onSubmit={e => { e.preventDefault(); save(); }}>
+        <form ref={formRef} onSubmit={e => { e.preventDefault(); save(); }}>
+          {formError && (
+            <div class="form-error" role="alert" tabIndex={-1} ref={formErrorRef}>
+              <ServerMessage message={formError} />
+            </div>
+          )}
           <div class="form-group">
-            <label class="required">Name</label>
-            <input type="text" value={form.name} onInput={e => setForm({ ...form, name: e.target.value })} required placeholder="My Monitor" />
+            <label for="mon-name" class="required">Name</label>
+            <input id="mon-name" type="text" value={form.name} onInput={e => setForm({ ...form, name: e.target.value })} required placeholder="My Monitor" />
           </div>
           <div class="form-group">
-            <label class="required">Type</label>
-            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
+            <label for="mon-type" class="required">Type</label>
+            <select id="mon-type" value={form.type} disabled={!!editId} aria-describedby={editId ? 'mon-type-help' : undefined}
+                    onChange={e => { setTargetErrors({}); setForm({ ...form, type: e.target.value }); }}>
               <option value="http">HTTP</option>
               <option value="tcp">TCP</option>
               <option value="ping">Ping</option>
               <option value="dns">DNS</option>
               <option value="heartbeat">Heartbeat</option>
             </select>
+            {editId && <p id="mon-type-help" class="form-help">The type of an existing monitor cannot be changed. Create a new monitor instead.</p>}
           </div>
 
-          <TypeConfigFields form={form} setForm={setForm} />
+          <TypeConfigFields form={form} setForm={setForm} errors={targetErrors}
+            clearError={key => setTargetErrors(prev => { const next = { ...prev }; delete next[key]; return next; })} />
 
           <div class="form-group">
-            <label>Interval (seconds)</label>
-            <input type="number" value={form.interval_seconds}
-                   min={currentOrg.value?.plan === 'enterprise' ? 10 : currentOrg.value?.plan === 'free' ? 300 : 30}
+            <label for="mon-interval">Interval (seconds)</label>
+            <input id="mon-interval" type="number" value={form.interval_seconds}
+                   min={intervalFloor(editId ? originalInterval : 0)} step="1" required
+                   aria-describedby="mon-interval-help"
                    onInput={e => setForm({ ...form, interval_seconds: e.target.value })} />
-            {currentOrg.value?.plan === 'free' && <p class="form-help">Free plan minimum: 300s (5 min). <a href="/settings/billing">Upgrade</a> for faster checks.</p>}
+            <IntervalHelp originalInterval={editId ? originalInterval : 0} />
           </div>
           {/* Heartbeat is push-based: no outbound request, latency is always 0,
               and it never reports degraded. Timeout and latency thresholds don't apply. */}
           {form.type !== 'heartbeat' && (
             <>
               <div class="form-group">
-                <label>Timeout (seconds)</label>
-                <input type="number" value={form.timeout_seconds} onInput={e => setForm({ ...form, timeout_seconds: e.target.value })} />
+                <label for="mon-timeout">Timeout (seconds)</label>
+                <input id="mon-timeout" type="number" min="1" value={form.timeout_seconds} onInput={e => setForm({ ...form, timeout_seconds: e.target.value })} />
               </div>
               <div class="form-group">
-                <label>Latency Warning (ms)</label>
-                <input type="number" value={form.latency_warning_ms} onInput={e => setForm({ ...form, latency_warning_ms: e.target.value })} placeholder="e.g. 500" />
+                <label for="mon-latency-warning">Latency Warning (ms)</label>
+                <input id="mon-latency-warning" type="number" min="0" value={form.latency_warning_ms} onInput={e => setForm({ ...form, latency_warning_ms: e.target.value })} placeholder="e.g. 500" />
               </div>
               <div class="form-group">
-                <label>Latency Critical (ms)</label>
-                <input type="number" value={form.latency_critical_ms} onInput={e => setForm({ ...form, latency_critical_ms: e.target.value })} placeholder="e.g. 2000" />
+                <label for="mon-latency-critical">Latency Critical (ms)</label>
+                <input id="mon-latency-critical" type="number" min="0" value={form.latency_critical_ms} onInput={e => setForm({ ...form, latency_critical_ms: e.target.value })} placeholder="e.g. 2000" />
               </div>
             </>
           )}
           <div class="form-group">
-            <label>Down Severity</label>
-            <select value={form.down_severity} onChange={e => setForm({ ...form, down_severity: e.target.value })}>
+            <label for="mon-down-severity">Down Severity</label>
+            <select id="mon-down-severity" value={form.down_severity} onChange={e => setForm({ ...form, down_severity: e.target.value })}>
               <option value="critical">Critical</option>
               <option value="warning">Warning</option>
               <option value="info">Info</option>
@@ -768,8 +964,8 @@ export function MonitorListPage() {
           </div>
           {form.type !== 'heartbeat' && (
             <div class="form-group">
-              <label>Degraded Severity</label>
-              <select value={form.degraded_severity} onChange={e => setForm({ ...form, degraded_severity: e.target.value })}>
+              <label for="mon-degraded-severity">Degraded Severity</label>
+              <select id="mon-degraded-severity" value={form.degraded_severity} onChange={e => setForm({ ...form, degraded_severity: e.target.value })}>
                 <option value="critical">Critical</option>
                 <option value="warning">Warning</option>
                 <option value="info">Info</option>
@@ -777,29 +973,33 @@ export function MonitorListPage() {
             </div>
           )}
           <div class="form-group">
-            <label>Escalation Policy <span class="form-optional">(optional)</span></label>
-            <select value={form.escalation_policy_id} onChange={e => setForm({ ...form, escalation_policy_id: e.target.value })}>
+            <label htmlFor="mon-escalation-policy">Escalation Policy <span class="form-optional">(optional)</span></label>
+            <select id="mon-escalation-policy" aria-describedby="mon-escalation-policy-help"
+                    value={form.escalation_policy_id} onChange={e => setForm({ ...form, escalation_policy_id: e.target.value })}>
               <option value="">None</option>
               {policies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
+            <p id="mon-escalation-policy-help" class="form-help">
+              An alert opens as soon as a check fails, including the first check after you save.
+            </p>
           </div>
           <div class="form-group">
-            <label>Group <span class="form-optional">(optional)</span></label>
-            <select value={form.group_id} onChange={e => setForm({ ...form, group_id: e.target.value })}>
+            <label for="mon-group">Group <span class="form-optional">(optional)</span></label>
+            <select id="mon-group" value={form.group_id} onChange={e => setForm({ ...form, group_id: e.target.value })}>
               <option value="">None</option>
               {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </div>
           <div class="form-group">
-            <label>Runbook URL <span class="form-optional">(optional)</span></label>
-            <input type="url" value={form.runbook_url}
+            <label for="mon-runbook">Runbook URL <span class="form-optional">(optional)</span></label>
+            <input id="mon-runbook" type="url" value={form.runbook_url}
                    onInput={e => setForm({ ...form, runbook_url: e.target.value })}
                    placeholder="https://wiki.example.com/runbooks/..." />
           </div>
           {appMeta.value?.edition !== 'foss' && (
             <div class="form-group">
-              <label>Service <span class="form-optional">(optional)</span></label>
-              <select value={form.service_id}
+              <label for="mon-service">Service <span class="form-optional">(optional)</span></label>
+              <select id="mon-service" value={form.service_id}
                       onChange={e => setForm({ ...form, service_id: e.target.value })}>
                 <option value="">None</option>
                 {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -807,17 +1007,17 @@ export function MonitorListPage() {
             </div>
           )}
           <div class="form-group">
-            <label>Description <span class="form-optional">(optional)</span></label>
-            <textarea rows="3" value={form.description}
+            <label for="mon-description">Description <span class="form-optional">(optional)</span></label>
+            <textarea id="mon-description" rows="3" value={form.description}
               onInput={e => setForm({ ...form, description: e.target.value })}
               placeholder="Optional description for this monitor" />
           </div>
           <div class="form-group">
-            <label>Tags <span class="form-optional">(optional)</span></label>
-            <input type="text" value={form.tags}
+            <label for="mon-tags">Tags <span class="form-optional">(optional)</span></label>
+            <input id="mon-tags" type="text" aria-describedby="mon-tags-help" value={form.tags}
               onInput={e => setForm({ ...form, tags: e.target.value })}
               placeholder="env:prod, team:backend, region:us-east" />
-            <p class="form-help">Comma-separated tags. Use key:value format for labeled tags.</p>
+            <p id="mon-tags-help" class="form-help">Comma-separated tags. Use key:value format for labeled tags.</p>
           </div>
           {/* Match rules evaluate HTTP response status/body/headers; the scheduler
               only applies them when a check produced a status code (HTTP only). */}
@@ -832,10 +1032,10 @@ export function MonitorListPage() {
             </p>
             {matchRules.map((rule, idx) => (
               <div key={idx} class="card" style="padding: 12px; margin-bottom: 8px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                <div class="match-rule-grid match-rule-grid--3">
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Status Code</label>
-                    <input type="number" placeholder="e.g. 200"
+                    <label for={`mr-${idx}-status-code`} style="font-size: 0.75rem;">Status Code</label>
+                    <input id={`mr-${idx}-status-code`} type="number" placeholder="e.g. 200"
                       value={rule.status_code || ''}
                       onInput={e => {
                         const v = e.target.value ? +e.target.value : null;
@@ -843,24 +1043,24 @@ export function MonitorListPage() {
                       }} />
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Body Match</label>
-                    <input type="text" placeholder="e.g. ok"
+                    <label for={`mr-${idx}-body-match`} style="font-size: 0.75rem;">Body Match</label>
+                    <input id={`mr-${idx}-body-match`} type="text" placeholder="e.g. ok"
                       value={rule.body_match || ''}
                       onInput={e => setMatchRules(matchRules.map((r, i) => i === idx ? { ...r, body_match: e.target.value } : r))} />
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Assign State</label>
-                    <select value={rule.state_id || ''}
+                    <label for={`mr-${idx}-state`} style="font-size: 0.75rem;">Assign State</label>
+                    <select id={`mr-${idx}-state`} value={rule.state_id || ''}
                       onChange={e => setMatchRules(matchRules.map((r, i) => i === idx ? { ...r, state_id: e.target.value } : r))}>
                       <option value="">-- select --</option>
                       {monitorStates.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </div>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 8px;">
+                <div class="match-rule-grid match-rule-grid--4">
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Status Min</label>
-                    <input type="number" placeholder="e.g. 200"
+                    <label for={`mr-${idx}-status-min`} style="font-size: 0.75rem;">Status Min</label>
+                    <input id={`mr-${idx}-status-min`} type="number" placeholder="e.g. 200"
                       value={rule.status_code_min || ''}
                       onInput={e => {
                         const v = e.target.value ? +e.target.value : null;
@@ -868,8 +1068,8 @@ export function MonitorListPage() {
                       }} />
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Status Max</label>
-                    <input type="number" placeholder="e.g. 299"
+                    <label for={`mr-${idx}-status-max`} style="font-size: 0.75rem;">Status Max</label>
+                    <input id={`mr-${idx}-status-max`} type="number" placeholder="e.g. 299"
                       value={rule.status_code_max || ''}
                       onInput={e => {
                         const v = e.target.value ? +e.target.value : null;
@@ -877,8 +1077,8 @@ export function MonitorListPage() {
                       }} />
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Body Mode</label>
-                    <select value={rule.body_match_mode || 'contains'}
+                    <label for={`mr-${idx}-body-mode`} style="font-size: 0.75rem;">Body Mode</label>
+                    <select id={`mr-${idx}-body-mode`} value={rule.body_match_mode || 'contains'}
                       onChange={e => setMatchRules(matchRules.map((r, i) => i === idx ? { ...r, body_match_mode: e.target.value } : r))}>
                       <option value="contains">Contains</option>
                       <option value="not_contains">Not Contains</option>
@@ -886,16 +1086,16 @@ export function MonitorListPage() {
                     </select>
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Header Name</label>
-                    <input type="text" placeholder="e.g. Location"
+                    <label for={`mr-${idx}-header-name`} style="font-size: 0.75rem;">Header Name</label>
+                    <input id={`mr-${idx}-header-name`} type="text" placeholder="e.g. Location"
                       value={rule.header_match || ''}
                       onInput={e => setMatchRules(matchRules.map((r, i) => i === idx ? { ...r, header_match: e.target.value } : r))} />
                   </div>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin-top: 8px;">
+                <div class="match-rule-grid match-rule-grid--wide">
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Header Match</label>
-                    <select value={rule.header_match_mode || 'equals'}
+                    <label for={`mr-${idx}-header-match`} style="font-size: 0.75rem;">Header Match</label>
+                    <select id={`mr-${idx}-header-match`} value={rule.header_match_mode || 'equals'}
                       onChange={e => setMatchRules(matchRules.map((r, i) => i === idx ? { ...r, header_match_mode: e.target.value } : r))}>
                       <option value="equals">Equals</option>
                       <option value="contains">Contains</option>
@@ -903,14 +1103,15 @@ export function MonitorListPage() {
                     </select>
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
-                    <label style="font-size: 0.75rem;">Header Value <span class="form-optional">(blank = header present)</span></label>
-                    <input type="text" placeholder="e.g. https://example.com/login"
+                    <label for={`mr-${idx}-header-value`} style="font-size: 0.75rem;">Header Value <span class="form-optional">(blank = header present)</span></label>
+                    <input id={`mr-${idx}-header-value`} type="text" placeholder="e.g. https://example.com/login"
                       value={rule.header_value || ''}
                       onInput={e => setMatchRules(matchRules.map((r, i) => i === idx ? { ...r, header_value: e.target.value } : r))} />
                   </div>
                 </div>
                 <div style="margin-top: 8px; display: flex; justify-content: flex-end;">
-                  <button type="button" class="btn btn-xs btn-danger" onClick={() => setMatchRules(matchRules.filter((_, i) => i !== idx))}>
+                  <button type="button" class="btn btn-xs btn-danger" aria-label={`Remove rule ${idx + 1}`}
+                          onClick={() => setMatchRules(matchRules.filter((_, i) => i !== idx))}>
                     Remove
                   </button>
                 </div>
@@ -950,12 +1151,12 @@ export function MonitorListPage() {
       <Modal open={showGroupModal} onClose={() => setShowGroupModal(false)} title={editGroupId ? 'Edit Group' : 'New Group'}>
         <form onSubmit={e => { e.preventDefault(); saveGroup(); }}>
           <div class="form-group">
-            <label class="required">Name</label>
-            <input type="text" value={groupForm.name} onInput={e => setGroupForm({ ...groupForm, name: e.target.value })} required placeholder="Group name" />
+            <label for="group-name" class="required">Name</label>
+            <input id="group-name" type="text" value={groupForm.name} onInput={e => setGroupForm({ ...groupForm, name: e.target.value })} required placeholder="Group name" />
           </div>
           <div class="form-group">
-            <label>Description <span class="form-optional">(optional)</span></label>
-            <textarea rows="3" value={groupForm.description}
+            <label for="group-description">Description <span class="form-optional">(optional)</span></label>
+            <textarea id="group-description" rows="3" value={groupForm.description}
               onInput={e => setGroupForm({ ...groupForm, description: e.target.value })}
               placeholder="Optional description" />
           </div>

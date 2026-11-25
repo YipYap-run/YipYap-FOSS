@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 )
@@ -322,5 +324,51 @@ func TestWebhook_SendDingTalkFormat(t *testing.T) {
 	}
 	if msgType, _ := m["msgtype"].(string); msgType != "text" {
 		t.Errorf("expected msgtype 'text', got %q", msgType)
+	}
+}
+
+func TestWebhook_SignsPayloadWhenSecretSet(t *testing.T) {
+	const secret = WebhookSecretPrefix + "a-shared-signing-secret"
+	var gotBody []byte
+	var gotSignature, gotTimestamp string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		gotSignature = r.Header.Get(WebhookSignatureHeader)
+		gotTimestamp = r.Header.Get(WebhookTimestampHeader)
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	wh := NewWebhook(WebhookConfig{URL: srv.URL, Format: "generic", SigningSecret: secret}, nil)
+	if _, err := wh.Send(context.Background(), testJob()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotTimestamp == "" {
+		t.Fatal("missing X-YipYap-Timestamp")
+	}
+	ts, err := strconv.ParseInt(gotTimestamp, 10, 64)
+	if err != nil {
+		t.Fatalf("timestamp %q: %v", gotTimestamp, err)
+	}
+	if want := SignWebhook(secret, ts, gotBody); gotSignature != want {
+		t.Fatalf("signature = %q, want %q", gotSignature, want)
+	}
+	if err := VerifyWebhook(secret, gotTimestamp, gotSignature, gotBody, time.Now()); err != nil {
+		t.Fatalf("receipt does not verify: %v", err)
+	}
+}
+
+func TestWebhook_OmitsSignatureWithoutSecret(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-YipYap-Signature") != "" {
+			t.Error("unsigned webhook carried a signature")
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	wh := NewWebhook(WebhookConfig{URL: srv.URL, Format: "generic"}, nil)
+	if _, err := wh.Send(context.Background(), testJob()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

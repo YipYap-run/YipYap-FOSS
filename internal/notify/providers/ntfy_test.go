@@ -64,6 +64,9 @@ func TestNtfy_Send(t *testing.T) {
 	if got := gotHeaders.Get("Authorization"); got != "Bearer tk_secret123" {
 		t.Errorf("expected Authorization 'Bearer tk_secret123', got %q", got)
 	}
+	if got := gotHeaders.Get("X-Actions"); got != "view, Acknowledge, https://example.com/ack/a1, clear=true" {
+		t.Errorf("X-Actions = %q", got)
+	}
 }
 
 func TestNtfy_SendWarning(t *testing.T) {
@@ -160,5 +163,14 @@ func TestNtfy_DefaultServerURL(t *testing.T) {
 	}
 	if n.MaxConcurrency() != 10 {
 		t.Errorf("expected MaxConcurrency 10, got %d", n.MaxConcurrency())
+	}
+}
+
+func TestNtfyAckAction(t *testing.T) {
+	if ntfyAckAction("") != "" {
+		t.Error("empty link must give no action")
+	}
+	if ntfyAckAction("https://x.example/ack/a,b") != "" {
+		t.Error("a comma would break the action header")
 	}
 }

@@ -3,7 +3,6 @@ package checker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -14,10 +13,10 @@ import (
 var ErrSSRFBlocked = errors.New("checker: resolved address is in a blocked range")
 
 // SSRFGuardedDialContext wraps a base DialContext with an SSRF check that
-// fires at TCP-connect time. The check re-resolves the host for every
-// connection so a DNS rebind that flips a public A record to
-// 169.254.169.254 between create-time validation and Dial is rejected
-// before bytes leave the process. Redirects follow the same DialContext
+// fires at TCP-connect time. It resolves the host once, refuses when any
+// address is in a blocked range, and hands the base dialer only the
+// vetted IP literal, so a DNS rebind between the check and the connect
+// has nothing to act on (mon-4). Redirects follow the same DialContext
 // because http.Client.Do issues fresh requests through the same
 // transport, so a 302 to a private address is also caught.
 //
@@ -27,13 +26,10 @@ var ErrSSRFBlocked = errors.New("checker: resolved address is in a blocked range
 // YIPYAP_ALLOW_PRIVATE_CONTROL_PLANE_TARGETS=true; this wrapper then
 // reduces to a direct pass-through.
 //
-// Distinct from the provider-internal ssrfGuardedDialContext, which also
-// covers CGNAT (100.64/10) and IPv6 ULA (fc00::/7). The check here goes
-// through validateHost so it sees the same blocked ranges as
-// ValidateControlPlaneHTTPTarget, including the IPv4-compat IPv6
-// (R2-H4) and non-standard IP forms (decimal/hex/octal). Use this for
-// new call sites such as the OIDC verifier discovery and JWKS-fetch
-// transports (A2-NM-1).
+// Blocked ranges are those of IsPrivateAddr, the same set the save-time
+// checks use. Use this for control-plane call sites such as the OIDC
+// verifier discovery and JWKS-fetch transports (A2-NM-1). Monitor checks
+// use monitorDialContext, governed by AllowPrivateTargets instead.
 func SSRFGuardedDialContext(base func(ctx context.Context, network, addr string) (net.Conn, error)) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	if base == nil {
 		base = (&net.Dialer{}).DialContext
@@ -42,20 +38,7 @@ func SSRFGuardedDialContext(base func(ctx context.Context, network, addr string)
 		if AllowPrivateControlPlaneTargets {
 			return base(ctx, network, addr)
 		}
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			// Some networks (unix sockets etc.) aren't host:port, let the
-			// base dialer surface the real error rather than reject here.
-			return base(ctx, network, addr)
-		}
-		// validateHost already handles literal IPs (including non-standard
-		// hex/decimal/octal forms and the IPv4-compat IPv6 that R2-H4
-		// fixed) AND DNS-resolved hostnames. Any rejection from
-		// validateHost is an SSRF block, translate to ErrSSRFBlocked.
-		if err := validateHost(host); err != nil {
-			return nil, fmt.Errorf("%w: %s (%v)", ErrSSRFBlocked, host, err)
-		}
-		return base(ctx, network, addr)
+		return guardedDial(ctx, base, network, addr)
 	}
 }
 

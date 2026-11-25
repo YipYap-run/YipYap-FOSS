@@ -51,10 +51,30 @@ func (s *APIKeyStore) ListByOrg(ctx context.Context, orgID string, params store.
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.q.QueryContext(ctx,
+	return s.list(ctx,
 		`SELECT id, org_id, name, key_hash, prefix, scopes, created_by, expires_at, created_at, last_used_at
 		 FROM api_keys WHERE org_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		orgID, limit, params.Offset)
+}
+
+func (s *APIKeyStore) ListByCreator(ctx context.Context, orgID, userID string) ([]*domain.APIKey, error) {
+	return s.list(ctx,
+		`SELECT id, org_id, name, key_hash, prefix, scopes, created_by, expires_at, created_at, last_used_at
+		 FROM api_keys WHERE org_id = ? AND created_by = ? ORDER BY created_at DESC`,
+		orgID, userID)
+}
+
+func (s *APIKeyStore) DeleteByCreator(ctx context.Context, orgID, userID string) (int64, error) {
+	res, err := s.q.ExecContext(ctx,
+		`DELETE FROM api_keys WHERE org_id = ? AND created_by = ?`, orgID, userID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s *APIKeyStore) list(ctx context.Context, query string, args ...any) ([]*domain.APIKey, error) {
+	rows, err := s.q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

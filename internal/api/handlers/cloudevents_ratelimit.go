@@ -10,8 +10,8 @@ import (
 )
 
 // DefaultMaxStreamsPerOrg caps the number of concurrent /cloudevents/stream
-// connections per org. A stream connection pins a server goroutine plus
-// a 1024-slot buffered channel; without the cap an authenticated caller
+// connections per org. A stream connection pins a server goroutine and a
+// log reader; without the cap an authenticated caller
 // could open thousands and exhaust memory. See H-16.
 const DefaultMaxStreamsPerOrg = 10
 

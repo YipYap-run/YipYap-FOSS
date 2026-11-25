@@ -11,6 +11,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/mailer"
+	"github.com/YipYap-run/YipYap-FOSS/internal/session"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
@@ -29,8 +30,8 @@ func NewAccountDeleteHandler(s store.Store, jwt *auth.JWTIssuer, m *mailer.Maile
 
 type deletionRequest struct {
 	Password      string `json:"password"`
-	MFACode       string `json:"mfa_code"`
 	ConfirmPhrase string `json:"confirm_phrase"`
+	mfaProof
 }
 
 const requiredConfirmPhrase = "I am sure I wish to delete my account"
@@ -76,8 +77,8 @@ func (h *AccountDeleteHandler) RequestDeletion(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := verifyMFAIfEnabled(ctx, h.store, user, req.MFACode); err != nil {
-		errorResponse(w, http.StatusUnauthorized, "invalid MFA code")
+	if err := verifyMFAIfEnabled(ctx, h.store, user, req.mfaProof); err != nil {
+		writeStepUpError(w, http.StatusUnauthorized, err)
 		return
 	}
 
@@ -111,9 +112,10 @@ func (h *AccountDeleteHandler) RequestDeletion(w http.ResponseWriter, r *http.Re
 	confirmURL := fmt.Sprintf("%s/account/confirm-delete?token=%s", h.baseURL, url.QueryEscape(token))
 	subject := "Confirm Account Deletion"
 	body := "You requested to delete your YipYap account.\n\n" +
-		"Click the link below to confirm:\n\n" +
+		"Open the link below within 1 hour to confirm:\n\n" +
 		confirmURL + "\n\n" +
-		"After confirmation your account will be disabled and permanently deleted after a 96-hour grace period.\n\n" +
+		"After you confirm, your account is disabled right away and deleted after 4 days. " +
+		"To keep it, sign in during that time and we will email you a link to restore it.\n\n" +
 		"If you did not request this, you can safely ignore this email."
 
 	go func() {
@@ -151,6 +153,11 @@ func (h *AccountDeleteHandler) ConfirmDeletion(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if user.DeletedAt != nil {
+		errorResponse(w, http.StatusGone, "this account was already deleted")
+		return
+	}
+
 	// Idempotent: if already disabled, return success.
 	if user.DisabledAt != nil {
 		jsonResponse(w, http.StatusOK, map[string]interface{}{"status": "already_disabled"})
@@ -158,7 +165,7 @@ func (h *AccountDeleteHandler) ConfirmDeletion(w http.ResponseWriter, r *http.Re
 	}
 
 	// Verify email hasn't changed since the token was issued.
-	if user.Email != claims.Role {
+	if user.Email != domain.NormalizeEmail(claims.Role) {
 		errorResponse(w, http.StatusUnauthorized, "deletion token is no longer valid")
 		return
 	}
@@ -192,8 +199,14 @@ func (h *AccountDeleteHandler) ConfirmDeletion(w http.ResponseWriter, r *http.Re
 		errorResponse(w, http.StatusInternalServerError, "failed to disable account")
 		return
 	}
+	if err := session.RevokeAll(ctx, h.store, user.ID, ""); err != nil {
+		slog.Error("confirm deletion: revoke sessions", "user_id", user.ID, "error", err)
+		errorResponse(w, http.StatusInternalServerError, "account disabled, but signing out its sessions failed")
+		return
+	}
+	clearSessionCookie(w)
 
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "account disabled, will be permanently deleted in 96 hours"})
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "account disabled, will be deleted in 4 days"})
 }
 
 type recoveryRequest struct {
@@ -214,6 +227,7 @@ func (h *AccountDeleteHandler) RequestRecovery(w http.ResponseWriter, r *http.Re
 		errorResponse(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Email = domain.NormalizeEmail(req.Email)
 	if req.Email == "" || req.Password == "" {
 		errorResponse(w, http.StatusBadRequest, "email and password are required")
 		return
@@ -254,7 +268,7 @@ func (h *AccountDeleteHandler) RequestRecovery(w http.ResponseWriter, r *http.Re
 	confirmURL := fmt.Sprintf("%s/account/confirm-recover?token=%s", h.baseURL, url.QueryEscape(token))
 	subject := "Recover Your Account"
 	body := "You requested to recover your YipYap account.\n\n" +
-		"Click the link below to re-enable your account:\n\n" +
+		"Open the link below within 1 hour to restore your account and cancel the deletion:\n\n" +
 		confirmURL + "\n\n" +
 		"If you did not request this, you can safely ignore this email."
 
@@ -293,13 +307,20 @@ func (h *AccountDeleteHandler) ConfirmRecovery(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// The 4-day window ended and the account was deleted. Say so instead of
+	// the generic "no longer valid" the email check below would give.
+	if user.DeletedAt != nil {
+		errorResponse(w, http.StatusGone, "this account was deleted and cannot be restored")
+		return
+	}
+
 	// Idempotent: if already active, return success.
 	if user.DisabledAt == nil {
 		jsonResponse(w, http.StatusOK, map[string]interface{}{"status": "already_active"})
 		return
 	}
 
-	if user.Email != claims.Role {
+	if user.Email != domain.NormalizeEmail(claims.Role) {
 		errorResponse(w, http.StatusUnauthorized, "recovery token is no longer valid")
 		return
 	}

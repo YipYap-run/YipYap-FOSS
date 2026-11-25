@@ -1,0 +1,134 @@
+/* Webhook custom headers row editor (settings > channels). */
+.headers-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.headers-editor:focus-visible {
+  outline: 2px solid var(--color-primary, currentColor);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.headers-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.headers-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Wide: name | value | actions on one line. Narrow: stacked (below). */
+.headers-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+.headers-row.has-error {
+  border-color: var(--color-down);
+}
+
+.headers-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.headers-cell input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.headers-cell-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.headers-saved-name {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 32px;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+}
+
+.headers-value-input {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.headers-value-input input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+/* "Value set": a status, not a field. Text plus a check so the state
+   does not rely on color. */
+.headers-value-set {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  font-size: 0.8125rem;
+  color: var(--color-text);
+}
+.headers-value-set::before {
+  content: "\2713";
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.headers-actions {
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+  /* Line the buttons up with the inputs, under the small labels. */
+  padding-top: 16px;
+}
+.headers-actions .btn {
+  min-height: 24px;
+  white-space: nowrap;
+}
+
+.headers-add {
+  align-self: flex-start;
+}
+.headers-cap {
+  margin: 0;
+}
+
+/* Screen reader only text. */
+.headers-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 560px) {
+  .headers-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .headers-actions {
+    padding-top: 0;
+    justify-content: flex-end;
+  }
+}

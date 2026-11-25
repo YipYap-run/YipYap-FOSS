@@ -1,12 +1,15 @@
 package providers
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 )
 
@@ -114,3 +117,24 @@ func TestTelegramParseAck_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
+
+// A channel whose chat has not sent its /link code has no chat_id; the
+// send fails without calling Telegram (notif-16).
+func TestTelegramSendUnlinkedChannelFails(t *testing.T) {
+	tg := NewTelegram(TelegramConfig{BotToken: "platform"}, nil)
+	tg.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("telegram API called for an unlinked channel")
+		return nil, nil
+	})}
+	cfg := append([]byte{0x00}, []byte(`{"chat_title":"x"}`)...)
+	_, err := tg.Send(context.Background(), domain.NotificationJob{
+		AlertID: "a1", MonitorName: "m", TargetConfig: base64.StdEncoding.EncodeToString(cfg),
+	})
+	if err == nil || !strings.Contains(err.Error(), "not linked") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

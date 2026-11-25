@@ -56,7 +56,7 @@ func wirePhase5ReplyProvider(t *testing.T, s *sqlite.SQLiteStore) (*providers.Cl
 	t.Helper()
 	reg := reply.NewMemoryRegistry(256, time.Hour)
 	d := reply.NewDispatcher(reg)
-	if got := replyhandlers.RegisterAll(d, s); len(got) != 13 {
+	if got := replyhandlers.RegisterAll(d, s, nil); len(got) != 13 {
 		t.Fatalf("RegisterAll returned %d handlers, want 13 (Phase-2 three + Phase-5 ten)", len(got))
 	}
 	p := providers.NewCloudEventHTTP(nil)

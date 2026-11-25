@@ -13,7 +13,7 @@ func TestRegisterAll_RegistersAllHandlers(t *testing.T) {
 	reg := reply.NewMemoryRegistry(10, time.Hour)
 	d := reply.NewDispatcher(reg)
 
-	hs := RegisterAll(d, s)
+	hs := RegisterAll(d, s, nil)
 	if len(hs) != 13 {
 		t.Fatalf("returned %d handlers, want 13 (3 Phase-2 + 10 Phase-5)", len(hs))
 	}
@@ -24,16 +24,16 @@ func TestRegisterAll_RegistersAllHandlers(t *testing.T) {
 		types.TypeReplyAlertEnrichedV1: false,
 		types.TypeReplyAlertLinkedV1:   false,
 		// Phase-5.
-		types.TypeReplyAlertSuppressedV1:          false,
-		types.TypeReplyAlertDeduplicatedV1:        false,
-		types.TypeReplyAlertEscalatedV1:           false,
-		types.TypeReplyAlertRemediationStartedV1:  false,
-		types.TypeReplyAlertRemediationResultV1:   false,
-		types.TypeReplyAlertOwnershipV1:           false,
-		types.TypeReplyAlertAckWithContextV1:      false,
-		types.TypeReplyAlertRouteV1:               false,
-		types.TypeReplyAlertStatusPageV1:          false,
-		types.TypeReplyMonitorDeregisterV1:        false,
+		types.TypeReplyAlertSuppressedV1:         false,
+		types.TypeReplyAlertDeduplicatedV1:       false,
+		types.TypeReplyAlertEscalatedV1:          false,
+		types.TypeReplyAlertRemediationStartedV1: false,
+		types.TypeReplyAlertRemediationResultV1:  false,
+		types.TypeReplyAlertOwnershipV1:          false,
+		types.TypeReplyAlertAckWithContextV1:     false,
+		types.TypeReplyAlertRouteV1:              false,
+		types.TypeReplyAlertStatusPageV1:         false,
+		types.TypeReplyMonitorDeregisterV1:       false,
 	}
 	for _, h := range hs {
 		if _, ok := want[h.Type()]; !ok {
@@ -50,7 +50,7 @@ func TestRegisterAll_RegistersAllHandlers(t *testing.T) {
 }
 
 func TestRegisterAll_NilSafety(t *testing.T) {
-	if hs := RegisterAll(nil, nil); hs != nil {
+	if hs := RegisterAll(nil, nil, nil); hs != nil {
 		t.Errorf("expected nil slice when both args nil, got %d", len(hs))
 	}
 }

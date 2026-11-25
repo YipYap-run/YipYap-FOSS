@@ -49,6 +49,9 @@ func setupEventsTestServer(t *testing.T) (*httptest.Server, *sqlite.SQLiteStore,
 	return ts, s, msgBus
 }
 
+// discordTestPrivateKey is set by setupEventsTestServer via the matching public key.
+var discordTestPrivateKey ed25519.PrivateKey
+
 // createMonitorWithIntegrationKey creates an org and a monitor with the given integration key.
 func createMonitorWithIntegrationKey(t *testing.T, s *sqlite.SQLiteStore, integrationKey string) *domain.Monitor {
 	t.Helper()

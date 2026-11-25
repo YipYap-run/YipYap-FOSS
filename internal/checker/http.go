@@ -17,17 +17,24 @@ import (
 // sharedTransport is a connection-pooling HTTP transport reused across all
 // HTTP checks. This avoids per-check TCP+TLS handshake overhead by keeping
 // idle connections alive for repeat checks to the same host.
+//
+// Every connection goes through monitorDialContext, which resolves the
+// host once, refuses blocked addresses and dials the vetted IP (mon-4).
+// Proxy stays nil on purpose: a proxy would do its own lookup and bypass
+// that guard.
 var sharedTransport = &http.Transport{
+	Proxy: nil,
 	TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: false,
 	},
 	MaxIdleConns:        2048,
 	MaxIdleConnsPerHost: 128,
 	IdleConnTimeout:     120 * time.Second,
-	DialContext: (&net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}).DialContext,
+	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		return monitorDialContext(ctx, network, addr)
+	},
 	TLSHandshakeTimeout: 10 * time.Second,
 }
 

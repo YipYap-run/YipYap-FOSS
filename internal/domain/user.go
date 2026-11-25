@@ -31,9 +31,17 @@ type User struct {
 	EmailVerificationSentAt              *time.Time `json:"-"`
 	EmailVerificationResendCount         int        `json:"-"`
 	EmailVerificationResendWindowStarted *time.Time `json:"-"`
+	// PendingEmail is a requested new address that has not been confirmed
+	// from the link mailed to it. Email stays unchanged until then.
+	PendingEmail            string     `json:"pending_email,omitempty"`
+	PendingEmailNonce       string     `json:"-"`
+	PendingEmailRequestedAt *time.Time `json:"pending_email_requested_at,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DisabledAt   *time.Time `json:"disabled_at,omitempty"`
+	// DeletedAt is set when the account was deleted. The row stays as an
+	// anonymized tombstone so records that reference it keep their author.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 type OIDCConnection struct {

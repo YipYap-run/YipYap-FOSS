@@ -1,0 +1,59 @@
+/* Monitors list page. Kept out of main.css so this page's styles do not
+   collide with other areas. */
+
+.monitors-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.monitor-cap-note {
+  margin: -8px 0 16px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+}
+
+/* Form-level save error: focusable so it can take focus when it appears. */
+.monitors-page .form-error:focus-visible,
+.modal .form-error:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.modal .form-error a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Match rule fields: several per row on wide screens, one per row on phones
+   so 320px wide dialogs do not squeeze inputs below a usable width. */
+.match-rule-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.match-rule-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.match-rule-grid--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.match-rule-grid--wide {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .match-rule-grid--3,
+  .match-rule-grid--4,
+  .match-rule-grid--wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

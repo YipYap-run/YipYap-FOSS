@@ -17,6 +17,6 @@ func NewOnCallResolver(_ store.Store) *OnCallResolver {
 }
 
 // Resolve always returns an error in FOSS builds.
-func (r *OnCallResolver) Resolve(_ context.Context, teamID string, _ int, _ time.Time) (string, error) {
-	return "", fmt.Errorf("on-call resolution requires Pro tier (team %s)", teamID)
+func (r *OnCallResolver) Resolve(_ context.Context, _, scheduleID string, _ int, _ time.Time) (string, error) {
+	return "", fmt.Errorf("on-call schedules are not available in this edition (schedule %s)", scheduleID)
 }

@@ -2,19 +2,117 @@ package middleware
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 )
 
-// RequireScope returns middleware that enforces API key scope restrictions.
+// API key scopes use one vocabulary: "<resource>:read" and "<resource>:write".
+// A write scope implies read on the same resource. A bare "<resource>" (the
+// pre-vocabulary format) is still honored on stored keys and means write;
+// new keys are normalized to the canonical form at creation.
 //
-// The check only applies when the request was authenticated via an API key
-// (i.e. claims.Role == "api_key" and the Scopes slice is non-empty).  Regular
-// JWT users (human sessions) always pass through so that the existing role
-// system remains the sole gate for them.
+// A key with an empty scope list is unrestricted on scoped routes (legacy
+// behaviour, also the "full access" preset). Every key, scoped or not, is
+// still kept off account and session routes by RequireSession and off
+// admin-only routes by RequireRole, since its role is "api_key".
+
+const (
+	ScopeRead  = "read"
+	ScopeWrite = "write"
+)
+
+// ScopeResource is one entry in the API key scope vocabulary.
+type ScopeResource struct {
+	Resource string `json:"resource"`
+	Label    string `json:"label"`
+	Read     string `json:"read"`
+	Write    string `json:"write"`
+	// ReadOnly marks a resource whose writes are owner/admin-only. A key's
+	// role is api_key, so its write scope never reaches a write route and a
+	// client should offer only the read scope.
+	ReadOnly bool `json:"read_only"`
+}
+
+// coreScopeResources are the resources gated by RequireScope in every edition.
+var coreScopeResources = []ScopeResource{
+	resource("monitors", "Monitors, groups and states"),
+	resource("alerts", "Alerts"),
+	resource("escalation_policies", "Escalation policies"),
+	resource("notification_channels", "Notification channels"),
+	resource("maintenance_windows", "Maintenance windows"),
+	readOnlyResource("users", "Members"),
+	readOnlyResource("org", "Organization profile and settings"),
+}
+
+func resource(name, label string) ScopeResource {
+	return ScopeResource{Resource: name, Label: label, Read: name + ":" + ScopeRead, Write: name + ":" + ScopeWrite}
+}
+
+func readOnlyResource(name, label string) ScopeResource {
+	r := resource(name, label)
+	r.ReadOnly = true
+	return r
+}
+
+// ScopeVocabulary returns every resource an API key can be scoped to in this
+// build, in display order.
+func ScopeVocabulary() []ScopeResource {
+	out := make([]ScopeResource, 0, len(coreScopeResources)+len(editionScopeResources))
+	out = append(out, coreScopeResources...)
+	out = append(out, editionScopeResources...)
+	return out
+}
+
+// AllowedScopes returns the flat, sorted list of canonical scope strings.
+func AllowedScopes() []string {
+	var out []string
+	for _, r := range ScopeVocabulary() {
+		out = append(out, r.Read, r.Write)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// NormalizeScopes validates requested scopes against the vocabulary. It
+// trims and lowercases each entry, maps a bare resource name to its write
+// scope, and drops duplicates. It returns the canonical list plus any
+// entries it did not recognize.
+func NormalizeScopes(in []string) (canonical []string, unknown []string) {
+	known := map[string]bool{}
+	resources := map[string]bool{}
+	for _, r := range ScopeVocabulary() {
+		known[r.Read] = true
+		known[r.Write] = true
+		resources[r.Resource] = true
+	}
+	seen := map[string]bool{}
+	for _, raw := range in {
+		s := strings.ToLower(strings.TrimSpace(raw))
+		if s == "" {
+			continue
+		}
+		if resources[s] {
+			s += ":" + ScopeWrite
+		}
+		if !known[s] {
+			unknown = append(unknown, raw)
+			continue
+		}
+		if !seen[s] {
+			seen[s] = true
+			canonical = append(canonical, s)
+		}
+	}
+	return canonical, unknown
+}
+
+// RequireScope returns middleware that enforces API key scope restrictions
+// for one resource. Safe methods (GET, HEAD, OPTIONS) need "<resource>:read"
+// or "<resource>:write"; other methods need "<resource>:write".
 //
-// If an API key has an empty scopes list it is treated as having no
-// restrictions (legacy / unrestricted key behaviour).  Once any scope is
-// declared the key is limited to only those scopes.
-func RequireScope(scope string) func(http.Handler) http.Handler {
+// It applies only to API key claims with a non-empty scope list. Human
+// sessions pass through so the role system stays their only gate.
+func RequireScope(resource string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := GetClaims(r.Context())
@@ -23,15 +121,34 @@ func RequireScope(scope string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Only enforce scopes for API key tokens that have declared scopes.
-			// Human JWT sessions pass through unconditionally.
-			if claims.Role == "api_key" && len(claims.Scopes) > 0 {
-				if !hasScope(claims.Scopes, scope) {
-					writeError(w, http.StatusForbidden, "api key missing required scope: "+scope)
+			if claims.Role == "api_key" {
+				action := actionForMethod(r.Method)
+				if !scopeGrants(claims.Scopes, resource, action) {
+					writeError(w, http.StatusForbidden, "api key missing required scope: "+resource+":"+action)
 					return
 				}
 			}
 
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireSession rejects API keys outright. It guards account and session
+// routes (password, email, MFA factors, linked identities, session refresh)
+// where a key acting as its creator would be an escalation.
+func RequireSession() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := GetClaims(r.Context())
+			if claims == nil {
+				writeError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			if claims.Role == "api_key" {
+				writeError(w, http.StatusForbidden, "api keys cannot access this endpoint")
+				return
+			}
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -49,8 +166,7 @@ func RequireScope(scope string) func(http.Handler) http.Handler {
 func RequireWriteAccess() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.Method {
-			case http.MethodGet, http.MethodHead, http.MethodOptions:
+			if isSafeMethod(r.Method) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -71,28 +187,21 @@ func RequireWriteAccess() func(http.Handler) http.Handler {
 	}
 }
 
-// hasScope reports whether the given scope appears in the list.
-func hasScope(scopes []string, want string) bool {
-	for _, s := range scopes {
-		if s == want {
-			return true
-		}
+func isSafeMethod(m string) bool {
+	switch m {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
 	}
 	return false
 }
 
 // isReadOnly reports whether every scope in the list is a read-type scope
-// (i.e. ends in ":read" or equals "read").
+// (ends in ":read", or is "read-only" or the legacy "read").
 func isReadOnly(scopes []string) bool {
 	for _, s := range scopes {
-		if s != "read" && !hasReadSuffix(s) {
+		if s != "read" && s != ScopePresetReadOnly && !strings.HasSuffix(s, ":read") {
 			return false
 		}
 	}
 	return true
-}
-
-func hasReadSuffix(s string) bool {
-	const suffix = ":read"
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }

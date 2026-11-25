@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YipYap-run/YipYap-FOSS/internal/checker"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 )
@@ -30,7 +31,7 @@ func NewNtfy(fallback NtfyConfig, decrypt notify.DecryptFunc) *Ntfy {
 	return &Ntfy{
 		fallback: fallback,
 		decrypt:  decrypt,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   checker.NewGuardedHTTPClient(30*time.Second, checker.MonitorTargetPolicy),
 	}
 }
 
@@ -90,6 +91,9 @@ func (n *Ntfy) Send(ctx context.Context, job domain.NotificationJob) (string, er
 	if job.RunbookURL != "" {
 		req.Header.Set("X-Click", job.RunbookURL)
 	}
+	if a := ntfyAckAction(job.AckURL); a != "" {
+		req.Header.Set("X-Actions", a)
+	}
 
 	if cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.Token)
@@ -97,12 +101,23 @@ func (n *Ntfy) Send(ctx context.Context, job domain.NotificationJob) (string, er
 
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ntfy POST: %w", err)
+		return "", fmt.Errorf("ntfy POST: %w", stripURL(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ntfy returned status %d", resp.StatusCode)
+		return "", &notify.StatusError{Provider: "ntfy", StatusCode: resp.StatusCode}
 	}
 	return fmt.Sprintf("ntfy:%d", resp.StatusCode), nil
+}
+
+// ntfyAckAction returns an ntfy "view" action button that opens the signed
+// ack link, or "" when there is no link. The link opens a confirm page, so
+// tapping the button never acks without a second tap. ntfy splits actions
+// on ";" and fields on ",", so a URL holding either is left out.
+func ntfyAckAction(ackURL string) string {
+	if ackURL == "" || strings.ContainsAny(ackURL, ",;\r\n") {
+		return ""
+	}
+	return "view, Acknowledge, " + ackURL + ", clear=true"
 }

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/google/uuid"
 )
 
 func TestOrgCreateAndGet(t *testing.T) {
@@ -69,5 +69,29 @@ func TestOrgUpdate(t *testing.T) {
 	}
 	if got.Name != "Updated" {
 		t.Fatalf("expected Updated, got %s", got.Name)
+	}
+}
+
+func TestOrgSSOEnforcedRoundTrip(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	org := createTestOrg(t, s)
+	if org.SSOEnforced {
+		t.Fatal("new org enforces SSO")
+	}
+	org.SSOEnforced = true
+	if err := s.Orgs().Update(ctx, org); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Orgs().GetByID(ctx, org.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.SSOEnforced {
+		t.Fatal("sso_enforced not persisted")
+	}
+	got, err = s.Orgs().GetBySlug(ctx, org.Slug)
+	if err != nil || !got.SSOEnforced {
+		t.Fatalf("GetBySlug sso_enforced = %v, %v", got, err)
 	}
 }

@@ -183,7 +183,7 @@ func wireReplyProvider(t *testing.T, s *sqlite.SQLiteStore) (*providers.CloudEve
 	// count is asserted over in the Phase-5 integration suite (see
 	// wirePhase5ReplyProvider); here we just require that RegisterAll
 	// produced a non-zero list so a future registration regression trips.
-	if got := replyhandlers.RegisterAll(d, s); len(got) == 0 {
+	if got := replyhandlers.RegisterAll(d, s, nil); len(got) == 0 {
 		t.Fatalf("RegisterAll returned no handlers")
 	}
 

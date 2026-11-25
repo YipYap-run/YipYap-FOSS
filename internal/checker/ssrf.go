@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -50,7 +51,7 @@ func ValidateHTTPTarget(rawURL string) error {
 	if AllowPrivateTargets {
 		return nil
 	}
-	return validateHTTPTargetStrict(rawURL)
+	return validateHTTPTargetStrict(rawURL, true)
 }
 
 // ValidateControlPlaneHTTPTarget checks that a control-plane HTTP URL
@@ -68,7 +69,7 @@ func ValidateControlPlaneHTTPTarget(rawURL string) error {
 	if AllowPrivateControlPlaneTargets {
 		return nil
 	}
-	if err := validateHTTPTargetStrict(rawURL); err != nil {
+	if err := validateHTTPTargetStrict(rawURL, false); err != nil {
 		// Replace the monitor-flavoured "monitors cannot target ..." text
 		// with the control-plane-flavoured sentinel. Parse-level errors
 		// (bad scheme, missing host) are kept as-is so they still surface
@@ -81,11 +82,37 @@ func ValidateControlPlaneHTTPTarget(rawURL string) error {
 	return nil
 }
 
+// ValidateControlPlaneHost checks a bare control-plane host (no scheme),
+// such as the host half of an OTLP gRPC host:port endpoint, against the
+// same blocked ranges as ValidateControlPlaneHTTPTarget. Governed by
+// AllowPrivateControlPlaneTargets. A private hit wraps
+// ErrControlPlanePrivateTarget.
+func ValidateControlPlaneHost(host string) error {
+	if AllowPrivateControlPlaneTargets {
+		return nil
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if host == "" {
+		return fmt.Errorf("missing host")
+	}
+	lower := strings.ToLower(host)
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return fmt.Errorf("%w: %s", ErrControlPlanePrivateTarget, host)
+	}
+	if err := validateHost(host); err != nil {
+		if errors.Is(err, errPrivate) || strings.Contains(err.Error(), "monitors cannot target private") {
+			return fmt.Errorf("%w: %s", ErrControlPlanePrivateTarget, host)
+		}
+		return err
+	}
+	return nil
+}
+
 // validateHTTPTargetStrict is the shared parse+host-check body used by
 // both ValidateHTTPTarget and ValidateControlPlaneHTTPTarget. It ignores
 // the two allow-private toggles, callers must consult the appropriate
 // toggle before invoking.
-func validateHTTPTargetStrict(rawURL string) error {
+func validateHTTPTargetStrict(rawURL string, requireResolve bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL")
@@ -103,7 +130,10 @@ func validateHTTPTargetStrict(rawURL string) error {
 		return fmt.Errorf("missing hostname")
 	}
 
-	return validateHost(host)
+	if requireResolve {
+		return validateHost(host)
+	}
+	return validateHostAllowUnresolved(host)
 }
 
 // ValidateTarget checks that a hostname or IP address does not point to a
@@ -118,46 +148,42 @@ func ValidateTarget(host string) error {
 	return validateHost(host)
 }
 
-// validateHost is the shared implementation that normalizes all IP
-// representations (decimal, hex, octal, short-form) before checking.
-// It also rejects hostnames containing shell metacharacters to prevent
-// command injection when the host is passed to system commands (e.g., ping).
+// ValidateDNSQueryName checks the name a DNS monitor asks about. The name
+// itself is never dialed, so a name with no A/AAAA record is accepted,
+// but a name that resolves into a blocked range is still refused.
+func ValidateDNSQueryName(host string) error {
+	if AllowPrivateTargets {
+		return nil
+	}
+	if host == "" {
+		return fmt.Errorf("missing host")
+	}
+	return validateHostAllowUnresolved(host)
+}
+
+// validateHost is the monitor-side save-time check. It normalizes all IP
+// representations (decimal, hex, octal, short-form), rejects shell
+// metacharacters, resolves names once and rejects a name when any
+// address is blocked or when it does not resolve at all (mon-4). The
+// checks repeat at dial time through monitorDialContext, so this is the
+// early 400, not the only line of defence.
 func validateHost(host string) error {
-	// Reject shell metacharacters  - these should never appear in a valid
-	// hostname or IP address and could be dangerous if passed to exec.Command.
-	if strings.ContainsAny(host, ";|&$`\\\"'(){}[]<>!\n\r\t ") {
-		return fmt.Errorf("hostname contains invalid characters")
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), validateResolveTimeout)
+	defer cancel()
+	_, err := resolveVetted(ctx, host)
+	return err
+}
 
-	// Step 1: Try net.ParseIP (handles standard dotted-decimal and IPv6).
-	if ip := net.ParseIP(host); ip != nil {
-		if blocked, _ := IsPrivateAddr(ip); blocked {
-			return errPrivate
-		}
+// validateHostAllowUnresolved is validateHost for targets that are never
+// dialed by name at save time: control-plane URLs (dialed later through
+// SSRFGuardedDialContext, which vets at connect time) and DNS monitor
+// query names (a TXT- or MX-only name legitimately has no address).
+func validateHostAllowUnresolved(host string) error {
+	err := validateHost(host)
+	if errors.Is(err, ErrUnresolvable) {
 		return nil
 	}
-
-	// Step 2: Try parsing non-standard IP representations that net.ParseIP
-	// doesn't handle: decimal (2130706433), hex (0x7f000001), octal
-	// (0177.0.0.1), short-form (127.1), and zero (0).
-	if ip := parseNonStandardIP(host); ip != nil {
-		if blocked, _ := IsPrivateAddr(ip); blocked {
-			return errPrivate
-		}
-		return nil
-	}
-
-	// Step 3: It's a hostname. Resolve via DNS and check all addresses.
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return nil // DNS failure at validation time; the checker will fail at runtime
-	}
-	for _, ip := range ips {
-		if blocked, _ := IsPrivateAddr(ip); blocked {
-			return fmt.Errorf("monitors cannot target private/internal IP addresses (%s resolves to %s)", host, ip)
-		}
-	}
-	return nil
+	return err
 }
 
 var errPrivate = fmt.Errorf("monitors cannot target private/internal IP addresses")
@@ -223,14 +249,34 @@ func parseNonStandardIP(host string) net.IP {
 	return net.IPv4(octets[0], octets[1], octets[2], octets[3])
 }
 
-// cgnatPrefix is RFC6598 carrier-grade NAT (100.64.0.0/10). Not caught by
-// net.IP.IsPrivate() but SSRF-relevant, increasingly used on corporate
-// networks where the Kubernetes pod CIDR overlaps.
-var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
+type blockedPrefix struct {
+	prefix netip.Prefix
+	why    string
+}
 
-// ipv6ULAPrefix is the IPv6 Unique Local Address range (fc00::/7), which
-// serves the same role as RFC1918 IPv4 private ranges.
-var ipv6ULAPrefix = netip.MustParsePrefix("fc00::/7")
+// blockedV4 lists IPv4 ranges that net.IP's helpers do not cover.
+var blockedV4 = []blockedPrefix{
+	{netip.MustParsePrefix("0.0.0.0/8"), "this-network"},         // RFC 1122, 0.x.x.x reaches the local host on Linux
+	{netip.MustParsePrefix("100.64.0.0/10"), "cgnat"},            // RFC 6598, often overlaps pod CIDRs and cloud metadata (100.100.100.200)
+	{netip.MustParsePrefix("192.0.0.0/24"), "ietf protocol"},     // RFC 6890 protocol assignments
+	{netip.MustParsePrefix("198.18.0.0/15"), "benchmarking"},     // RFC 2544
+	{netip.MustParsePrefix("240.0.0.0/4"), "reserved/broadcast"}, // includes 255.255.255.255
+}
+
+// blockedV6 lists IPv6 ranges blocked outright.
+var blockedV6 = []blockedPrefix{
+	{netip.MustParsePrefix("fc00::/7"), "ipv6 ula"},              // RFC 4193, includes fd00:ec2::254 (AWS metadata)
+	{netip.MustParsePrefix("fec0::/10"), "ipv6 site-local"},      // deprecated, still routed on some networks
+	{netip.MustParsePrefix("100::/64"), "ipv6 discard"},          // RFC 6666
+	{netip.MustParsePrefix("2001::/32"), "teredo"},               // embedded v4 is obfuscated, so block it all
+	{netip.MustParsePrefix("64:ff9b:1::/48"), "nat64 local-use"}, // RFC 8215, operator-local by definition
+}
+
+// nat64WellKnown (RFC 6052) carries an IPv4 address in its low 32 bits.
+var nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
+
+// sixToFour (RFC 3056) carries an IPv4 address in bits 16..47.
+var sixToFour = netip.MustParsePrefix("2002::/16")
 
 // IsPrivateAddr reports whether the given net.IP falls in a range we
 // consider SSRF-blocked. Returns a short why-string for error messages.
@@ -241,8 +287,10 @@ var ipv6ULAPrefix = netip.MustParsePrefix("fc00::/7")
 //   - Link-local unicast (169.254/16, fe80::/10)
 //   - Link-local multicast
 //   - Unspecified (0.0.0.0, ::)
-//   - CGNAT (100.64/10)
-//   - IPv6 ULA (fc00::/7)
+//   - CGNAT (100.64/10), 0.0.0.0/8, 192.0.0.0/24, 198.18/15, 240/4
+//   - IPv6 ULA (fc00::/7), site-local (fec0::/10), discard (100::/64)
+//   - Teredo (2001::/32) and NAT64 local-use (64:ff9b:1::/48)
+//   - NAT64 (64:ff9b::/96) and 6to4 (2002::/16) embedding a blocked v4
 //   - Multicast (224/4, ff00::/8)
 //
 // IPv4-mapped IPv6 (::ffff:a.b.c.d) and IPv4-compatible IPv6 (::a.b.c.d)
@@ -289,15 +337,32 @@ func IsPrivateAddr(ip net.IP) (bool, string) {
 		return false, ""
 	}
 	// netip.AddrFromSlice wraps IPv4 as a 16-byte v4-in-v6 representation.
-	// Unwrap so CGNAT is recognised on real v4 addrs.
-	if addr.Is4In6() {
-		addr = addr.Unmap()
+	// Unwrap so the v4 prefixes match real v4 addrs.
+	addr = addr.Unmap()
+	if addr.Is4() {
+		for _, b := range blockedV4 {
+			if b.prefix.Contains(addr) {
+				return true, b.why
+			}
+		}
+		return false, ""
 	}
-	if addr.Is4() && cgnatPrefix.Contains(addr) {
-		return true, "cgnat"
+	for _, b := range blockedV6 {
+		if b.prefix.Contains(addr) {
+			return true, b.why
+		}
 	}
-	if addr.Is6() && ipv6ULAPrefix.Contains(addr) {
-		return true, "ipv6 ula"
+	// Translation prefixes route to the embedded IPv4 address, so vet that.
+	raw := addr.As16()
+	if nat64WellKnown.Contains(addr) {
+		if blocked, why := IsPrivateAddr(net.IPv4(raw[12], raw[13], raw[14], raw[15])); blocked {
+			return true, "nat64 " + why
+		}
+	}
+	if sixToFour.Contains(addr) {
+		if blocked, why := IsPrivateAddr(net.IPv4(raw[2], raw[3], raw[4], raw[5])); blocked {
+			return true, "6to4 " + why
+		}
 	}
 	return false, ""
 }
@@ -376,4 +441,10 @@ func ipv4CompatToV4(ip net.IP) net.IP {
 		return nil
 	}
 	return net.IPv4(ip[12], ip[13], ip[14], ip[15])
+}
+
+// IsPrivateTargetError reports whether err is a monitor target refusal
+// because the host is, or resolves to, a private or internal address.
+func IsPrivateTargetError(err error) bool {
+	return errors.Is(err, errPrivate)
 }

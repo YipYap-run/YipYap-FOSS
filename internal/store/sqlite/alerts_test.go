@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/google/uuid"
 )
 
 func createTestAlert(t *testing.T, s *SQLiteStore, orgID, monitorID string) *domain.Alert {
@@ -157,5 +157,37 @@ func TestAlertEscalationState(t *testing.T) {
 	}
 	if got.RetryCount != 2 {
 		t.Fatalf("expected retry_count 2, got %d", got.RetryCount)
+	}
+}
+
+// TestAlertAcknowledgeOnce checks the compare-and-set contract the escalation
+// engine relies on for duplicate ack events. (core-16)
+func TestAlertAcknowledgeOnce(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	org := createTestOrg(t, s)
+	mon := createTestMonitor(t, s, org.ID)
+	alert := createTestAlert(t, s, org.ID, mon.ID)
+	at := time.Now().UTC().Truncate(time.Second)
+
+	ok, err := s.Alerts().Acknowledge(ctx, alert.ID, "user-1", at)
+	if err != nil || !ok {
+		t.Fatalf("first Acknowledge = %v, %v; want true, nil", ok, err)
+	}
+	ok, err = s.Alerts().Acknowledge(ctx, alert.ID, "user-2", at.Add(time.Minute))
+	if err != nil || ok {
+		t.Fatalf("second Acknowledge = %v, %v; want false, nil", ok, err)
+	}
+	got, err := s.Alerts().GetByID(ctx, alert.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.AlertAcknowledged || got.AcknowledgedBy != "user-1" ||
+		got.AcknowledgedAt == nil || !got.AcknowledgedAt.Equal(at) {
+		t.Fatalf("after ack: status=%s by=%q at=%v", got.Status, got.AcknowledgedBy, got.AcknowledgedAt)
+	}
+
+	if _, err := s.Alerts().Acknowledge(ctx, "missing-alert", "user-1", at); err == nil {
+		t.Fatal("Acknowledge on a missing alert returned nil error")
 	}
 }

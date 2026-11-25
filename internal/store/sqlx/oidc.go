@@ -3,8 +3,10 @@ package sqlx
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
 // OIDCStore is a no-op stub in FOSS builds.
@@ -41,6 +43,38 @@ func (s *OIDCStore) GetUserByOIDC(_ context.Context, _, _ string) (*domain.User,
 	return nil, fmt.Errorf("OIDC requires Pro tier")
 }
 
-func (s *OIDCStore) ListAllEnabled(_ context.Context) ([]*domain.OIDCConnection, error) {
+func (s *OIDCStore) ListLinksByUser(_ context.Context, _ string) ([]*domain.UserOIDCLink, error) {
 	return nil, nil
+}
+
+func (s *OIDCStore) UnlinkUser(_ context.Context, _, _ string) error {
+	return fmt.Errorf("OIDC requires Pro tier")
+}
+
+func (s *OIDCStore) CountLinksByConnection(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
+
+func (s *OIDCStore) CreateDomain(_ context.Context, _ *domain.OIDCDomain) error {
+	return fmt.Errorf("OIDC requires Pro tier")
+}
+
+func (s *OIDCStore) GetDomain(_ context.Context, _ string) (*domain.OIDCDomain, error) {
+	return nil, store.ErrOIDCDomainNotFound
+}
+
+func (s *OIDCStore) ListDomainsByConnection(_ context.Context, _ string) ([]*domain.OIDCDomain, error) {
+	return nil, nil
+}
+
+func (s *OIDCStore) DeleteDomain(_ context.Context, _ string) error {
+	return store.ErrOIDCDomainNotFound
+}
+
+func (s *OIDCStore) MarkDomainVerified(_ context.Context, _ string, _ time.Time) error {
+	return fmt.Errorf("OIDC requires Pro tier")
+}
+
+func (s *OIDCStore) GetVerifiedDomain(_ context.Context, _ string) (*domain.OIDCDomain, error) {
+	return nil, store.ErrOIDCDomainNotFound
 }

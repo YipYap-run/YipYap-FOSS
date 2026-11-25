@@ -10,7 +10,7 @@ type APIKey struct {
 	Prefix     string     `json:"prefix"`
 	Scopes     []string   `json:"scopes"`
 	CreatedBy  string     `json:"created_by"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }

@@ -28,6 +28,8 @@ type pollTestHarness struct {
 	ts       *httptest.Server
 	store    *sqlite.SQLiteStore
 	msgBus   bus.Bus
+	hasher   *auth.APIKeyHasher
+	jwt      *auth.JWTIssuer
 	org      *domain.Org
 	apiKey   string
 	otherOrg *domain.Org
@@ -73,6 +75,11 @@ func setupPollTest(t *testing.T) *pollTestHarness {
 			t.Fatalf("generate api key: %v", err)
 		}
 		now := time.Now().UTC().Truncate(time.Second)
+		// The key's creator must exist: the CloudEvents routes run the
+		// full authenticated chain, which loads the creator (auth-16).
+		if err := s.Users().Create(ctx, &domain.User{ID: "user-" + prefix, OrgID: org.ID, Email: "user-" + prefix + "@example.com", PasswordHash: "x", Role: domain.RoleOwner, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatalf("create key creator: %v", err)
+		}
 		apiKey := &domain.APIKey{
 			ID:        "key-" + ulid.Make().String(),
 			OrgID:     org.ID,
@@ -96,6 +103,8 @@ func setupPollTest(t *testing.T) *pollTestHarness {
 		ts:       ts,
 		store:    s,
 		msgBus:   msgBus,
+		hasher:   hasher,
+		jwt:      jwt,
 		org:      org,
 		apiKey:   key,
 		otherOrg: other,
@@ -104,7 +113,8 @@ func setupPollTest(t *testing.T) *pollTestHarness {
 }
 
 // publishTestEvent constructs, marshals, and publishes an event on the bus
-// using the same subject convention as internal/cloudevents.Publisher.
+// through internal/cloudevents.Publisher, so it lands on the fan-out subject
+// poll and stream consumers read.
 func publishTestEvent(t *testing.T, b bus.Bus, orgID, ceType string) ce.Event {
 	t.Helper()
 	ev := ce.NewEvent()
@@ -115,12 +125,7 @@ func publishTestEvent(t *testing.T, b bus.Bus, orgID, ceType string) ce.Event {
 	if err := ev.SetData(ce.ApplicationJSON, map[string]string{"k": "v"}); err != nil {
 		t.Fatalf("set data: %v", err)
 	}
-	payload, err := json.Marshal(ev)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	subject := cepub.SubjectFor(orgID, ceType)
-	if err := b.PublishDurable(context.Background(), subject, payload, ev.ID()); err != nil {
+	if err := cepub.NewPublisher(b).Publish(context.Background(), orgID, ev); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	return ev
@@ -165,6 +170,7 @@ func doPollFilters(t *testing.T, h *pollTestHarness, bearer string, filters []st
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
+	req.Header.Set("X-YipYap-Source-ID", "poll-test-client")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Do: %v", err)
@@ -382,5 +388,22 @@ func TestPoll_Unauthorized(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestPoll_RequiresSourceID(t *testing.T) {
+	h := setupPollTest(t)
+
+	for i := 0; i < 2; i++ {
+		req, _ := http.NewRequest(http.MethodGet, h.ts.URL+"/api/v1/cloudevents/poll?filter=run.yipyap.alert.*", nil)
+		req.Header.Set("Authorization", "Bearer "+h.apiKey)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("anonymous poller %d: status %d, want 400", i, resp.StatusCode)
+		}
 	}
 }

@@ -1,0 +1,86 @@
+/* Email change notice, sign-up conflict links and password hint warnings.
+   Text pairs reach at least 4.5:1 in every theme (WCAG 1.4.3). */
+
+:root {
+  --acct-notice-bg: #eff6ff;
+  --acct-notice-border: #2563eb;
+  --acct-notice-text: #1e293b;
+  --acct-warn-bg: #fffbeb;
+  --acct-warn-border: #b45309;
+  --acct-warn-text: #78350f;  /* 7.9:1 on #fffbeb */
+  --acct-problem-text: #b91c1c; /* 5.9:1 on white */
+}
+
+[data-theme="dark"],
+[data-theme="oled"] {
+  --acct-notice-bg: #172554;
+  --acct-notice-border: #60a5fa;
+  --acct-notice-text: #e2e8f0;
+  --acct-warn-bg: #451a03;
+  --acct-warn-border: #f59e0b;
+  --acct-warn-text: #fde68a;
+  --acct-problem-text: #fca5a5;
+}
+
+/* Pending email change in Account settings */
+.email-pending {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--acct-notice-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--acct-notice-bg);
+  color: var(--acct-notice-text);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.email-pending.is-expired {
+  border-color: var(--acct-warn-border);
+  background: var(--acct-warn-bg);
+  color: var(--acct-warn-text);
+}
+
+.email-pending h4 {
+  margin: 0 0 4px;
+  font-size: 0.9375rem;
+}
+
+.email-pending p {
+  margin: 0;
+}
+
+.email-pending p + p {
+  margin-top: 4px;
+}
+
+.email-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Buttons in the notice keep a 24px target (WCAG 2.5.8). */
+.email-pending-actions .btn {
+  min-height: 32px;
+}
+
+/* Sign-up conflict: links under the error */
+.auth-hint {
+  margin: -8px 0 16px;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.auth-hint a {
+  font-weight: 600;
+}
+
+/* Over the password byte limit */
+.password-hint-problem {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  color: var(--acct-problem-text);
+}

@@ -548,6 +548,8 @@ func (s *Scheduler) executeCheck(ctx context.Context, m *domain.Monitor) {
 
 	if !seeded {
 		// DB lookup outside the lock to avoid serialising 4K+ first-checks.
+		// No prior check leaves prevStatus empty, which AlertTransition
+		// treats as a fresh monitor: a first check that is down alerts.
 		if latest, err := s.store.Checks().GetLatest(ctx, m.ID); err == nil && latest != nil {
 			prevStatus = latest.Status
 		}
@@ -557,13 +559,8 @@ func (s *Scheduler) executeCheck(ctx context.Context, m *domain.Monitor) {
 	s.lastStatus[m.ID] = result.Status
 	s.statusMu.Unlock()
 
-	if (result.Status == domain.StatusDown || result.Status == domain.StatusDegraded) && prevStatus == domain.StatusUp {
-		s.publishAlertEvent(ctx, "alert.trigger", *m, result, now)
-	} else if result.Status == domain.StatusDown && prevStatus == domain.StatusDegraded {
-		// Escalation from degraded to down
-		s.publishAlertEvent(ctx, "alert.trigger", *m, result, now)
-	} else if result.Status == domain.StatusUp && (prevStatus == domain.StatusDown || prevStatus == domain.StatusDegraded) {
-		s.publishAlertEvent(ctx, "alert.recover", *m, result, now)
+	if subject := AlertTransition(prevStatus, result.Status); subject != "" {
+		s.publishAlertEvent(ctx, subject, *m, result, now)
 	}
 
 	// Additive CloudEvent emission on the same transition boundaries.
@@ -571,58 +568,18 @@ func (s *Scheduler) executeCheck(ctx context.Context, m *domain.Monitor) {
 }
 
 // emitMonitorTransition publishes monitor.up/down/degraded.v1 CloudEvents
-// on state changes. Additive to publishAlertEvent - this is the external
-// eventing path, not a replacement.
+// on state changes via the shared EmitMonitorTransition.
 func (s *Scheduler) emitMonitorTransition(ctx context.Context, m *domain.Monitor, result *Result, prevStatus domain.CheckStatus, checkID string, checkedAt time.Time) {
-	if s.emitter == nil {
-		return
-	}
-	switch result.Status {
-	case domain.StatusUp:
-		if prevStatus == domain.StatusDown || prevStatus == domain.StatusDegraded {
-			d := types.MonitorUpV1Data{
-				MonitorID: m.ID,
-				CheckID:   checkID,
-				LatencyMs: int64(result.LatencyMS),
-				CheckedAt: checkedAt,
-			}
-			if err := cloudevents.EmitMonitorUp(ctx, s.emitter, m.OrgID, m.ID, d); err != nil {
-				slog.Error("emit monitor.up.v1", "monitor_id", m.ID, "error", err)
-			}
-		}
-	case domain.StatusDown:
-		if prevStatus == domain.StatusUp || prevStatus == domain.StatusDegraded {
-			reason := result.Error
-			if reason == "" {
-				reason = "unknown"
-			}
-			d := types.MonitorDownV1Data{
-				MonitorID:     m.ID,
-				CheckID:       checkID,
-				FailureReason: reason,
-				CheckedAt:     checkedAt,
-			}
-			if err := cloudevents.EmitMonitorDown(ctx, s.emitter, m.OrgID, m.ID, d); err != nil {
-				slog.Error("emit monitor.down.v1", "monitor_id", m.ID, "error", err)
-			}
-		}
-	case domain.StatusDegraded:
-		if prevStatus != domain.StatusDegraded {
-			reason := result.Error
-			if reason == "" {
-				reason = "degraded"
-			}
-			d := types.MonitorDegradedV1Data{
-				MonitorID: m.ID,
-				CheckID:   checkID,
-				Reason:    reason,
-				CheckedAt: checkedAt,
-			}
-			if err := cloudevents.EmitMonitorDegraded(ctx, s.emitter, m.OrgID, m.ID, d); err != nil {
-				slog.Error("emit monitor.degraded.v1", "monitor_id", m.ID, "error", err)
-			}
-		}
-	}
+	EmitMonitorTransition(ctx, s.emitter, MonitorTransition{
+		OrgID:     m.OrgID,
+		MonitorID: m.ID,
+		CheckID:   checkID,
+		Prev:      prevStatus,
+		Cur:       result.Status,
+		LatencyMS: result.LatencyMS,
+		Error:     result.Error,
+		CheckedAt: checkedAt,
+	})
 }
 
 // detectDNSChange compares the current DNS resolution against the previous

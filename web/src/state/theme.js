@@ -1,19 +1,14 @@
 import { signal, effect } from '@preact/signals';
+import { initialTheme, isTheme, writeStoredTheme } from './theme-store.mjs';
 
-const STORAGE_KEY = 'yipyap-theme';
+export const theme = signal(initialTheme(window));
 
-function getInitialTheme() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === 'light' || stored === 'dark' || stored === 'oled') return stored;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-export const theme = signal(getInitialTheme());
-
-// Sync to DOM and localStorage whenever theme changes
+// Sync to the DOM and to localStorage whenever the theme changes. Saving is
+// best effort: with site data blocked the theme still applies for this page.
 effect(() => {
-  document.documentElement.setAttribute('data-theme', theme.value);
-  localStorage.setItem(STORAGE_KEY, theme.value);
+  const value = isTheme(theme.value) ? theme.value : 'light';
+  document.documentElement.setAttribute('data-theme', value);
+  writeStoredTheme(window, value);
 });
 
 export function toggleTheme() {
