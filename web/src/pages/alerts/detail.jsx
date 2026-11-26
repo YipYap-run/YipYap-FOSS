@@ -254,7 +254,7 @@ export function AlertDetailPage({ id }) {
               aria-describedby={showDownHint ? 'resolve-waits-hint' : undefined}
               style={resolveWaits
                 ? 'opacity: 0.6;'
-                : 'color: var(--color-up); border-color: var(--color-up);'}>
+                : 'color: var(--color-up-text); border-color: var(--color-up);'}>
               Resolve
             </button>
           )}

@@ -8,12 +8,13 @@ import { MFATab, OrgMFASection } from '../../edition/mfa-ui';
 import { SessionsTab } from './sessions.jsx';
 import { SupportAccessTab } from './support-access.jsx';
 import { AccountTab } from './account.jsx';
-import { IntegrationsTab } from './integrations';
+import { IntegrationsTab } from '../../edition/integrations-ui';
 import { MonitorStatesTab } from './monitor-states.jsx';
 import { ImportTab } from './import.jsx';
 import { HostedNote } from '../../components/hosted-note';
 import { MaintenanceTab } from './maintenance.jsx';
 import { ContactMethodsTab } from './contact-methods.jsx';
+import { EscalationTab } from './escalation.jsx';
 import { BillingTab } from './billing.jsx';
 import { APIKeysTab } from './api-keys.jsx';
 import { MembersTab } from './members.jsx';
@@ -27,7 +28,9 @@ import { channelAccessNote } from './channel-permissions-logic.mjs';
 import { ChannelHealthBadge, ChannelHealthLine, FailingChannelsNote, useLinkedChannel, channelRowId } from './channel-health.jsx';
 import { ChannelPlanBadge, ChannelPlanLine, PaidChannelsBanner, ChannelTestNote, useTestCooldowns, channelTestNoteId } from './channel-plan.jsx';
 import { testRefusal, testCooldown } from './channel-plan-logic.mjs';
-import { testSentMessage, testFilteredMessage, testFailureNote } from './channel-health-logic.mjs';
+import { testSentMessage, testFailureNote } from './channel-health-logic.mjs';
+import { EVENTING_CHANNEL_TYPES, testFilteredMessage } from '../../edition/eventing.mjs';
+import { JsonFieldExtra, EVENTING_FIELD_EDITORS } from '../../edition/eventing-ui';
 import { testResultLifetime } from '../../components/ui-logic.mjs';
 import { validateEmailConfig, emailConfigBody, parseEmailConfigError, splitRecipients, EMAIL_FIELDS } from './email-channel-logic.mjs';
 import './channel-config.css';
@@ -49,7 +52,7 @@ import {
   applyRotation, withoutSecret, shouldWarnBeforeClose,
 } from './webhook-signing.jsx';
 import { headersToRows, rowsToHeaders, headerRowForServerField } from './webhook-headers-logic.mjs';
-import { isPhoneType, isRetiredType, normalizePhone, formatPhone, phoneConfigBody, parseChannelServerError, outboundURLHelp, channelTypeOptions, testErrorField, parseJsonField, parseJsonFields, stringifyJsonFields, configFieldError, prettyJsonField, jsonFieldRows, addEventTypePattern, acceptedRepliesError, CLOUDEVENT_TYPE_GROUPS } from './channel-config-logic.mjs';
+import { isPhoneType, isRetiredType, normalizePhone, formatPhone, phoneConfigBody, parseChannelServerError, outboundURLHelp, channelTypeOptions, testErrorField, parseJsonField, parseJsonFields, stringifyJsonFields, configFieldError, prettyJsonField, jsonFieldRows } from './channel-config-logic.mjs';
 
 
 export function SettingsPage({ tab: initialTab }) {
@@ -196,13 +199,7 @@ const CHANNEL_TYPES = {
     { key: 'device', label: 'Device', type: 'text', placeholder: 'Optional specific device name' },
     { key: 'sound', label: 'Sound', type: 'text', placeholder: 'Optional notification sound' },
   ]},
-  cloudevent_http: { label: 'CloudEvents (Knative)', fields: [
-    { key: 'sink_url', label: 'Sink URL', type: 'url', placeholder: 'https://broker.example.com/ns/default', required: true, help: 'The HTTPS URL that accepts CloudEvent POSTs (Knative Broker ingress, Eventarc destination, any CloudEvents-compatible sink). Each CloudEvents channel gets its own copy of every matching event, so two channels can point at different sinks.' },
-    { key: 'mode', label: 'HTTP Mode', type: 'select', options: [{ value: 'binary', label: 'Binary (one event per request; ce-* headers)' }, { value: 'structured', label: 'Structured (application/cloudevents+json)' }], default: 'binary' },
-    { key: 'event_types', label: 'Event Types Filter', type: 'json', placeholder: '["run.yipyap.alert.*", "run.yipyap.monitor.down.*"]', help: 'A JSON list of patterns over CloudEvent types, where * matches any part, for example ["run.yipyap.alert.*"]. Leave empty to receive every event type.' },
-    { key: 'ce_overrides', label: 'CloudEvent Overrides', type: 'json', placeholder: '{"environment": "production"}', help: 'A JSON object of extension attributes added to every event, for example to tag the environment or region. Names use lower-case letters and digits only.' },
-    { key: 'accepted_replies', label: 'Accepted Replies', type: 'accepted_replies', help: 'Choose which reply CloudEvent types this channel will act on when a sink returns a CloudEvent in its response body. Replies without a ce_alertref matching a recent outbound event are always rejected.' },
-  ]},
+  ...EVENTING_CHANNEL_TYPES,
 };
 
 const WEBHOOK_FORMATS = {
@@ -324,6 +321,7 @@ function ChannelsTab() {
       const data = await get('/notification-channels');
       const list = data.channels || data || [];
       setChannels(list);
+      if (!quiet) setLoading(false);
       return list;
     } catch (e) {
       if (!quiet) toast('Failed to load channels', 'error');
@@ -494,8 +492,9 @@ function ChannelsTab() {
           const r = parseJsonField(type, f.key, config[f.key]);
           if (r.error) errs[f.key] = r.error;
         }
-        if (f.type === 'accepted_replies') {
-          const msg = acceptedRepliesError(config[f.key]);
+        const editorCheck = EVENTING_FIELD_EDITORS[f.type]?.validate;
+        if (editorCheck) {
+          const msg = editorCheck(config[f.key]);
           if (msg) errs[f.key] = msg;
         }
         if (f.type === 'headers') {
@@ -739,7 +738,7 @@ function ChannelsTab() {
     setConfig(c => {
       const next = {};
       for (const k of newFields) {
-        // 'mode' means different things per type (email vs CloudEvents).
+        // 'mode' means different things per type (email vs other types).
         // 'to' is a phone number on SMS/voice and addresses on email.
         const crossesEmail = k === 'to' && (newType === 'smtp') !== (type === 'smtp');
         if (k !== 'mode' && !crossesEmail && c[k] !== undefined) next[k] = c[k];
@@ -751,6 +750,9 @@ function ChannelsTab() {
 
   function renderField(f) {
     const fid = 'channel-field-' + f.key;
+    // Edition field types (for example a reply settings group) bring their
+    // own editor.
+    const FieldEditor = EVENTING_FIELD_EDITORS[f.type]?.Editor;
     const req = f.required ? 'true' : undefined;
     // A URL that holds a credential is write-only: only its host comes back.
     const urlSaved = f.type === 'url' && isSavedSecret(config[f.key]);
@@ -773,16 +775,9 @@ function ChannelsTab() {
               autocapitalize="off" aria-required={req} {...aria} value={typeof config[f.key] === 'string' ? config[f.key] : ''} placeholder={f.placeholder}
               onInput={e => updateConfig(f.key, e.target.value)}
               onBlur={e => { const v = prettyJsonField(type, f.key, e.target.value); if (v !== e.target.value) updateConfig(f.key, v); }} />
-            {type === 'cloudevent_http' && f.key === 'event_types' && (
-              <EventTypePicker onAdd={pattern => {
-                const next = addEventTypePattern(config[f.key], pattern);
-                if (next === null) {
-                  showErrors({ [f.key]: 'Fix the list above before adding a pattern' });
-                  return;
-                }
-                updateConfig(f.key, next);
-              }} />
-            )}
+            <JsonFieldExtra type={type} fieldKey={f.key} value={config[f.key]}
+              onChange={v => updateConfig(f.key, v)}
+              onError={msg => showErrors({ [f.key]: msg })} />
           </>
         ) : f.type === 'number' ? (
           <input id={fid} type="number" aria-required={req} {...aria} value={config[f.key] ?? ''} placeholder={f.placeholder}
@@ -801,8 +796,8 @@ function ChannelsTab() {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-        ) : f.type === 'accepted_replies' ? (
-          <AcceptedRepliesEditor id={fid} describedBy={aria['aria-describedby']} invalid={!!errors[f.key]}
+        ) : FieldEditor ? (
+          <FieldEditor id={fid} describedBy={aria['aria-describedby']} invalid={!!errors[f.key]}
             value={config[f.key]} onChange={v => updateConfig(f.key, v)} />
         ) : f.type === 'tel' ? (
           <input id={fid} type="tel" inputMode="tel" autocomplete="tel" aria-required={req} {...aria} value={config[f.key] || ''} placeholder={f.placeholder}
@@ -1875,280 +1870,6 @@ function DataTab() {
           </table>
         </Card>
       )}
-    </div>
-  );
-}
-
-/* ─── cloudevent_http accepted-replies editor ─── */
-
-// The config shape for accepted_replies is:
-//   {
-//     types: ["run.yipyap.reply.alert.claimed.v1", ...],
-//     rate_limit: 60,
-//     trust_elevated: false,
-//     allow_deregister: false,
-//     max_suppress_seconds: 3600,
-//     max_remediation_seconds: 600,
-//     max_route_duration_seconds: 86400,
-//   }
-// The editor groups reply types by blast radius and gates the elevated
-// group behind an explicit Trust Elevated flag. Per-type numeric caps
-// appear alongside the types they apply to. Zero means "use the dispatcher
-// default."
-
-// Blast-radius groups for the reply catalog. Keep these in sync with the
-// 13 types defined in internal/cloudevents/reply/handlers/. When a type
-// exposes a per-channel cap, the cap_key points at the field in the
-// accepted_replies config object that holds the value.
-const REPLY_GROUPS = [
-  {
-    key: 'read_only',
-    label: 'Read-only annotations (Phase 2)',
-    help: 'Safe: each of these just writes an annotation or timeline entry. No alert or monitor state changes.',
-    types: [
-      { type: 'run.yipyap.reply.alert.claimed.v1',  label: 'Claimed',  help: 'Timeline: claimed by a person or automation.' },
-      { type: 'run.yipyap.reply.alert.enriched.v1', label: 'Enriched', help: 'Context attachments (runbook links, graphs, log snippets).' },
-      { type: 'run.yipyap.reply.alert.linked.v1',   label: 'Linked',   help: 'External references (Jira, PagerDuty, Slack thread).' },
-    ],
-  },
-  {
-    key: 'state_standard',
-    label: 'State-mutating, standard (Phase 5)',
-    help: 'Mutates alert state but is loop-safe and reversible by an operator.',
-    types: [
-      { type: 'run.yipyap.reply.alert.suppressed.v1',          label: 'Suppressed',         help: 'Temporarily stop notifying for this alert.', cap_key: 'max_suppress_seconds', cap_default: 3600, cap_label: 'seconds' },
-      { type: 'run.yipyap.reply.alert.deduplicated.v1',        label: 'Deduplicated',       help: 'Mark as a duplicate of another alert.' },
-      { type: 'run.yipyap.reply.alert.ack_with_context.v1',    label: 'Ack with context',   help: 'Acknowledge and attach investigation notes.' },
-      { type: 'run.yipyap.reply.alert.ownership.v1',           label: 'Ownership',          help: 'Transfer ownership of the alert (user, team, service).' },
-      { type: 'run.yipyap.reply.alert.remediation_started.v1', label: 'Remediation started', help: 'Signal that an automated or manual fix is in progress.', cap_key: 'max_remediation_seconds', cap_default: 600, cap_label: 'seconds' },
-      { type: 'run.yipyap.reply.alert.remediation_result.v1',  label: 'Remediation result', help: 'Report the outcome; a success can auto-resolve the alert.' },
-      { type: 'run.yipyap.reply.alert.status_page.v1',         label: 'Status page',        help: 'Publish an incident update to the public status page.' },
-    ],
-  },
-  {
-    key: 'state_elevated',
-    label: 'State-mutating, elevated',
-    help: 'Requires the Trust Elevated flag. These reply types can escalate pages or rewire routing, so only enable on sinks you control.',
-    requires_trust: true,
-    types: [
-      { type: 'run.yipyap.reply.alert.escalated.v1', label: 'Escalated', help: 'Force-advance the alert on its escalation policy.' },
-      { type: 'run.yipyap.reply.alert.route.v1',     label: 'Route',     help: 'Deliver the alert to a different notification channel for a bounded window.', cap_key: 'max_route_duration_seconds', cap_default: 86400, cap_label: 'seconds' },
-    ],
-  },
-  {
-    key: 'high_blast',
-    label: 'High-blast-radius',
-    help: 'Requires Trust Elevated AND Allow Deregister. Disabling a monitor stops all alerts from it; there is no automatic re-enable.',
-    requires_trust: true,
-    requires_deregister: true,
-    types: [
-      { type: 'run.yipyap.reply.monitor.deregister.v1', label: 'Monitor deregister', help: 'Disable the monitor that fired this alert.', warning: true },
-    ],
-  },
-];
-
-// List of all cap keys so normalize can coerce numeric fields safely.
-const REPLY_CAP_KEYS = ['max_suppress_seconds', 'max_remediation_seconds', 'max_route_duration_seconds'];
-
-function normalizeAcceptedReplies(value) {
-  if (!value || typeof value !== 'object') {
-    return {
-      types: [],
-      rate_limit: 0,
-      trust_elevated: false,
-      allow_deregister: false,
-      max_suppress_seconds: 0,
-      max_remediation_seconds: 0,
-      max_route_duration_seconds: 0,
-    };
-  }
-  const out = {
-    types: Array.isArray(value.types) ? value.types : [],
-    rate_limit: typeof value.rate_limit === 'number' ? value.rate_limit : 0,
-    trust_elevated: value.trust_elevated === true,
-    allow_deregister: value.allow_deregister === true,
-    max_suppress_seconds: 0,
-    max_remediation_seconds: 0,
-    max_route_duration_seconds: 0,
-  };
-  for (const k of REPLY_CAP_KEYS) {
-    if (typeof value[k] === 'number') out[k] = value[k];
-  }
-  return out;
-}
-
-// typeIsElevated returns true if the reply type lives in an elevated group
-// and is therefore gated on trust_elevated being true.
-function groupForType(type) {
-  for (const g of REPLY_GROUPS) {
-    if (g.types.some((t) => t.type === type)) return g;
-  }
-  return null;
-}
-
-// Filter the types array to remove anything whose group's prerequisites
-// no longer hold (e.g. user unchecked Trust Elevated). Called from every
-// onChange path so the persisted config can never enable a type whose
-// gate is off.
-function enforceGates(cfg) {
-  const kept = cfg.types.filter((t) => {
-    const g = groupForType(t);
-    if (!g) return true; // unknown type: leave intact (future-compat)
-    if (g.requires_trust && !cfg.trust_elevated) return false;
-    if (g.requires_deregister && !cfg.allow_deregister) return false;
-    return true;
-  });
-  return { ...cfg, types: kept };
-}
-
-// Lists the outbound CloudEvent types under the Event Types Filter box, with
-// a button per family that adds its pattern to the list.
-function EventTypePicker({ onAdd }) {
-  return (
-    <details class="event-type-picker">
-      <summary>Event types you can filter on</summary>
-      {CLOUDEVENT_TYPE_GROUPS.map(g => (
-        <div key={g.pattern} class="event-type-group">
-          <div class="event-type-group-head">
-            <span class="event-type-group-label">{g.label}</span>
-            <button type="button" class="btn btn-sm btn-secondary" onClick={() => onAdd(g.pattern)}
-              aria-label={'Add ' + g.pattern + ' to the filter'}>
-              Add <code>{g.pattern}</code>
-            </button>
-          </div>
-          <ul>
-            {g.types.map(t => <li key={t}><code>{t}</code></li>)}
-          </ul>
-        </div>
-      ))}
-    </details>
-  );
-}
-
-// Number inputs for reply caps. Whole numbers only: the API refuses
-// decimals, and validate() says so before save.
-function capValue(raw) {
-  if (raw === '') return 0;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : raw;
-}
-
-function AcceptedRepliesEditor({ id, describedBy, invalid, value, onChange }) {
-  const cfg = normalizeAcceptedReplies(value);
-
-  const commit = (next) => onChange(enforceGates(next));
-
-  const toggleType = (group, type) => {
-    if (group.requires_trust && !cfg.trust_elevated) return;
-    if (group.requires_deregister && !cfg.allow_deregister) return;
-    const set = new Set(cfg.types);
-    if (set.has(type)) set.delete(type); else set.add(type);
-    commit({ ...cfg, types: Array.from(set) });
-  };
-
-  const setCap = (key, n) => commit({ ...cfg, [key]: n });
-
-  const setTrust = (v) => {
-    // Uncheck Allow Deregister too when Trust is turned off. It's
-    // meaningless on its own, and enforceGates would otherwise strip
-    // monitor.deregister but leave allow_deregister visually checked.
-    const next = { ...cfg, trust_elevated: v };
-    if (!v) next.allow_deregister = false;
-    commit(next);
-  };
-
-  const setAllowDeregister = (v) => {
-    if (!cfg.trust_elevated) return; // no-op unless Trust is on
-    commit({ ...cfg, allow_deregister: v });
-  };
-
-  return (
-    <div class="accepted-replies-editor" id={id} role="group" tabIndex={-1}
-      aria-labelledby={id ? id + '-label' : undefined} aria-describedby={describedBy}
-      aria-invalid={invalid ? 'true' : undefined}>
-      {REPLY_GROUPS.map((g) => {
-        const gatedByTrust = g.requires_trust && !cfg.trust_elevated;
-        const gatedByDeregister = g.requires_deregister && !cfg.allow_deregister;
-        const disabled = gatedByTrust || gatedByDeregister;
-        return (
-          <div key={g.key} style="margin-bottom:14px">
-            <div style="font-weight:600;margin-bottom:4px">{g.label}</div>
-            {g.help && <div class="form-help" style="margin-bottom:6px">{g.help}</div>}
-
-            {g.key === 'state_elevated' && (
-              <label style="display:flex;align-items:center;gap:8px;margin:4px 0;cursor:pointer">
-                <input type="checkbox"
-                  checked={cfg.trust_elevated}
-                  onChange={(e) => setTrust(e.target.checked)} />
-                <strong>Trust elevated</strong>
-                <span class="text-muted" style="font-size:0.8em">Enables the elevated handlers below.</span>
-              </label>
-            )}
-            {g.key === 'high_blast' && (
-              <label style={`display:flex;align-items:center;gap:8px;margin:4px 0;cursor:${cfg.trust_elevated ? 'pointer' : 'not-allowed'};opacity:${cfg.trust_elevated ? 1 : 0.55}`}
-                     title={cfg.trust_elevated ? '' : 'Enable Trust Elevated first.'}>
-                <input type="checkbox"
-                  checked={cfg.allow_deregister && cfg.trust_elevated}
-                  disabled={!cfg.trust_elevated}
-                  onChange={(e) => setAllowDeregister(e.target.checked)} />
-                <strong>Allow deregister</strong>
-                <span class="text-muted" style="font-size:0.8em">Enables the Monitor deregister handler.</span>
-              </label>
-            )}
-
-            <ul class="accepted-replies-list" style="list-style:none;padding:0;margin:0">
-              {g.types.map((r) => {
-                const checked = cfg.types.includes(r.type);
-                const rowOpacity = disabled ? 0.55 : 1;
-                return (
-                  <li key={r.type} style={`padding:4px 0;opacity:${rowOpacity}`}>
-                    <label style={`display:flex;align-items:flex-start;gap:8px;cursor:${disabled ? 'not-allowed' : 'pointer'}`}
-                           title={disabled ? (gatedByTrust ? 'Enable Trust Elevated first.' : 'Enable Allow Deregister first.') : ''}>
-                      <input type="checkbox"
-                        checked={checked && !disabled}
-                        disabled={disabled}
-                        onChange={() => toggleType(g, r.type)} />
-                      <span style="flex:1">
-                        <strong>{r.label}</strong>{' '}<code style="font-size:0.8em">{r.type}</code>
-                        <div class="form-help" style="margin-top:2px">{r.help}</div>
-                        {r.cap_key && (
-                          <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
-                            <span class="text-muted" style="font-size:0.8em">Cap:</span>
-                            <input type="number" min="0" step="1" inputMode="numeric"
-                              aria-label={r.label + ' cap in ' + r.cap_label + ', 0 for the default of ' + r.cap_default}
-                              value={cfg[r.cap_key] || ''}
-                              placeholder={r.cap_default}
-                              disabled={disabled}
-                              onInput={(e) => setCap(r.cap_key, capValue(e.target.value))}
-                              style="width:90px" />
-                            <span class="text-muted" style="font-size:0.8em">{r.cap_label} (0 = default {r.cap_default})</span>
-                          </div>
-                        )}
-                        {r.warning && checked && !disabled && (
-                          <div class="reply-blast-warning" role="note">
-                            High blast radius: disabling a monitor stops all alerts from it. There is no automatic re-enable.
-                          </div>
-                        )}
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        );
-      })}
-
-      <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
-        <label style="display:flex;align-items:center;gap:6px">
-          Rate limit:
-          <input type="number" min="0" step="1" inputMode="numeric" value={cfg.rate_limit || ''}
-            placeholder="60"
-            onInput={(e) => commit({ ...cfg, rate_limit: capValue(e.target.value) })}
-            style="width:80px" />
-          <span class="text-muted" style="font-size:0.8em">replies / min per reply type (0 = default 60)</span>
-        </label>
-      </div>
     </div>
   );
 }

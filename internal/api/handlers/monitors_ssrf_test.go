@@ -19,9 +19,9 @@ func TestMonitorCreate_UnresolvableTargetRejected(t *testing.T) {
 	checker.AllowPrivateTargets = false
 	defer func() { checker.AllowPrivateTargets = orig }()
 
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "SSRFOrg", "ssrf@test.com", "supersecret123")
-	ceBumpToProByEmail(t, s, "ssrf@test.com")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "SSRFOrg", "ssrf@test.com", "supersecret123")
+	bumpToProByEmail(t, s, "ssrf@test.com")
 
 	create := func(typ string, cfg map[string]any) (int, string) {
 		resp := doJSONReq(t, http.MethodPost, ts.URL+"/api/v1/monitors", token, map[string]any{
@@ -77,9 +77,9 @@ func TestMonitorTargetFieldErrors(t *testing.T) {
 	checker.AllowPrivateTargets = false
 	defer func() { checker.AllowPrivateTargets = orig }()
 
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "SSRFFieldOrg", "ssrf-field@test.com", "supersecret123")
-	ceBumpToProByEmail(t, s, "ssrf-field@test.com")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "SSRFFieldOrg", "ssrf-field@test.com", "supersecret123")
+	bumpToProByEmail(t, s, "ssrf-field@test.com")
 
 	send := func(method, path string, body map[string]any) (int, map[string]any) {
 		resp := doJSONReq(t, method, ts.URL+path, token, body)

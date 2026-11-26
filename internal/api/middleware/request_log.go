@@ -11,10 +11,10 @@ import (
 )
 
 // RequestLog returns access-log middleware that writes one structured line
-// per request. It logs the chi route pattern (for example
-// /api/v1/cloudevents/ingest/{token}), never the raw path or query, because
-// several routes carry credentials there: ingest tokens, heartbeat and
-// survey tokens. (core-5)
+// per request. It logs the chi route pattern (for example /ack/{token}),
+// never the raw path or query, because several routes carry credentials
+// there: ingest tokens, signed ack links, heartbeat and survey tokens.
+// (core-5)
 //
 // Mount it after the trusted-proxy middleware so client_ip is the real
 // client, and before the panic recoverer so recovered panics log as 500.

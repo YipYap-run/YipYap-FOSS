@@ -2,6 +2,11 @@
 // fields, server error mapping). Kept free of Preact so they can be checked
 // with `npm test` (see channel-config-logic.test.mjs).
 
+import {
+  EVENTING_GUARDED_URL_FIELDS, EVENTING_PAID_TYPES, EVENTING_JSON_FIELDS,
+  eventingServerErrorField, eventingSubfieldLabel,
+} from '../../edition/eventing.mjs';
+
 export const PHONE_TYPES = ['telnyx_sms', 'telnyx_voice', 'twilio_sms', 'twilio_voice'];
 
 // Twilio rows from before the move to Telnyx still deliver and can be
@@ -54,7 +59,7 @@ export function phoneConfigBody(config) {
 export const GUARDED_URL_FIELDS = {
   webhook: ['url'],
   ntfy: ['server_url'],
-  cloudevent_http: ['sink_url'],
+  ...EVENTING_GUARDED_URL_FIELDS,
 };
 
 // Help text for outbound URL fields. Delivery does not follow redirects on
@@ -99,14 +104,13 @@ export function parseChannelServerError(type, message) {
       return { field, message: rest };
     }
   }
-  // CloudEvent sink checks return the control-plane sentinel without a field.
-  if (type === 'cloudevent_http' && /^control-plane URL cannot target private/.test(message)) {
-    return { field: 'sink_url', message: PRIVATE_MSG };
-  }
+  // Some edition channel types return a sentinel without a field name.
+  const edField = eventingServerErrorField(type, message);
+  if (edField) return { field: edField, message: PRIVATE_MSG };
   return null;
 }
 
-export const PAID_TYPES = ['telegram', ...PHONE_TYPES, 'cloudevent_http'];
+export const PAID_TYPES = ['telegram', ...PHONE_TYPES, ...EVENTING_PAID_TYPES];
 
 // Which types the Type select offers. New channels get the types this edition
 // and plan allow, minus retired ones. On edit the type is fixed, so the
@@ -138,10 +142,7 @@ export function testErrorField(type, message) {
 // headers have their own row editor (webhook-headers-logic.mjs) because
 // their values are write-only.
 export const JSON_FIELDS = {
-  cloudevent_http: {
-    event_types: { shape: 'list', example: '["run.yipyap.alert.*"]' },
-    ce_overrides: { shape: 'map', example: '{"environment": "production"}' },
-  },
+  ...EVENTING_JSON_FIELDS,
 };
 
 // Parses one JSON textarea. Returns { value } (undefined when the box is
@@ -193,8 +194,8 @@ export function stringifyJsonFields(type, config) {
 }
 
 // Maps a typed config 400 ({ error: "<field>: <message>", field }) onto a
-// form field. Nested fields ("auth.oidc.client_id",
-// "accepted_replies.rate_limit") land on their top-level input. Returns
+// form field. Nested fields ("auth.oidc.client_id") land on their
+// top-level input. Returns
 // { field, message } or null.
 export function configFieldError(type, body, formKeys) {
   const field = body && typeof body.field === 'string' ? body.field : '';
@@ -206,7 +207,7 @@ export function configFieldError(type, body, formKeys) {
     const sub = field.slice(top.length + 1);
     // Header names are shown as typed: "X-Api_Key has no saved value".
     if (top === 'headers') return { field: top, message: sub + ' ' + msg };
-    const label = top === 'accepted_replies' && REPLY_CAPS[sub];
+    const label = eventingSubfieldLabel(top, sub);
     msg = (label || sub.replace(/[._]/g, ' ')) + ' ' + msg;
   }
   return { field: top, message: msg.charAt(0).toUpperCase() + msg.slice(1) };
@@ -227,45 +228,4 @@ export function prettyJsonField(type, key, text) {
 export function jsonFieldRows(text) {
   const lines = typeof text === 'string' ? text.split('\n').length : 1;
   return Math.min(12, Math.max(3, lines));
-}
-
-// Outbound CloudEvent types a channel filter can match, grouped for the
-// help list under the Event Types Filter box.
-export const CLOUDEVENT_TYPE_GROUPS = [
-  { label: 'Alerts', pattern: 'run.yipyap.alert.*', types: ['run.yipyap.alert.fired.v1', 'run.yipyap.alert.acknowledged.v1', 'run.yipyap.alert.escalated.v1', 'run.yipyap.alert.resolved.v1'] },
-  { label: 'Monitors', pattern: 'run.yipyap.monitor.*', types: ['run.yipyap.monitor.down.v1', 'run.yipyap.monitor.up.v1', 'run.yipyap.monitor.degraded.v1', 'run.yipyap.monitor.heartbeat_missed.v1'] },
-  { label: 'Maintenance', pattern: 'run.yipyap.maintenance.*', types: ['run.yipyap.maintenance.started.v1', 'run.yipyap.maintenance.ended.v1'] },
-];
-
-// Adds a pattern to the Event Types Filter text. Returns the new text, or
-// null when the current text is not a valid list (the caller leaves it for
-// the user to fix rather than overwrite it). Patterns already present are
-// not added twice.
-export function addEventTypePattern(text, pattern) {
-  const r = parseJsonField('cloudevent_http', 'event_types', text);
-  if (r.error) return null;
-  const list = r.value || [];
-  if (!list.includes(pattern)) list.push(pattern);
-  return JSON.stringify(list, null, 2);
-}
-
-const REPLY_CAPS = {
-  rate_limit: 'Rate limit',
-  max_suppress_seconds: 'Suppressed cap',
-  max_remediation_seconds: 'Remediation started cap',
-  max_route_duration_seconds: 'Route cap',
-};
-
-// Checks the Accepted Replies number inputs the way the server does: each
-// cap must be a whole number, 0 or more. Returns copy for the first bad one
-// or null.
-export function acceptedRepliesError(cfg) {
-  if (!cfg || typeof cfg !== 'object') return null;
-  for (const [key, label] of Object.entries(REPLY_CAPS)) {
-    const v = cfg[key];
-    if (v === undefined || v === null || v === '') continue;
-    if (typeof v !== 'number' || !Number.isInteger(v)) return label + ' must be a whole number';
-    if (v < 0) return label + ' must be 0 or more';
-  }
-  return null;
 }

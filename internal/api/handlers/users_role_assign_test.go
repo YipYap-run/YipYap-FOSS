@@ -16,7 +16,7 @@ func TestRoleAssignmentContract(t *testing.T) {
 	ts, s := setupTestServer(t)
 	ctx := context.Background()
 
-	ownerToken := selfServiceRegisterAndGetToken(t, ts, "RoleOrg", "owner@roles.test", "ownerpass1")
+	ownerToken := selfServisignupAndGetToken(t, ts, "RoleOrg", "owner@roles.test", "ownerpass1")
 	owner, err := s.Users().GetByEmail(ctx, "owner@roles.test")
 	if err != nil {
 		t.Fatal(err)

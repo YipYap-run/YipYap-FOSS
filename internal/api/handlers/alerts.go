@@ -12,11 +12,10 @@ import (
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/contactmethod"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/escalation"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -24,7 +23,7 @@ import (
 
 type AlertHandler struct {
 	store   store.Store
-	emitter cloudevents.Emitter
+	emitter events.Emitter
 	bus     bus.Bus
 	cipher  contactmethod.Cipher
 }
@@ -45,14 +44,14 @@ func (h *AlertHandler) announce(ctx context.Context, a *domain.Alert) {
 	}
 }
 
-// NewAlertHandler builds an AlertHandler without CloudEvent emission.
+// NewAlertHandler builds an AlertHandler without event emission.
 func NewAlertHandler(s store.Store) *AlertHandler {
 	return &AlertHandler{store: s}
 }
 
-// NewAlertHandlerWithEmitter builds an AlertHandler that emits CloudEvents
+// NewAlertHandlerWithEmitter builds an AlertHandler that emits domain events
 // for Ack and Resolve state transitions. Pass nil for em to disable emission.
-func NewAlertHandlerWithEmitter(s store.Store, em cloudevents.Emitter) *AlertHandler {
+func NewAlertHandlerWithEmitter(s store.Store, em events.Emitter) *AlertHandler {
 	return &AlertHandler{store: s, emitter: em}
 }
 
@@ -311,8 +310,8 @@ func (h *AlertHandler) Ack(w http.ResponseWriter, r *http.Request) {
 	_ = h.store.Alerts().CreateEvent(r.Context(), event)
 	h.announce(r.Context(), alert)
 
-	// Emit CloudEvent (no-op when no emitter is attached).
-	_ = cloudevents.EmitAlertAcknowledged(r.Context(), h.emitter, alert.OrgID, types.AlertAcknowledgedV1Data{
+	// Emit the domain event (no-op when no emitter is attached).
+	_ = events.EmitAlertAcknowledged(r.Context(), h.emitter, alert.OrgID, events.AlertAcknowledged{
 		AlertID:   alert.ID,
 		MonitorID: alert.MonitorID,
 		AckedBy:   claims.UserID,
@@ -373,8 +372,8 @@ func (h *AlertHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	_ = h.store.Alerts().CreateEvent(r.Context(), event)
 	h.announce(r.Context(), alert)
 
-	// Emit CloudEvent (no-op when no emitter is attached).
-	_ = cloudevents.EmitAlertResolved(r.Context(), h.emitter, alert.OrgID, types.AlertResolvedV1Data{
+	// Emit the domain event (no-op when no emitter is attached).
+	_ = events.EmitAlertResolved(r.Context(), h.emitter, alert.OrgID, events.AlertResolved{
 		AlertID:    alert.ID,
 		MonitorID:  alert.MonitorID,
 		ResolvedBy: claims.UserID,

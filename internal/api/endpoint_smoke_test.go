@@ -275,7 +275,7 @@ func (f *smokeFixture) bumpToPro() {
 
 // do issues a smoke probe. Returns the status code and a short body excerpt
 // (capped) for failure messages. Uses a per-request 5s timeout so long-lived
-// streams (e.g. /cloudevents/stream) cannot wedge the suite.
+// streams cannot wedge the suite.
 func (f *smokeFixture) do(c endpointCase) (int, string) {
 	f.t.Helper()
 
@@ -474,12 +474,6 @@ func commonPubAuthCases() []endpointCase {
 			wantStatuses: []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound},
 			notes:        "documented public; integration-key auth"},
 
-		// CloudEvents ingest by URL token. Fake token => 401.
-		{name: "cloudevents-ingest", method: http.MethodPost, path: "/api/v1/cloudevents/ingest/no-such-token", authMode: authNone,
-			body:         map[string]string{"specversion": "1.0", "type": "x", "id": "x", "source": "x"},
-			wantStatuses: []int{http.StatusOK, http.StatusUnauthorized, http.StatusBadRequest, http.StatusForbidden},
-			notes:        "documented public; URL-token auth"},
-
 		// Webhook callbacks (Discord/Telegram/Slack) verify signatures; with
 		// no signing key configured, they should respond 4xx, never 5xx.
 		{name: "webhook-discord", method: http.MethodPost, path: "/api/v1/webhooks/discord", authMode: authNone,
@@ -608,10 +602,6 @@ func commonAuthedCases() []endpointCase {
 		{name: "import", method: http.MethodPost, path: "/api/v1/import", authMode: authSession,
 			body:         map[string]interface{}{"monitors": []interface{}{}},
 			wantStatuses: []int{http.StatusOK, http.StatusBadRequest, http.StatusAccepted, http.StatusUnprocessableEntity}},
-
-		// Admin reply audit (admin-only).
-		{name: "admin-cloudevents-replies", method: http.MethodGet, path: "/api/v1/admin/cloudevents/replies", authMode: authSession,
-			wantStatuses: []int{http.StatusOK}},
 
 		// Monitor groups.
 		{name: "monitor-groups-list", method: http.MethodGet, path: "/api/v1/monitor-groups", authMode: authSession,

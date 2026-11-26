@@ -1,9 +1,6 @@
 package handlers
 
-import (
-	"encoding/json"
-	"testing"
-)
+import "testing"
 
 func TestIsWriteOnlyURL(t *testing.T) {
 	cases := []struct {
@@ -34,23 +31,6 @@ func TestIsWriteOnlyURL(t *testing.T) {
 		if got := isWriteOnlyURL(tc.url, tc.format); got != tc.want {
 			t.Errorf("isWriteOnlyURL(%q, %q) = %v, want %v", tc.url, tc.format, got, tc.want)
 		}
-	}
-}
-
-func TestRedactConfig_CloudEventSinkWithToken(t *testing.T) {
-	out, red := redactConfig("cloudevent_http", `{"sink_url":"https://sink.example.com/in?key=zz9","mode":"binary"}`)
-	if red == nil || red.Field != "sink_url" || red.Host != "https://sink.example.com" {
-		t.Fatalf("redaction = %+v", red)
-	}
-	var m map[string]any
-	_ = json.Unmarshal([]byte(out), &m)
-	if m["sink_url"] != configSentinel {
-		t.Fatalf("sink_url = %v", m["sink_url"])
-	}
-	merged := mergeConfig("cloudevent_http", out, `{"sink_url":"https://sink.example.com/in?key=zz9"}`)
-	_ = json.Unmarshal([]byte(merged), &m)
-	if m["sink_url"] != "https://sink.example.com/in?key=zz9" {
-		t.Fatalf("merged sink_url = %v", m["sink_url"])
 	}
 }
 

@@ -16,6 +16,12 @@ type ContactMethodStore interface {
 	Get(ctx context.Context, userID, id string) (*domain.ContactMethod, error)
 	ListByUser(ctx context.Context, userID string) ([]*domain.ContactMethod, error)
 	CountByUser(ctx context.Context, userID string) (int, error)
+	// ListByType returns every method of type t across all orgs. Intended
+	// for maintenance jobs such as the secret sealing backfill.
+	ListByType(ctx context.Context, t domain.ContactMethodType) ([]*domain.ContactMethod, error)
+	// ReplaceConfig swaps the stored config for newCfg only when it still
+	// equals oldCfg, so concurrent jobs and user edits are not overwritten.
+	ReplaceConfig(ctx context.Context, id, oldCfg, newCfg string) (bool, error)
 	// Update writes label and config. When resetVerification is true the
 	// method goes back to unverified and any pending code is dropped.
 	Update(ctx context.Context, m *domain.ContactMethod, resetVerification bool) error
@@ -26,7 +32,12 @@ type ContactMethodStore interface {
 	SetVerificationCode(ctx context.Context, userID, id, codeHash string, expiresAt, sentAt time.Time) error
 	// RecordSend stamps last_sent_at (used for the send cooldown).
 	RecordSend(ctx context.Context, userID, id string, at time.Time) error
-	ReserveSendBudget(ctx context.Context, userID, orgID string, at time.Time, smsCode bool, userDailyLimit, orgSMSDailyLimit int) (bool, error)
+	// ReserveSendBudget takes one unit from the user's daily send budget.
+	// For a phone code (phone is the E.164 number, empty otherwise) it also
+	// takes one from the number's daily budget, shared across orgs, and from
+	// the org's daily SMS code budget. It reports false, with nothing taken,
+	// when any bucket is full.
+	ReserveSendBudget(ctx context.Context, userID, orgID string, at time.Time, phone string, userDailyLimit, orgSMSDailyLimit, phoneDailyLimit int) (bool, error)
 	// IncrementVerifyAttempts bumps the attempt counter and returns the
 	// new value.
 	IncrementVerifyAttempts(ctx context.Context, userID, id string) (int, error)

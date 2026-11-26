@@ -308,7 +308,7 @@ a:hover {
 
 .btn-logout:hover {
   border-color: var(--color-down);
-  color: var(--color-down);
+  color: var(--color-down-text);
 }
 
 .sidebar-footer-actions {
@@ -603,17 +603,17 @@ a:hover {
 
 .badge-up {
   background: var(--color-up-bg);
-  color: var(--color-up);
+  color: var(--color-up-text);
 }
 
 .badge-down {
   background: var(--color-down-bg);
-  color: var(--color-down);
+  color: var(--color-down-text);
 }
 
 .badge-warning {
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .badge-info {
@@ -652,6 +652,24 @@ a:hover {
   transition: border-color 0.15s;
 }
 
+/* Checkboxes and radios keep their natural size; the full-width rule above is
+   for text fields. Without this they stretch across the row and the box sits
+   centered, far from its label. */
+.form-group input[type="checkbox"],
+.form-group input[type="radio"] {
+  width: auto;
+  padding: 0;
+  flex: none;
+}
+
+.form-group label:has(> input[type="checkbox"]),
+.form-group label:has(> input[type="radio"]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
@@ -683,7 +701,7 @@ a:hover {
 
 label.required::after {
   content: ' *';
-  color: var(--color-down);
+  color: var(--color-down-text);
   font-weight: normal;
 }
 
@@ -862,7 +880,7 @@ label.required::after {
   background: var(--color-down-bg);
   border: 1px solid var(--color-down);
   border-radius: var(--radius);
-  color: var(--color-down);
+  color: var(--color-down-text);
   text-align: center;
 }
 
@@ -1000,10 +1018,10 @@ label.required::after {
   margin-top: 4px;
 }
 
-.stat-up .stat-value { color: var(--color-up); }
-.stat-down .stat-value { color: var(--color-down); }
-.stat-degraded .stat-value { color: var(--color-warning); }
-.stat-alerts .stat-value { color: var(--color-down); }
+.stat-up .stat-value { color: var(--color-up-text); }
+.stat-down .stat-value { color: var(--color-down-text); }
+.stat-degraded .stat-value { color: var(--color-warning-text); }
+.stat-alerts .stat-value { color: var(--color-down-text); }
 
 .dashboard-grid {
   display: grid;
@@ -2579,12 +2597,12 @@ h3[tabindex="-1"]:focus { outline: none; }
 
 .status-overall.all-up {
   background: var(--color-up-bg);
-  color: var(--color-up);
+  color: var(--color-up-text);
 }
 
 .status-overall.has-issues {
   background: var(--color-down-bg);
-  color: var(--color-down);
+  color: var(--color-down-text);
 }
 
 .maintenance-banner {
@@ -2630,7 +2648,7 @@ h3[tabindex="-1"]:focus { outline: none; }
 .uptime-pct {
   font-weight: 700;
   font-size: 1rem;
-  color: var(--color-up);
+  color: var(--color-up-text);
 }
 
 .status-footer {

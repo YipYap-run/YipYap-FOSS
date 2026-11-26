@@ -87,21 +87,6 @@ type Store interface {
 	Stats() StatsStore
 	// MFA returns the MFA store (SaaS-only; FOSS returns stub).
 	MFA() MFAStore
-	// CloudEventIngest returns the inbound CloudEvent idempotency store.
-	CloudEventIngest() CloudEventIngest
-	CloudEventPositions() CloudEventPositionStore
-	// CloudEventReplyAudit returns the audit log for Phase-5 state-mutating
-	// reply handlers. Every accepted, rejected, or errored mutating reply
-	// writes a row here for forensic review.
-	CloudEventReplyAudit() CloudEventReplyAudit
-	// AlertSuppressions returns the state store for reply.suppressed.
-	AlertSuppressions() AlertSuppressionStore
-	// AlertRemediations returns the state store for reply.remediation_*.
-	AlertRemediations() AlertRemediationStore
-	// AlertRoutingRules returns the state store for reply.route.
-	AlertRoutingRules() AlertRoutingRuleStore
-	// AlertStatusPageRefs returns the state store for reply.status_page.
-	AlertStatusPageRefs() AlertStatusPageRefStore
 	// OIDCSigningKeys returns the self-hosted JWKS signing key store.
 	// May return nil on backends that do not implement it.
 	OIDCSigningKeys() OIDCSigningKeyStore
@@ -271,11 +256,6 @@ type MonitorStore interface {
 	// keyed by monitor ID, in one query.
 	GetLabelsByMonitors(ctx context.Context, monitorIDs []string) (map[string]map[string]string, error)
 	DeleteLabel(ctx context.Context, monitorID, key string) error
-
-	// Disable sets enabled=false on the monitor and records the reason. Used
-	// by the Phase-5 reply.monitor.deregister handler. Reason is persisted
-	// via the audit log; this method does not mutate any other column.
-	Disable(ctx context.Context, monitorID, reason string) error
 }
 
 // CheckStore manages monitor checks and rollups.
@@ -347,12 +327,6 @@ type AlertStore interface {
 	RecordPagedTarget(ctx context.Context, target *domain.AlertPagedTarget) error
 	ListPagedTargets(ctx context.Context, alertID string) ([]*domain.AlertPagedTarget, error)
 	DeletePagedTarget(ctx context.Context, alertID, targetKey string) error
-
-	// Phase-5 reply-mutation helpers. Each also writes a matching alert_event
-	// row so the timeline reflects the change.
-	MarkDuplicate(ctx context.Context, alertID, duplicateOfID, reason string) error
-	SetOwner(ctx context.Context, alertID, ownerKind, ownerID, reason string) error
-	AckWithContext(ctx context.Context, alertID, reasonCode, note, referenceID, ackedBy string) error
 }
 
 // TeamStore manages teams and their membership.
@@ -448,6 +422,33 @@ type MaintenanceWindowStore interface {
 	ListAll(ctx context.Context) ([]*domain.MaintenanceWindow, error)
 	Update(ctx context.Context, mw *domain.MaintenanceWindow) error
 	Delete(ctx context.Context, id string) error
+
+	// Lifecycle state shared by every replica's maintenance ticker, so a
+	// start or end event is emitted once per transition, not once per
+	// replica. Each call that changes state reports whether this caller
+	// won the change; only the winner emits.
+
+	// ListLifecycleStates returns the last emitted state of every tracked
+	// window, including windows whose row has since been deleted.
+	ListLifecycleStates(ctx context.Context) ([]MaintenanceLifecycleState, error)
+	// SeedLifecycleState starts tracking a window. It reports false when the
+	// window was already tracked (another replica seeded it first).
+	SeedLifecycleState(ctx context.Context, st MaintenanceLifecycleState, at time.Time) (bool, error)
+	// ClaimLifecycleTransition flips a tracked window from active=from to
+	// active=!from. It reports false when the stored state was not from.
+	ClaimLifecycleTransition(ctx context.Context, windowID string, from bool, at time.Time) (bool, error)
+	// ClaimLifecycleDeletion stops tracking a window. It reports false when
+	// another replica already did.
+	ClaimLifecycleDeletion(ctx context.Context, windowID string) (bool, error)
+}
+
+// MaintenanceLifecycleState is the last lifecycle state emitted for a
+// maintenance window.
+type MaintenanceLifecycleState struct {
+	WindowID  string
+	OrgID     string
+	MonitorID string
+	Active    bool
 }
 
 // APIKeyStore manages API keys.
@@ -493,6 +494,9 @@ type BillingStore interface {
 	Upsert(ctx context.Context, b *domain.Billing) error
 	ApplyCheckout(ctx context.Context, b *domain.Billing) (bool, error)
 	GetByOrgID(ctx context.Context, orgID string) (*domain.Billing, error)
+	// ListWithSubscription returns every billing row that has a payment
+	// subscription ID, for periodic reconcile jobs.
+	ListWithSubscription(ctx context.Context) ([]*domain.Billing, error)
 	UpdateStatus(ctx context.Context, orgID, status string) error
 	UpdateSeatCount(ctx context.Context, orgID string, count int) error
 	// UpdateEmail sets only the billing contact, so it cannot overwrite a

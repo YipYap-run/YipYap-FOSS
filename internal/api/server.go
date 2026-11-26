@@ -29,6 +29,13 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/web"
 )
 
+// opsAuth carries the internal ops API credentials: the bearer token and
+// the optional key for signed actor assertions.
+type opsAuth struct {
+	Token    string
+	ActorKey string
+}
+
 // ServerOptions holds optional configuration for the HTTP server.
 type ServerOptions struct {
 	TestSender          handlers.TestSender
@@ -37,7 +44,9 @@ type ServerOptions struct {
 	RegistrationEnabled bool
 	Envelope            *crypto.Envelope
 	OpsToken            string
-	Mailer              *mailer.Mailer
+	// OpsActorKey is the shared HMAC key for signed ops actor assertions.
+	OpsActorKey string
+	Mailer      *mailer.Mailer
 	// APIKeyHasher is used to hash API key tokens for storage and lookup.
 	// When nil, plain SHA-256 is used for backward compatibility.
 	APIKeyHasher *auth.APIKeyHasher
@@ -65,7 +74,7 @@ type ServerOptions struct {
 	// as-is and proxy headers are ignored.
 	TrustedProxyNets []*net.IPNet
 	// Metrics is the centralised OTEL metrics bundle. When non-nil it is
-	// wired into handlers that support SetMetrics (CloudEventHandler today).
+	// wired into handlers that support SetMetrics.
 	Metrics *telemetry.Metrics
 	// JWKSHandler, when non-nil, is mounted at /.well-known/jwks.json in
 	// non-FOSS builds. FOSS builds ignore it.
@@ -75,6 +84,10 @@ type ServerOptions struct {
 	// when the parent process is shutting down. main.go passes the same
 	// context it cancels in its SIGTERM handler. A4-N-2.
 	LifecycleCtx context.Context
+	// OTELExportSync applies an org's OTLP export settings on this
+	// instance right after they change. Nil means per-org export is not
+	// running here, and the settings API reports export_active=false.
+	OTELExportSync func(ctx context.Context, orgID string) error
 }
 
 // NewServer creates a new HTTP handler with all API routes.
@@ -148,7 +161,6 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		bulkImportH.SetOnChange(opt.OnMonitorChange)
 	}
 	accountDeleteH := handlers.NewAccountDeleteHandler(s, jwt, opt.Mailer, publicBaseURL)
-	replyAuditH := handlers.NewReplyAuditHandler(s)
 	sessionH := handlers.NewSessionHandler(s)
 	contactH := newContactMethodHandler(s, opt)
 
@@ -220,80 +232,8 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 			r.Post("/events", eventsH.Ingest)
 		})
 
-		// Inbound CloudEvents API (authenticated by integration key in URL).
-		ceIngestH := handlers.NewCloudEventHandler(s)
-		ceIngestH.SetMetrics(opt.Metrics)
-		r.Route("/cloudevents", func(r chi.Router) {
-			r.Use(httprate.LimitBy(60, time.Minute, handlers.RateLimitKeyByClientIP))
-			r.Post("/ingest/{token}", ceIngestH.Ingest)
-		})
-
-		// CloudEvents poll-mode and stream-mode transports for the
-		// yipyap-knative-source adapter. Bearer-auth'd reads of the
-		// fan-out log scoped to the caller's org. Poll and stream share
-		// one feed, so both modes use the same remembered positions.
-		//
-		// Tier gating (R2-C1): RequirePaidPlan blocks SaaS Free orgs;
-		// FOSS builds are tier-blind (RequirePaidPlan is a build-tagged
-		// no-op there) so self-hosted operators retain full access.
-		ceFeed := handlers.NewCloudEventsFeed(msgBus, s)
-		cePollH := handlers.NewCloudEventsPollHandlerWithFeed(ceFeed)
-		ceStreamH := handlers.NewCloudEventsStreamHandlerWithFeed(ceFeed)
-		ceAckH := handlers.NewCloudEventsAckHandlerWithFeed(ceFeed)
-		ceStreamGate := handlers.NewStreamConcurrencyGate(handlers.DefaultMaxStreamsPerOrg)
-		// Per-org rate limits (H-16): poll at 60 req/min/org, stream
-		// concurrency capped at DefaultMaxStreamsPerOrg per org. Auth
-		// has already stashed claims on the context, so keying by org
-		// works here. Poll uses httprate's fixed-window counter; stream
-		// uses a semaphore so concurrent long-lived connections are
-		// bounded.
-		//
-		// These routes run the full authenticated chain (disabled account,
-		// forced password change, org MFA, promo expiry) like every other
-		// user route (auth-16). Staff impersonation tokens are refused: a
-		// poll or stream advances the org's shared consumer cursor, so a
-		// staff read would take events from the customer's source.
-		r.Group(func(r chi.Router) {
-			r.Use(authed)
-			r.Use(middleware.RejectStaffReadonly())
-			r.Use(middleware.RequirePaidPlan(s))
-			r.Group(func(r chi.Router) {
-				r.Use(httprate.LimitBy(60, time.Minute, handlers.RateLimitKeyByOrg))
-				r.Get("/cloudevents/poll", cePollH.Poll)
-			})
-			r.Group(func(r chi.Router) {
-				r.Use(ceStreamGate.Middleware)
-				r.Get("/cloudevents/stream", ceStreamH.Stream)
-			})
-		})
-
-		// Ack confirms a cursor for a source ID. It only moves a read
-		// position, so read-only keys may call it, but every other gate
-		// (disabled account, staff read-only, MFA, promo expiry) still
-		// applies. It has its own per-org limit so stream clients acking
-		// each batch do not eat into the poll budget.
-		r.Group(func(r chi.Router) {
-			r.Use(authedAllowReadOnlyWrite)
-			r.Use(middleware.RejectStaffReadonly())
-			r.Use(middleware.RequirePaidPlan(s))
-			r.Use(httprate.LimitBy(handlers.CEAckRatePerMinute, time.Minute, handlers.RateLimitKeyByOrg))
-			r.Post("/cloudevents/ack", ceAckH.Ack)
-		})
-
-		// Knative source-config endpoint. The yipyap-knative-source
-		// ContainerSource binary polls this on startup (and again every
-		// refresh_after_seconds) to learn the recommended mode and
-		// cadence. Auth is a JWT or a Bearer API key through the full
-		// authenticated chain (auth-16). It is a read-only hint endpoint.
-		//
-		// Tier gating (R2-C1): RequirePaidPlan applies, Knative source
-		// configuration is a paid feature in SaaS builds; FOSS is tier-blind.
-		knativeSourceConfigH := handlers.NewKnativeSourceConfigHandler(s)
-		r.Route("/knative", func(r chi.Router) {
-			r.Use(authed)
-			r.Use(middleware.RequirePaidPlan(s))
-			r.Get("/source-config", knativeSourceConfigH.Get)
-		})
+		// Event streaming routes (registered by build-tagged helpers).
+		registerEventingRoutes(r, s, msgBus, authed, authedAllowReadOnlyWrite, opt)
 
 		// Discord: OAuth callback and button clicks. SaaS serves the
 		// platform app; FOSS keeps the public-key click handler.
@@ -399,13 +339,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 				r.Post("/import", bulkImportH.Import)
 			})
 
-			// Admin reply-activity dashboard (Phase-5 audit log). Admin-only
-			// because it exposes cross-channel, cross-alert visibility into
-			// every state-mutating reply the org has accepted or rejected.
-			r.Group(func(r chi.Router) {
-				r.Use(middleware.RequireRole("owner", "admin"))
-				r.Get("/admin/cloudevents/replies", replyAuditH.List)
-			})
+			registerEventingAdminRoutes(r, s)
 
 			// Monitor Groups.
 			r.Group(func(r chi.Router) {
@@ -481,7 +415,7 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 		})
 
 		// Pro-only routes (teams, schedules, OIDC, API keys, billing).
-		registerProRoutes(r, s, jwt, authed, msgBus, billingClient, billingWebhookSecret, publicBaseURL, userH, opt.Envelope, opt.OpsToken, root, opt.APIKeyHasher, opt.Mailer, opt.TestSender)
+		registerProRoutes(r, s, jwt, authed, msgBus, billingClient, billingWebhookSecret, publicBaseURL, userH, opt.Envelope, opsAuth{Token: opt.OpsToken, ActorKey: opt.OpsActorKey}, root, opt.APIKeyHasher, opt.Mailer, opt.TestSender, opt.OTELExportSync)
 	})
 
 	// JWKS endpoint, mounted before the SPA catch-all so that

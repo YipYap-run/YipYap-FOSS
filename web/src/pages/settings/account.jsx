@@ -306,7 +306,7 @@ export function AccountTab() {
               {resendMsg && (
                 <span
                   class={resendMsg.kind === 'ok' || resendMsg.kind === 'verified' ? 'form-success' : 'form-error'}
-                  style={resendMsg.kind === 'ok' || resendMsg.kind === 'verified' ? 'color: var(--color-up)' : undefined}
+                  style={resendMsg.kind === 'ok' || resendMsg.kind === 'verified' ? 'color: var(--color-up-text)' : undefined}
                 >
                   {resendMsg.message}
                 </span>
@@ -387,7 +387,7 @@ export function AccountTab() {
       </div>
 
       <div class="card" style="margin-top: 16px">
-        <div class="section-header"><h3 style="color: var(--color-down)">Delete Account</h3></div>
+        <div class="section-header"><h3 style="color: var(--color-down-text)">Delete Account</h3></div>
         <p style="font-size: 0.875rem; color: var(--color-text-muted); margin: 0 0 12px">
           Your account will be disabled right away and deleted after 4 days. To keep it, sign in
           during that time and we will email you a link to restore it.

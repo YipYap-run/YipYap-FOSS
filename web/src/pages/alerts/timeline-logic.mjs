@@ -4,6 +4,7 @@
 // channel_name, reason).
 
 import { deliveryReason } from '../settings/channel-health-logic.mjs';
+import { EVENTING_CHANNEL_LABELS, REPLY_TIMELINE_LABELS, REPLY_TIMELINE_TONES } from '../../edition/eventing.mjs';
 
 export const CHANNEL_TYPE_LABELS = {
   webhook: 'Webhook',
@@ -17,7 +18,7 @@ export const CHANNEL_TYPE_LABELS = {
   twilio_voice: 'Voice call',
   ntfy: 'ntfy',
   pushover: 'Pushover',
-  cloudevent_http: 'CloudEvents',
+  ...EVENTING_CHANNEL_LABELS,
 };
 
 export function channelTypeLabel(type) {
@@ -47,24 +48,17 @@ export function eventType(evt) {
 const SIMPLE_LABELS = {
   triggered: 'Alert triggered',
   ack: 'Acknowledged',
-  ack_with_context: 'Acknowledged with context',
   escalated: 'Escalated to the next step',
   resolved: 'Resolved',
-  duplicated: 'Marked as a duplicate',
-  ownership_transferred: 'Ownership transferred',
   suppressed: 'Suppressed',
-  escalated_reply: 'Escalated by a reply',
-  remediation_started: 'Remediation started',
-  remediation_result: 'Remediation finished',
-  routed: 'Routed',
-  status_page_synced: 'Status page updated',
+  ...REPLY_TIMELINE_LABELS,
 };
 
 const SIMPLE_TONES = {
   triggered: 'down',
   ack: 'warning',
-  ack_with_context: 'warning',
   resolved: 'up',
+  ...REPLY_TIMELINE_TONES,
 };
 
 export function humanizeType(type) {

@@ -75,7 +75,6 @@ var apiKeyScopeResources = []APIKeyScopeResource{
 	{Key: "services", Label: "Services", Description: "Services, links and dependencies.", Actions: readWrite},
 	{Key: "users", Label: "Members", Description: "List org members and their roles. Members can only be changed by an owner or admin session.", Actions: readOnly},
 	{Key: "org", Label: "Organization", Description: "Org name, plan and settings. Org settings can only be changed by an owner or admin session.", Actions: readOnly},
-	{Key: "events", Label: "Event stream", Description: "Poll or stream org events (CloudEvents transport and the Knative source).", Actions: readOnly},
 }
 
 // APIKeyScopePresets returns the preset scopes, in display order.
@@ -226,12 +225,6 @@ var apiKeyScopeRoutes = []scopeRoute{
 	{pattern: "/users/**", resource: "users"},
 	{pattern: "/org", resource: "org"},
 	{pattern: "/org/settings", resource: "org"},
-	// The event stream carries monitor and alert changes, so a key that can
-	// read either keeps working with the Knative source it was issued for.
-	{pattern: "/cloudevents/poll", resource: "events", alsoAccept: []string{"monitors", "alerts"}},
-	{pattern: "/cloudevents/stream", resource: "events", alsoAccept: []string{"monitors", "alerts"}},
-	{pattern: "/cloudevents/ack", resource: "events", alsoAccept: []string{"monitors", "alerts"}, readOnly: true},
-	{pattern: "/knative/**", resource: "events", alsoAccept: []string{"monitors", "alerts"}},
 }
 
 func matchScopePattern(pattern, path string) bool {

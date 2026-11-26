@@ -68,6 +68,19 @@ type phoneConfig struct {
 	Phone string `json:"phone"`
 }
 
+// PhoneOf returns the E.164 number of an SMS or voice method, or "" for any
+// other type or an unreadable config.
+func PhoneOf(m *domain.ContactMethod) string {
+	if m.Type != domain.ContactSMS && m.Type != domain.ContactVoice {
+		return ""
+	}
+	var c phoneConfig
+	if json.Unmarshal([]byte(m.Config), &c) != nil {
+		return ""
+	}
+	return c.Phone
+}
+
 type ntfyConfig struct {
 	ServerURL string `json:"server_url,omitempty"`
 	Topic     string `json:"topic"`
@@ -418,7 +431,7 @@ func Target(ctx context.Context, s store.Store, m *domain.ContactMethod) (string
 		if err := json.Unmarshal([]byte(m.Config), &c); err != nil {
 			return "", nil, err
 		}
-		channel, cfg = "webhook", map[string]string{"url": c.URL, "secret": c.Secret, "format": "generic"}
+		channel, cfg = "webhook", map[string]string{"url": c.URL, "signing_secret": c.Secret, "format": "generic"}
 	case domain.ContactSlackDM:
 		var c slackDMConfig
 		if err := json.Unmarshal([]byte(m.Config), &c); err != nil {
@@ -502,9 +515,20 @@ type Cipher struct {
 
 const sealedPrefix = "sealed:v1:"
 
+// ErrSealingRequired is returned by SealConfig when a config holds a secret
+// field, no envelope key is configured, and this edition refuses to store
+// secrets in plaintext.
+var ErrSealingRequired = errors.New("this server has no notification encryption key (YIPYAP_NOTIFICATION_KEY), so contact methods with a token or secret cannot be saved")
+
+// SealConfig encrypts the secret fields of cfg. With no encrypter the SaaS
+// build refuses a config that carries a plaintext secret
+// (ErrSealingRequired); the self-hosted build stores it as is.
 func SealConfig(t domain.ContactMethodType, cfg string, enc Encrypter) (string, error) {
 	fields := secretFields[t]
-	if len(fields) == 0 || cfg == "" || enc == nil {
+	if len(fields) == 0 || cfg == "" {
+		return cfg, nil
+	}
+	if enc == nil && !requireSealing {
 		return cfg, nil
 	}
 	var m map[string]any
@@ -516,6 +540,9 @@ func SealConfig(t domain.ContactMethodType, cfg string, enc Encrypter) (string, 
 		v, ok := m[f].(string)
 		if !ok || v == "" || strings.HasPrefix(v, sealedPrefix) {
 			continue
+		}
+		if enc == nil {
+			return "", ErrSealingRequired
 		}
 		ct, err := enc([]byte(v))
 		if err != nil {

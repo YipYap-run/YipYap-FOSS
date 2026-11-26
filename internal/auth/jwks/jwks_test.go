@@ -40,7 +40,7 @@ func TestE2E_SignAndVerifyViaJWKSHandler(t *testing.T) {
 			tok, err := signer.Sign(Claims{
 				Issuer:    "https://yipyap.example/",
 				Subject:   "ce:alert:abc",
-				Audience:  []string{"knative-source"},
+				Audience:  []string{"example-audience"},
 				IssuedAt:  now,
 				ExpiresAt: now.Add(DefaultTokenTTL),
 				JTI:       "jti-e2e",

@@ -12,6 +12,7 @@ type ProConfig struct {
 	DBDriver      string
 	PublicBaseURL string
 	OpsToken      string
+	OpsActorKey   string
 
 	// TwilioAuthToken is SaaS-only and always empty in FOSS. Present so
 	// shared wiring (ServerOptions) can reference it in both builds.
@@ -49,13 +50,13 @@ type ProConfig struct {
 	AllowPrivateTargets bool // FOSS defaults to true so self-hosters can monitor their own networks
 
 	// AllowPrivateControlPlaneTargets governs SSRF protection for
-	// control-plane URLs (CloudEvent sink_url, OIDC token_url / issuer,
+	// control-plane URLs (outbound sink URLs, OIDC token_url / issuer,
 	// JWKS). Distinct from AllowPrivateTargets: a FOSS deployment that
 	// legitimately watches intranet monitors should NOT simultaneously
 	// accept attacker-submitted sink_url pointing at the same intranet.
 	// Defaults to false even in FOSS; override via
 	// YIPYAP_ALLOW_PRIVATE_CONTROL_PLANE_TARGETS=true for localhost
-	// CloudEvent development.
+	// development.
 	AllowPrivateControlPlaneTargets bool
 
 	// Optional operator caps. FOSS has no plan limits; 0 (unset) means no
@@ -78,6 +79,15 @@ func loadProConfig(c *Config) {
 	c.MaxMonitorsPerOrg = envNonNegInt("YIPYAP_MAX_MONITORS_PER_ORG")
 	c.MaxNotificationChannelsPerOrg = envNonNegInt("YIPYAP_MAX_NOTIFICATION_CHANNELS_PER_ORG")
 	c.MinCheckIntervalSeconds = envNonNegInt("YIPYAP_MIN_CHECK_INTERVAL_SECONDS")
+
+	// Transactional email: password resets, invites and contact method
+	// verification. Unset host means no email. An empty From lets the
+	// mailer use its own default rather than a hosted-service address.
+	c.SMTPHost = envOr("YIPYAP_SMTP_HOST", "")
+	c.SMTPPort = envInt("YIPYAP_SMTP_PORT", 587)
+	c.SMTPUser = envOr("YIPYAP_SMTP_USER", "")
+	c.SMTPPass = envOr("YIPYAP_SMTP_PASS", "")
+	c.SMTPFrom = envOr("YIPYAP_SMTP_FROM", "")
 }
 
 // envNonNegInt reads an optional cap. Unset, malformed or negative values
@@ -94,4 +104,15 @@ func envNonNegInt(key string) int {
 		return 0
 	}
 	return n
+}
+
+// envInt reads an integer setting, falling back when unset or malformed.
+// The SaaS build has its own copy in proconfig_full.go.
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
 }

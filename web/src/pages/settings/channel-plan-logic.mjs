@@ -13,6 +13,7 @@
 // The rules mirror billing.PaidChannelsAllowed; the server decides.
 
 import { isPhoneType, PAID_TYPES } from './channel-config-logic.mjs';
+import { EVENTING_PAID_KINDS } from '../../edition/eventing.mjs';
 
 export function isPaidChannelType(type) {
   return PAID_TYPES.includes(type);
@@ -123,14 +124,13 @@ export function pausedChannelsNote(channels, org, opts = {}) {
     : `${names.length} channels are not sending alerts because they need Pro: ${names.join(', ')}.`;
 }
 
-const KIND_ORDER = ['SMS', 'voice', 'Telegram', 'CloudEvents'];
+const KIND_ORDER = ['SMS', 'voice', 'Telegram', ...Object.values(EVENTING_PAID_KINDS)];
 
 function paidKind(type) {
   if (type === 'twilio_sms' || type === 'telnyx_sms') return 'SMS';
   if (type === 'twilio_voice' || type === 'telnyx_voice') return 'voice';
   if (type === 'telegram') return 'Telegram';
-  if (type === 'cloudevent_http') return 'CloudEvents';
-  return null;
+  return EVENTING_PAID_KINDS[type] || null;
 }
 
 // paidKinds names the channel kinds in a fixed order: "SMS and voice",

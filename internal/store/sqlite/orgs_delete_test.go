@@ -20,7 +20,8 @@ func countRows(t *testing.T, s *SQLiteStore, table string) int {
 
 // TestOrgDeleteCleansUpOrphans verifies that deleting an org removes every
 // org-scoped row, including child tables reached via ON DELETE CASCADE and
-// the two join-only tables (alert_status_page_refs, cloudevent_ingest_idempotency).
+// the join-only table alert_status_page_refs. Edition-specific join-only
+// tables are covered next to their stores.
 func TestOrgDeleteCleansUpOrphans(t *testing.T) {
 	s := setupTestDB(t)
 	ctx := context.Background()
@@ -57,8 +58,6 @@ func TestOrgDeleteCleansUpOrphans(t *testing.T) {
 	// Join-only tables (no org_id, no FK).
 	exec(`INSERT INTO alert_status_page_refs (id, alert_id, provider, updated_at) VALUES (?, ?, ?, ?)`,
 		uuid.New().String(), alert.ID, "statuspage", now)
-	exec(`INSERT INTO cloudevent_ingest_idempotency (monitor_id, event_id) VALUES (?, ?)`,
-		mon.ID, "evt-1")
 
 	// Newer org_id-bearing tables.
 	exec(`INSERT INTO services (id, org_id, name, slug) VALUES (?, ?, 'svc', 'svc')`,
@@ -83,7 +82,7 @@ func TestOrgDeleteCleansUpOrphans(t *testing.T) {
 		"orgs", "users", "monitors", "alerts", "escalation_policies", "teams",
 		"alert_events", "alert_escalation_state", "escalation_steps",
 		"team_members", "schedules", "monitor_labels", "monitor_checks",
-		"alert_status_page_refs", "cloudevent_ingest_idempotency",
+		"alert_status_page_refs",
 		"services", "billing", "support_tickets", "incidents", "status_pages",
 		"monitor_groups", "sms_voice_usage", "sms_voice_usage_warnings",
 	} {

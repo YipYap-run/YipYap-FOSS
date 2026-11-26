@@ -41,7 +41,7 @@ func (s *syncBuffer) String() string {
 }
 
 // TestServerAccessLogHasNoSecrets covers core-5 end to end: the server's
-// global access log must not contain the ingest token path parameter or a
+// global access log must not contain a token path parameter or a
 // ?token= query value.
 func TestServerAccessLogHasNoSecrets(t *testing.T) {
 	buf := &syncBuffer{}
@@ -66,8 +66,7 @@ func TestServerAccessLogHasNoSecrets(t *testing.T) {
 	srv := httptest.NewServer(api.NewServer(s, jwt, bus.NewChannel(), hub, nil, "", "", api.ServerOptions{}))
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Post(srv.URL+"/api/v1/cloudevents/ingest/ingest-secret-abc?token=query-secret-xyz",
-		"application/cloudevents+json", strings.NewReader(`{}`))
+	resp, err := http.Get(srv.URL + "/ack/path-secret-abc?token=query-secret-xyz")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +88,13 @@ func TestServerAccessLogHasNoSecrets(t *testing.T) {
 	}
 
 	out := buf.String()
-	for name, secret := range map[string]string{"ingest path token": "ingest-secret-abc", "query token": "query-secret-xyz", "ws JWT": tok} {
+	for name, secret := range map[string]string{"path token": "path-secret-abc", "query token": "query-secret-xyz", "ws JWT": tok} {
 		if strings.Contains(out, secret) {
 			t.Errorf("server log leaks the %s", name)
 		}
 	}
-	if !strings.Contains(out, `"route":"/api/v1/cloudevents/ingest/{token}"`) {
-		t.Errorf("access log missing ingest route pattern: %s", out)
+	if !strings.Contains(out, `"route":"/ack/{token}"`) {
+		t.Errorf("access log missing ack route pattern: %s", out)
 	}
 	if !strings.Contains(out, `"route":"/ws"`) {
 		t.Errorf("access log missing /ws route: %s", out)

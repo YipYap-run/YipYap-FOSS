@@ -36,69 +36,6 @@
   box-sizing: border-box;
 }
 
-/* Event type list under the CloudEvents filter. */
-.event-type-picker {
-  margin-top: 6px;
-  font-size: 0.8125rem;
-}
-.event-type-picker summary {
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  padding: 4px 0;
-  min-height: 24px;
-}
-.event-type-picker summary:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-.event-type-group {
-  margin: 8px 0 0;
-}
-.event-type-group-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.event-type-group-label {
-  font-weight: 600;
-  min-width: 6.5rem;
-}
-.event-type-group ul {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-}
-.event-type-group li code,
-.event-type-group-head code {
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
-}
-
-/* Accepted replies: the editor is a labelled group so an inline error can
-   be announced and focused. */
-.accepted-replies-editor:focus {
-  outline: none;
-}
-.accepted-replies-editor:focus-visible,
-.accepted-replies-editor[aria-invalid="true"] {
-  outline: 2px solid var(--color-down);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
-/* Text tone, not the warning hue, so it reads at 4.5:1 on both themes. */
-.reply-blast-warning {
-  margin-top: 6px;
-  padding: 8px 10px;
-  border-left: 3px solid var(--color-warning);
-  background: var(--color-warning-bg);
-  color: var(--color-text);
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 0.85em;
-}
-
 /* A saved URL that holds a credential: shown as its host, with Replace. */
 .saved-url {
   display: flex;
@@ -127,5 +64,5 @@
 }
 
 .form-required-note span {
-  color: var(--color-down);
+  color: var(--color-down-text);
 }

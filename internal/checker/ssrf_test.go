@@ -190,7 +190,7 @@ func TestValidateControlPlaneHTTPTarget_SplitFromMonitorToggle(t *testing.T) {
 
 // TestValidateControlPlaneHTTPTarget_OptInAllowsPrivate confirms the
 // control-plane toggle actually relaxes when explicitly set. Needed for
-// localhost CloudEvent development.
+// localhost development.
 func TestValidateControlPlaneHTTPTarget_OptInAllowsPrivate(t *testing.T) {
 	origCP := AllowPrivateControlPlaneTargets
 	AllowPrivateControlPlaneTargets = true

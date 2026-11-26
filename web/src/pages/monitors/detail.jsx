@@ -217,7 +217,7 @@ export function MonitorDetailPage({ id }) {
       });
 
     return () => cleanup();
-  }, [latency]);
+  }, [latency, loading]);
 
   if (loading) return <LoadingPage />;
   if (error) return <ErrorMessage error={error} onRetry={load} />;

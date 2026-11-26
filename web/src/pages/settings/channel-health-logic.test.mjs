@@ -3,7 +3,7 @@
 // failure classes in internal/notify/delivery_error.go.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { channelHealthView, deliveryReason, failingChannelsNote, linkedChannel, testSentMessage, testFilteredMessage, testFailureNote } from './channel-health-logic.mjs';
+import { channelHealthView, deliveryReason, failingChannelsNote, linkedChannel, testSentMessage, testFailureNote } from './channel-health-logic.mjs';
 
 const NOW = Date.parse('2026-11-24T12:00:00Z');
 
@@ -85,14 +85,6 @@ test('testSentMessage mentions the owner follow-up only when one was sent', () =
   assert.equal(testSentMessage({ status: 'test notification sent', owners_notified: false }), 'Test notification sent');
   assert.equal(testSentMessage(null), 'Test notification sent');
   assert.match(testSentMessage({ owners_notified: true }), /owners are getting a follow-up email/);
-});
-
-test('testFilteredMessage explains a test the event filter dropped', () => {
-  assert.equal(testFilteredMessage({ status: 'test notification sent' }), null);
-  assert.equal(testFilteredMessage(null), null);
-  const msg = testFilteredMessage({ status: 'filtered', filtered: true, event_type: 'run.yipyap.alert.fired.v1' });
-  assert.match(msg, /^Nothing was sent/);
-  assert.match(msg, /run\.yipyap\.alert\.fired\.v1/);
 });
 
 test('testFailureNote keeps the reason and stays until dismissed', () => {

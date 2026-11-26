@@ -89,6 +89,33 @@ func (s *ContactMethodStore) ListByUser(ctx context.Context, userID string) ([]*
 	return out, rows.Err()
 }
 
+// ListByType implements store.ContactMethodStore.
+func (s *ContactMethodStore) ListByType(ctx context.Context, t domain.ContactMethodType) ([]*domain.ContactMethod, error) {
+	rows, err := s.q.QueryContext(ctx,
+		`SELECT `+contactMethodCols+` FROM user_contact_methods WHERE type = ? ORDER BY id`, string(t))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*domain.ContactMethod
+	for rows.Next() {
+		m, err := scanContactMethod(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ReplaceConfig implements store.ContactMethodStore. It leaves updated_at
+// alone: re-encrypting a secret is not a user-visible change.
+func (s *ContactMethodStore) ReplaceConfig(ctx context.Context, id, oldCfg, newCfg string) (bool, error) {
+	res, err := s.q.ExecContext(ctx,
+		`UPDATE user_contact_methods SET config = ? WHERE id = ? AND config = ?`, newCfg, id, oldCfg)
+	return affectedOne(res, err)
+}
+
 func (s *ContactMethodStore) CountByUser(ctx context.Context, userID string) (int, error) {
 	var n int
 	err := s.q.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_contact_methods WHERE user_id = ?`, userID).Scan(&n)
@@ -171,21 +198,44 @@ func (s *ContactMethodStore) IncrementVerifyAttempts(ctx context.Context, userID
 	return n, err
 }
 
-func (s *ContactMethodStore) ReserveSendBudget(ctx context.Context, userID, orgID string, at time.Time, smsCode bool, userDailyLimit, orgSMSDailyLimit int) (bool, error) {
+// ReserveSendBudget implements store.ContactMethodStore. Every bucket is
+// reserved or none is: a later refusal returns the units already taken.
+func (s *ContactMethodStore) ReserveSendBudget(ctx context.Context, userID, orgID string, at time.Time, phone string, userDailyLimit, orgSMSDailyLimit, phoneDailyLimit int) (bool, error) {
 	day := at.UTC().Format("2006-01-02")
 	if _, err := s.q.ExecContext(ctx,
 		`DELETE FROM contact_method_send_budgets WHERE day < ?`,
 		at.UTC().AddDate(0, 0, -2).Format("2006-01-02")); err != nil {
 		return false, err
 	}
-	ok, err := s.reserveSend(ctx, "user", userID, day, userDailyLimit)
-	if err != nil || !ok {
+	type bucket struct {
+		scope, owner string
+		limit        int
+	}
+	buckets := []bucket{{"user", userID, userDailyLimit}}
+	if phone != "" {
+		// The phone bucket is keyed by number alone, so it caps codes to one
+		// number across every org and user.
+		buckets = append(buckets, bucket{"phone", phone, phoneDailyLimit}, bucket{"org_sms", orgID, orgSMSDailyLimit})
+	}
+	for i, b := range buckets {
+		ok, err := s.reserveSend(ctx, b.scope, b.owner, day, b.limit)
+		if err == nil && ok {
+			continue
+		}
+		for _, taken := range buckets[:i] {
+			_ = s.releaseSend(ctx, taken.scope, taken.owner, day)
+		}
 		return false, err
 	}
-	if !smsCode {
-		return true, nil
-	}
-	return s.reserveSend(ctx, "org_sms", orgID, day, orgSMSDailyLimit)
+	return true, nil
+}
+
+func (s *ContactMethodStore) releaseSend(ctx context.Context, scope, ownerID, day string) error {
+	_, err := s.q.ExecContext(ctx,
+		`UPDATE contact_method_send_budgets SET count = count - 1
+		  WHERE scope = ? AND owner_id = ? AND day = ? AND count > 0`,
+		scope, ownerID, day)
+	return err
 }
 
 func (s *ContactMethodStore) reserveSend(ctx context.Context, scope, ownerID, day string, limit int) (bool, error) {

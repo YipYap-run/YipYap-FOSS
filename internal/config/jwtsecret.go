@@ -104,6 +104,13 @@ func ResolveJWTSecret(opts JWTSecretOptions) (secret string, src JWTSecretSource
 		return "", 0, "", err
 	}
 
+	if marker := sourceTreeMarker(opts.DataDir); marker != "" {
+		abs, _ := filepath.Abs(opts.DataDir)
+		if abs == "" {
+			abs = opts.DataDir
+		}
+		return "", 0, "", fmt.Errorf("%s is not set and the data dir %q looks like a source checkout (it contains %s); refusing to write a generated secret there. Set YIPYAP_DATA_DIR to a directory outside the source tree, or set %s", JWTSecretEnv, abs, marker, JWTSecretEnv)
+	}
 	if err := os.MkdirAll(opts.DataDir, 0o700); err != nil {
 		return "", 0, "", fmt.Errorf("%s is not set and the data dir %q cannot be created to store a generated one (%v); make it writable or set %s", JWTSecretEnv, opts.DataDir, err, JWTSecretEnv)
 	}
@@ -222,12 +229,20 @@ func (c *Config) APIKeyHMACSecret() (secret string, fallback bool) {
 }
 
 // ResolveDataDir returns the directory for local state such as a generated
-// JWT secret. YIPYAP_DATA_DIR wins; otherwise a SQLite database file's
-// directory is used, or the working directory for an in-memory SQLite DB.
+// JWT secret, in this order:
+//
+//  1. YIPYAP_DATA_DIR.
+//  2. The directory of a SQLite database file whose DSN names a directory
+//     (for example /data/yipyap.db in the Docker image).
+//  3. "." when a jwt_secret already exists there, so installs that ran with
+//     a bare DSN such as yipyap.db keep their secret.
+//  4. A per-user dir, os.UserConfigDir()/yipyap.
+//
 // With any other driver it returns "" unless YIPYAP_DATA_DIR is set: a
 // shared database usually means several replicas, and a secret generated
 // into each one's local disk would differ, so tokens from one replica would
-// fail on the next. The caller then requires an explicit secret.
+// fail on the next. The caller then requires an explicit secret. It also
+// returns "" when no per-user dir is known.
 func (c *Config) ResolveDataDir() string {
 	if c.DataDir != "" {
 		return c.DataDir
@@ -236,9 +251,36 @@ func (c *Config) ResolveDataDir() string {
 		return ""
 	}
 	if p := sqliteFilePath(c.DBDsn); p != "" {
-		return filepath.Dir(p)
+		if dir := filepath.Dir(p); dir != "." {
+			return dir
+		}
 	}
-	return "."
+	if _, err := os.Stat(JWTSecretFile); err == nil {
+		return "."
+	}
+	return userDataDir()
+}
+
+// userDataDir is os.UserConfigDir()/yipyap, or "" when the platform has no
+// per-user config dir (for example no $HOME). A variable so tests can stub it.
+var userDataDir = func() string {
+	base, err := os.UserConfigDir()
+	if err != nil || base == "" {
+		return ""
+	}
+	return filepath.Join(base, "yipyap")
+}
+
+// sourceTreeMarker returns the name of a go.mod or .git entry in dir, or ""
+// when there is none. A generated secret must not land in a source checkout,
+// where it can be committed or shipped by accident.
+func sourceTreeMarker(dir string) string {
+	for _, name := range []string{"go.mod", ".git"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			return name
+		}
+	}
+	return ""
 }
 
 // sqliteFilePath extracts the file path from a SQLite DSN such as

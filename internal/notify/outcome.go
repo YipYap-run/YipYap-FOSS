@@ -196,7 +196,7 @@ func (r *Recorder) RecordFailed(ctx context.Context, dl DeadLetter) (int, error)
 }
 
 // writeEvent inserts the outcome event once. Jobs without an alert (such
-// as CloudEvent deliveries) have no timeline; they report first=true so
+// as event sink deliveries) have no timeline; they report first=true so
 // the channel health is still updated.
 func (r *Recorder) writeEvent(ctx context.Context, tx store.Store, alertID string, evt *domain.AlertEvent) (bool, error) {
 	if alertID == "" {

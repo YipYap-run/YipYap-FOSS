@@ -48,8 +48,8 @@ func assertCapCopy(t *testing.T, body, envVar string) {
 // an "Upgrade" message that led nowhere.
 func TestFOSSMonitorLimits_NoCapByDefault(t *testing.T) {
 	withOperatorLimits(t, handlers.OperatorLimits{})
-	ts, _, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "FossOrg", "foss@test.com", "supersecret123")
+	ts, _, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "FossOrg", "foss@test.com", "supersecret123")
 
 	for i := 0; i < 8; i++ {
 		if code, body := createHeartbeat(t, ts.URL, token, 30); code != http.StatusCreated {
@@ -93,8 +93,8 @@ func TestFOSSMonitorLimits_NoCapByDefault(t *testing.T) {
 // not trigger the SPA's upgrade prompt.
 func TestFOSSMonitorLimits_OperatorCap(t *testing.T) {
 	withOperatorLimits(t, handlers.OperatorLimits{MaxMonitorsPerOrg: 2, MaxNotificationChannelsPerOrg: 1, MinCheckIntervalSeconds: 120})
-	ts, _, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "FossCap", "fosscap@test.com", "supersecret123")
+	ts, _, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "FossCap", "fosscap@test.com", "supersecret123")
 
 	// The SPA reads the caps from meta to set the form floor.
 	metaResp := doJSONReq(t, http.MethodGet, ts.URL+"/api/v1/meta", "", nil)

@@ -37,8 +37,8 @@ func getChannelHealth(t *testing.T, url, token string) healthBody {
 }
 
 func TestChannelAPI_ReportsDeliveryHealth(t *testing.T) {
-	srv, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, srv, "HealthOrg", "health@test.com", "supersecret123")
+	srv, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, srv, "HealthOrg", "health@test.com", "supersecret123")
 	ctx := context.Background()
 	user, err := s.Users().GetByEmail(ctx, "health@test.com")
 	if err != nil {

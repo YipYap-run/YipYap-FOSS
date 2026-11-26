@@ -14,3 +14,9 @@ type OrgSettingsStore interface {
 type OrgSettingsProvider interface {
 	OrgSettings() OrgSettingsStore
 }
+
+// OrgSettingsKeyLister is implemented by org settings stores that can list
+// the orgs holding a given key. Optional, so test doubles need not.
+type OrgSettingsKeyLister interface {
+	ListOrgIDsWithKey(ctx context.Context, key string) ([]string, error)
+}

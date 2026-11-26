@@ -74,9 +74,9 @@ func newTestPolicy(t *testing.T, s store.Store, orgID, name string, stepChannels
 // until it is removed from every policy, then succeeds with 204.
 // References from another org neither show up nor block the delete.
 func TestChannelAPI_UsedByBlocksDelete(t *testing.T) {
-	srv, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, srv, "UsedByOrg", "usedby@test.com", "supersecret123")
-	_ = ceRegisterAndGetToken(t, srv, "OtherOrg", "other-usedby@test.com", "supersecret123")
+	srv, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, srv, "UsedByOrg", "usedby@test.com", "supersecret123")
+	_ = signupAndGetToken(t, srv, "OtherOrg", "other-usedby@test.com", "supersecret123")
 	ctx := context.Background()
 	user, err := s.Users().GetByEmail(ctx, "usedby@test.com")
 	if err != nil {

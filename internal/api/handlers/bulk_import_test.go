@@ -57,10 +57,10 @@ func countMonitors(t *testing.T, s *sqlite.SQLiteStore, orgID string) int {
 // another org's escalation policy or group, and nothing from the batch is
 // created when one item fails.
 func TestBulkImport_ForeignReferencesRejected(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "ImpRefs", "imprefs@test.com", "supersecret123")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "ImpRefs", "imprefs@test.com", "supersecret123")
 	orgID := orgIDByEmail(t, s, "imprefs@test.com")
-	ceRegisterAndGetToken(t, ts, "OtherOrg", "other@test.com", "supersecret123")
+	signupAndGetToken(t, ts, "OtherOrg", "other@test.com", "supersecret123")
 	otherOrg := orgIDByEmail(t, s, "other@test.com")
 
 	ctx := context.Background()
@@ -103,9 +103,9 @@ func TestBulkImport_ForeignReferencesRejected(t *testing.T) {
 // TestMonitorCreate_ForeignPolicyRejected: the shared helper also closes
 // the same hole on single create and update.
 func TestMonitorCreate_ForeignPolicyRejected(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "CreateRefs", "createrefs@test.com", "supersecret123")
-	ceRegisterAndGetToken(t, ts, "Other2", "other2@test.com", "supersecret123")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "CreateRefs", "createrefs@test.com", "supersecret123")
+	signupAndGetToken(t, ts, "Other2", "other2@test.com", "supersecret123")
 	otherOrg := orgIDByEmail(t, s, "other2@test.com")
 	foreign := &domain.EscalationPolicy{ID: uuid.New().String(), OrgID: otherOrg, Name: "theirs"}
 	if err := s.EscalationPolicies().Create(context.Background(), foreign); err != nil {
@@ -155,8 +155,8 @@ func TestBulkImport_ChannelChecks(t *testing.T) {
 	checker.AllowPrivateTargets = false
 	defer func() { checker.AllowPrivateTargets = orig }()
 
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "ImpChan", "impchan@test.com", "supersecret123")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "ImpChan", "impchan@test.com", "supersecret123")
 	orgID := orgIDByEmail(t, s, "impchan@test.com")
 
 	code, res := postImport(t, ts.URL, token, map[string]any{
@@ -176,8 +176,8 @@ func TestBulkImport_ChannelChecks(t *testing.T) {
 // TestBulkImport_HeartbeatGetsToken: imported heartbeat monitors get a
 // token, and the token is required to report.
 func TestBulkImport_HeartbeatGetsToken(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "ImpHB", "imphb@test.com", "supersecret123")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "ImpHB", "imphb@test.com", "supersecret123")
 	orgID := orgIDByEmail(t, s, "imphb@test.com")
 
 	code, res := postImport(t, ts.URL, token, map[string]any{"monitors": []map[string]any{
@@ -212,8 +212,8 @@ func TestBulkImport_HeartbeatGetsToken(t *testing.T) {
 // (as old imports were) must not accept an empty token. ConstantTimeCompare
 // returns 1 for two empty strings.
 func TestHeartbeat_EmptyStoredTokenRejected(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	ceRegisterAndGetToken(t, ts, "EmptyHB", "emptyhb@test.com", "supersecret123")
+	ts, s, _ := setupChannelTestServer(t)
+	signupAndGetToken(t, ts, "EmptyHB", "emptyhb@test.com", "supersecret123")
 	orgID := orgIDByEmail(t, s, "emptyhb@test.com")
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -245,8 +245,8 @@ func TestHeartbeat_EmptyStoredTokenRejected(t *testing.T) {
 // import page reported success. Each error starts with "<section>[i]" or
 // the section name, which the SPA uses to point at the item.
 func TestBulkImport_WrongFormatRejected(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "ImpShape", "impshape@test.com", "supersecret123")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "ImpShape", "impshape@test.com", "supersecret123")
 	orgID := orgIDByEmail(t, s, "impshape@test.com")
 
 	cases := []struct {
@@ -312,8 +312,8 @@ func TestBulkImport_WrongFormatRejected(t *testing.T) {
 // into a Free org. The template used to set a 60s interval, which the Free
 // plan's 300s floor rejects, so the first thing a new user tried failed.
 func TestBulkImport_TemplateImportsOnFree(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "ImpTpl", "imptpl@test.com", "supersecret123")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "ImpTpl", "imptpl@test.com", "supersecret123")
 	orgID := orgIDByEmail(t, s, "imptpl@test.com")
 
 	tpl := `{

@@ -49,7 +49,7 @@ func TestTelegramLinkCodeContract(t *testing.T) {
 		t.Fatalf("create body = %v", created)
 	}
 	code, _ := created["code"].(string)
-	if created["command"] != "/link "+code {
+	if created["command"] != "/link@YipYapBot "+code {
 		t.Fatalf("command = %v, code %q", created["command"], code)
 	}
 	exp, err := time.Parse(time.RFC3339, created["expires_at"].(string))

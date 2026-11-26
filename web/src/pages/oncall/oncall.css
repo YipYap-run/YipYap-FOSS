@@ -228,7 +228,7 @@
 
 .oncall-fieldset legend.required::after {
   content: ' *';
-  color: var(--color-down);
+  color: var(--color-down-text);
   font-weight: normal;
 }
 

@@ -15,9 +15,6 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
 	"github.com/YipYap-run/YipYap-FOSS/internal/checker"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/reply"
-	replyhandlers "github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/reply/handlers"
 	"github.com/YipYap-run/YipYap-FOSS/internal/config"
 	"github.com/YipYap-run/YipYap-FOSS/internal/contactmethod"
 	"github.com/YipYap-run/YipYap-FOSS/internal/crypto"
@@ -28,7 +25,6 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 	"github.com/YipYap-run/YipYap-FOSS/internal/promo"
 	"github.com/YipYap-run/YipYap-FOSS/internal/seed"
-	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 	"github.com/YipYap-run/YipYap-FOSS/internal/support"
 	"github.com/YipYap-run/YipYap-FOSS/internal/wiring"
 )
@@ -42,7 +38,6 @@ func main() {
 
 func run() error {
 	cfg := config.Load()
-	cloudevents.SetPublicBaseURL(cfg.PublicBaseURL)
 
 	// Resolve the JWT signing secret. When YIPYAP_JWT_SECRET is unset, a
 	// random one is generated once and kept in the data dir. Placeholder or
@@ -130,10 +125,12 @@ func run() error {
 		FlushConcurrency:  cfg.CheckerFlushConcurrency,
 	})
 
-	// CloudEvent emitter for monitor and alert state egress. Shared by the
-	// scheduler (monitor up/down) and the escalation engine (alert lifecycle).
-	cePublisher := cloudevents.NewPublisher(msgBus)
-	sched.SetCloudEventEmitter(cePublisher)
+	// Event emitter for monitor, alert and maintenance state egress. Shared
+	// by the scheduler, the escalation engine and the maintenance ticker.
+	// Nil (a no-op) in the FOSS build.
+	evt := newEventing(cfg, msgBus)
+	emitter := evt.Emitter()
+	sched.SetEventEmitter(emitter)
 
 	// 5. Envelope encryption for notification configs.
 	var envelope *crypto.Envelope
@@ -148,10 +145,33 @@ func run() error {
 	if envelope == nil {
 		log.Println("WARNING: YIPYAP_NOTIFICATION_KEY is not set. Notification channel secrets (Slack tokens, SMTP passwords, etc.) will be stored as PLAINTEXT in the database. Set YIPYAP_NOTIFICATION_KEY to a 32-byte hex key for AES-256 encryption.")
 	}
+	if envelope != nil {
+		// Seal contact method secrets saved in plaintext before sealing
+		// existed or while no key was set. Conditional per row, so every
+		// replica can run it.
+		go func() {
+			n, err := contactmethod.SealExisting(ctx, db, envelope.Encrypt)
+			if err != nil {
+				slog.Error("contact method seal backfill", "sealed", n, "error", err)
+			} else if n > 0 {
+				slog.Info("contact method seal backfill", "sealed", n)
+			}
+		}()
+	}
+
+	// 5a. Per-org OTLP export (SaaS build only; a no-op in FOSS).
+	orgRec, otelSync, stopOrgOTEL := startOrgOTEL(db, envelope)
+	defer stopOrgOTEL()
+	if orgRec != nil {
+		sched.SetOrgRecorder(orgRec)
+	}
 
 	// 6. Escalation engine.
 	engine := escalation.NewEngine(db, msgBus, envelope, nil)
-	engine.SetCloudEventEmitter(cePublisher)
+	engine.SetEventEmitter(emitter)
+	if orgRec != nil {
+		engine.SetOrgRecorder(orgRec)
+	}
 	// Signed acknowledge links in SMS, email, Pushover, ntfy and webhook
 	// payloads. Needs YIPYAP_PUBLIC_BASE_URL; without it no link is sent.
 	if ackLinks := escalation.SignedAckLinks(jwt, cfg.PublicBaseURL); ackLinks != nil {
@@ -176,44 +196,12 @@ func run() error {
 	// a channel keeps failing (a no-op without SMTP).
 	recorder := notify.NewRecorder(db,
 		notify.WithChannelAlerts(notify.NewChannelAlerts(db, mail, cfg.PublicBaseURL)))
-	dispatcher, cehttpProvider := setupDispatcher(msgBus, db, decrypt, cfg, recorder)
-
-	// Phase-2 reply pipeline: outbound registry → dispatcher → handlers.
-	// The cehttp provider records every outbound event into the registry
-	// and routes sink-replies through the dispatcher for persistence.
-	replyRegistry := reply.NewMemoryRegistry(10000, 24*time.Hour)
-	// R2-H3: surface dispatcher-level rejections (org/channel mismatch,
-	// trust-flag missing, rate-limited, unknown alertref) on the admin
-	// reply-activity dashboard. Without this audit hook those denials
-	// only emit slog warnings and the dashboard query silently drops
-	// the most security-relevant attempts.
-	replyDispatcher := reply.NewDispatcher(replyRegistry,
-		reply.WithRejectAudit(func(ctx context.Context, a reply.RejectAudit) {
-			entry := &store.CloudEventReplyAuditEntry{
-				ReplyID:     a.ReplyID,
-				ReplyType:   a.ReplyType,
-				ReplySource: a.ReplySource,
-				AlertID:     a.AlertID,
-				MonitorID:   a.MonitorID,
-				OrgID:       a.OrgID,
-				ChannelID:   a.ChannelID,
-				Outcome:     a.Outcome,
-				Before:      []byte(`{}`),
-				After:       []byte(`{}`),
-				ReceivedAt:  time.Now().UTC(),
-			}
-			if err := db.CloudEventReplyAudit().Write(ctx, entry); err != nil {
-				slog.Warn("reply audit write failed", "outcome", a.Outcome, "error", err)
-			}
-		}),
-	)
-	var resolveCipher contactmethod.Cipher
-	if envelope != nil {
-		resolveCipher = contactmethod.Cipher{Enc: envelope.Encrypt, Dec: envelope.Decrypt}
+	dispatcher := setupDispatcher(msgBus, db, decrypt, cfg, recorder)
+	if orgRec != nil {
+		dispatcher.SetOrgRecorder(orgRec)
 	}
-	replyhandlers.RegisterAll(replyDispatcher, db, escalation.NewResolveFanout(db, msgBus, resolveCipher))
-	cehttpProvider.SetOutboundRegistry(replyRegistry)
-	cehttpProvider.SetReplyDispatcher(replyDispatcher)
+
+	evt.RegisterDelivery(dispatcher, db, decrypt, envelope)
 
 	// 8. WebSocket hub.
 	wsHub := api.NewHub(cfg.PublicBaseURL)
@@ -228,8 +216,10 @@ func run() error {
 	billingClient, billingWebhookSecret := wiring.InitBilling(cfg)
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	maintenanceTicker := maintenance.NewTicker(db, cePublisher, maintenance.DefaultInterval)
+	maintenanceTicker := maintenance.NewTicker(db, emitter, maintenance.DefaultInterval)
 	go maintenanceTicker.Run(runCtx)
+	// Periodic billing seat reconcile. A no-op without billing keys.
+	wiring.StartBilling(runCtx, billingClient, db)
 	support.StartEscalation(runCtx, db, msgBus, mail, cfg.PublicBaseURL, jwt)
 	support.StartSurveys(runCtx, db, msgBus, mail, cfg.PublicBaseURL, jwt)
 	// Promo lifecycle: expiry warning emails and the downgrade to Free.
@@ -242,6 +232,7 @@ func run() error {
 		RegistrationEnabled:   cfg.RegistrationEnabled,
 		Envelope:              envelope,
 		OpsToken:              cfg.OpsToken,
+		OpsActorKey:           cfg.OpsActorKey,
 		Mailer:                mail,
 		APIKeyHasher:          apiKeyHasher,
 		APIKeyMaxTTL:          cfg.APIKeyMaxTTL,
@@ -260,6 +251,7 @@ func run() error {
 		PhoneVerifySender:     phoneVerifySender(cfg),
 		TrustedProxyNets:      api.ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs),
 		LifecycleCtx:          runCtx,
+		OTELExportSync:        otelSync,
 	})
 	httpSrv := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -288,11 +280,8 @@ func run() error {
 		return fmt.Errorf("dead letter consumer: %w", err)
 	}
 
-	// CloudEvent router: bridges events.cloudevents.out.> onto notify.request
-	// for each cloudevent_http channel so the dispatcher can fan them out.
-	ceRouter := cloudevents.NewRouter(msgBus, db, db.Outbox(), envelope)
-	if err := ceRouter.Start(runCtx); err != nil {
-		return fmt.Errorf("cloudevent router start: %w", err)
+	if err := evt.StartRouter(runCtx, db, envelope); err != nil {
+		return err
 	}
 
 	jobs.StartRetentionPruner(runCtx, db)
@@ -321,9 +310,9 @@ func run() error {
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("shutdown error: %v", err)
 		}
-		// A4-N-2: tear down the long-lived dispatcher sweepers so they
-		// don't outlive the parent process.
-		replyDispatcher.Close()
+		// A4-N-2: tear down long-lived event sweepers so they don't
+		// outlive the parent process.
+		evt.Close()
 	}()
 
 	log.Printf("yipyap listening on %s", cfg.ListenAddr)

@@ -17,8 +17,8 @@ func authedChain(s store.Store, authMW func(http.Handler) http.Handler) func(htt
 }
 
 // authedChainAllowReadOnlyWrite is authedChain without the write-access
-// check, for the one write-shaped route that only moves a read position (the
-// CloudEvents ack). Every other gate still applies.
+// check, for write-shaped routes that only move a read position (such as an
+// event feed ack). Every other gate still applies.
 func authedChainAllowReadOnlyWrite(s store.Store, authMW func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return authedChainWithWriteAccess(s, authMW, false)
 }

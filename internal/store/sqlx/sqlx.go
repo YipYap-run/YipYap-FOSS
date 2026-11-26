@@ -191,3 +191,16 @@ func applyMigration(ctx context.Context, q Queryable, data string, m Migration, 
 	}
 	return nil
 }
+
+// affectedOne reports whether a conditional write changed exactly one row.
+// Claim-style writes use it so only the caller that won the row acts.
+func affectedOne(res sql.Result, err error) (bool, error) {
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}

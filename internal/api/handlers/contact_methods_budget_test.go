@@ -23,7 +23,7 @@ func TestContactMethodSendBudgetReturns429(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 20; i++ {
-		ok, err := f.s.ContactMethods().ReserveSendBudget(context.Background(), member.ID, member.OrgID, time.Now().UTC(), false, 20, 50)
+		ok, err := f.s.ContactMethods().ReserveSendBudget(context.Background(), member.ID, member.OrgID, time.Now().UTC(), "", 20, 50, 10)
 		if err != nil || !ok {
 			t.Fatalf("reserve %d = %v, %v", i, ok, err)
 		}

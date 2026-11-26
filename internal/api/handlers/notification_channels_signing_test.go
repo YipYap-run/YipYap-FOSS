@@ -87,7 +87,7 @@ func storedSecret(t *testing.T, s *sqlite.SQLiteStore, id string) string {
 
 func TestWebhookSigningSecretLifecycle(t *testing.T) {
 	srv, s, _, testSender := setupSigningServer(t)
-	token := ceRegisterAndGetToken(t, srv, "Sig1", "sig1@test.com", "supersecret123")
+	token := signupAndGetToken(t, srv, "Sig1", "sig1@test.com", "supersecret123")
 
 	// A client-chosen secret is ignored; the server generates one.
 	created := createWebhook(t, srv, token, map[string]any{"url": signingTestURL, "signing_secret": "whsec_mine"})
@@ -179,7 +179,7 @@ func TestWebhookSigningSecretLifecycle(t *testing.T) {
 
 func TestWebhookRotateSecretRules(t *testing.T) {
 	srv, s, jwt, _ := setupSigningServer(t)
-	token := ceRegisterAndGetToken(t, srv, "Sig2", "sig2@test.com", "supersecret123")
+	token := signupAndGetToken(t, srv, "Sig2", "sig2@test.com", "supersecret123")
 	ch := createWebhook(t, srv, token, map[string]any{"url": signingTestURL})
 
 	claims, err := jwt.Validate(token)
@@ -205,7 +205,7 @@ func TestWebhookRotateSecretRules(t *testing.T) {
 	}
 
 	// Another org cannot rotate it.
-	other := ceRegisterAndGetToken(t, srv, "Sig3", "sig3@test.com", "supersecret123")
+	other := signupAndGetToken(t, srv, "Sig3", "sig3@test.com", "supersecret123")
 	resp = doJSONReq(t, http.MethodPost, srv.URL+"/api/v1/notification-channels/"+ch.ID+"/rotate-secret", other, nil)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
@@ -248,7 +248,7 @@ func TestWebhookRotateSecretRules(t *testing.T) {
 
 func TestBulkImportDropsWebhookSigningSecret(t *testing.T) {
 	srv, s, _, _ := setupSigningServer(t)
-	token := ceRegisterAndGetToken(t, srv, "Sig4", "sig4@test.com", "supersecret123")
+	token := signupAndGetToken(t, srv, "Sig4", "sig4@test.com", "supersecret123")
 	resp := doJSONReq(t, http.MethodPost, srv.URL+"/api/v1/import", token, map[string]any{
 		"notification_channels": []map[string]any{{
 			"name": "imported", "type": "webhook",

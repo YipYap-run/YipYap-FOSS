@@ -25,8 +25,7 @@ import (
 // writeOnlyURLFields names the endpoint URL key per channel type that may
 // carry a credential.
 var writeOnlyURLFields = map[string]string{
-	"webhook":         "url",
-	"cloudevent_http": "sink_url",
+	"webhook": "url",
 }
 
 // incomingWebhookFormats are webhook formats whose URL is always an

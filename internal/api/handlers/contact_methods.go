@@ -28,6 +28,10 @@ const (
 	contactMaxCodeAttempt      = 5
 	contactDailySendsPerUser   = 20
 	contactDailySMSCodesPerOrg = 50
+	// contactDailyCodesPerPhone caps codes to one number per day across
+	// every org, matching phoneverify.PhoneDailyLimit, so one number cannot
+	// be flooded from many accounts.
+	contactDailyCodesPerPhone = 10
 )
 
 // CodeMailer sends a plain-text email. *mailer.Mailer satisfies it.
@@ -241,7 +245,7 @@ func (h *ContactMethodHandler) CreateMethod(w http.ResponseWriter, r *http.Reque
 	}
 	cfg, err = contactmethod.SealConfig(req.Type, cfg, h.cipher.Enc)
 	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, "failed to store contact method")
+		sealFailed(w, err)
 		return
 	}
 	n, err := methods.CountByUser(r.Context(), claims.UserID)
@@ -271,6 +275,17 @@ func (h *ContactMethodHandler) CreateMethod(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	jsonResponse(w, http.StatusCreated, h.toResponse(m))
+}
+
+// sealFailed reports a SealConfig error. A missing encryption key on the
+// hosted build is a server configuration problem, so it is a 503 with the
+// reason; anything else is a 500.
+func sealFailed(w http.ResponseWriter, err error) {
+	if errors.Is(err, contactmethod.ErrSealingRequired) {
+		errorResponse(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	errorResponse(w, http.StatusInternalServerError, "failed to store contact method")
 }
 
 func emailOf(cfg string) string {
@@ -327,7 +342,7 @@ func (h *ContactMethodHandler) UpdateMethod(w http.ResponseWriter, r *http.Reque
 		if cfg != opened {
 			reset = true
 			if m.Config, err = contactmethod.SealConfig(m.Type, cfg, h.cipher.Enc); err != nil {
-				errorResponse(w, http.StatusInternalServerError, "failed to store contact method")
+				sealFailed(w, err)
 				return
 			}
 		}
@@ -410,9 +425,11 @@ func (h *ContactMethodHandler) deliver(r *http.Request, m *domain.ContactMethod,
 
 var errNoDelivery = errors.New("notification delivery is not configured on this server")
 
-func (h *ContactMethodHandler) reserveSend(w http.ResponseWriter, r *http.Request, claims *auth.Claims, methods store.ContactMethodStore, smsCode bool) bool {
-	ok, err := methods.ReserveSendBudget(r.Context(), claims.UserID, claims.OrgID, h.now().UTC(), smsCode,
-		contactDailySendsPerUser, contactDailySMSCodesPerOrg)
+// reserveSend takes the daily send budget. phone is the destination number
+// for an SMS or voice code, empty for anything else.
+func (h *ContactMethodHandler) reserveSend(w http.ResponseWriter, r *http.Request, claims *auth.Claims, methods store.ContactMethodStore, phone string) bool {
+	ok, err := methods.ReserveSendBudget(r.Context(), claims.UserID, claims.OrgID, h.now().UTC(), phone,
+		contactDailySendsPerUser, contactDailySMSCodesPerOrg, contactDailyCodesPerPhone)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "failed to check the send budget")
 		return false
@@ -448,7 +465,7 @@ func (h *ContactMethodHandler) TestMethod(w http.ResponseWriter, r *http.Request
 	if h.cooling(w, m) {
 		return
 	}
-	if !h.reserveSend(w, r, claims, methods, false) {
+	if !h.reserveSend(w, r, claims, methods, "") {
 		return
 	}
 	if err := methods.RecordSend(r.Context(), claims.UserID, m.ID, h.now().UTC()); err != nil {
@@ -493,8 +510,14 @@ func (h *ContactMethodHandler) SendCode(w http.ResponseWriter, r *http.Request) 
 	if h.cooling(w, m) {
 		return
 	}
-	smsCode := m.Type == domain.ContactSMS || m.Type == domain.ContactVoice
-	if !h.reserveSend(w, r, claims, methods, smsCode) {
+	phone := ""
+	if m.Type == domain.ContactSMS || m.Type == domain.ContactVoice {
+		if phone = contactmethod.PhoneOf(m); phone == "" {
+			errorResponse(w, http.StatusInternalServerError, "failed to read contact method")
+			return
+		}
+	}
+	if !h.reserveSend(w, r, claims, methods, phone) {
 		return
 	}
 	code, hash, err := contactmethod.NewCode(m.ID)

@@ -7,7 +7,8 @@ Free, self-hosted monitoring and alerting for small teams. One binary, zero exte
 ## Features
 
 - **HTTP, TCP, DNS, Ping, Heartbeat** health checks on configurable intervals
-- **Escalation policies** with multi-step notification
+- **Escalation policies** with multi-step notification, repeats and loops
+- **Personal contact methods and notification rules** so each person chooses how they get paged
 - **Slack, Discord, Telegram, Email, Webhook, ntfy.sh, Pushover** notification channels
 - **API key management** for automation and CI/CD integration
 - **Multi-user** with role-based access (owner, admin, member, viewer)
@@ -70,9 +71,10 @@ older containerd, set the pod sysctl `net.ipv4.ping_group_range` to
 # Build
 go build -o yipyap ./cmd/yipyap
 
-# Run
 # Run. With YIPYAP_JWT_SECRET unset, a secret is generated on first boot and
-# stored next to the database (./jwt_secret here).
+# stored in the per-user config dir (for example ~/.config/yipyap/jwt_secret).
+# It is never written into the source checkout; set YIPYAP_DATA_DIR to choose
+# another place.
 ./yipyap
 ```
 
@@ -92,14 +94,26 @@ Credentials are printed to the console on first run (randomly generated password
 | `YIPYAP_LISTEN` | `:8080` | HTTP listen address |
 | `YIPYAP_DB_DSN` | `yipyap.db` | SQLite database file path |
 | `YIPYAP_JWT_SECRET` | (generated) | JWT signing secret, at least 32 bytes. When unset, a random secret is generated on first boot and stored in `jwt_secret` in the data dir (mode 0600), then reused. Back that file up with the database: losing it signs everyone out. Known placeholder values and anything shorter than 32 bytes are refused at startup. |
-| `YIPYAP_DATA_DIR` | directory of `YIPYAP_DB_DSN` | Where the generated `jwt_secret` file lives (`/data` in the Docker image) |
+| `YIPYAP_DATA_DIR` | directory of a SQLite DB path that names a directory, else `./jwt_secret` if it already exists, else the per-user config dir (`~/.config/yipyap` on Linux, `~/Library/Application Support/yipyap` on macOS) | Where the generated `jwt_secret` file lives. The Docker image sets `YIPYAP_DB_DSN=/data/yipyap.db` in compose, so it is the `/data` volume. A generated secret is never written into a directory that contains `go.mod` or `.git`; startup fails and asks for `YIPYAP_DATA_DIR`. |
 | `YIPYAP_JWT_EXPIRY` | `24h` | JWT token expiry |
+| `YIPYAP_SMTP_HOST` | (none) | SMTP server for account email: password resets, invites and contact method verification. Unset means no email |
+| `YIPYAP_SMTP_PORT` | `587` | SMTP port (465 uses implicit TLS, others require STARTTLS) |
+| `YIPYAP_SMTP_USER` / `YIPYAP_SMTP_PASS` | (none) | SMTP credentials |
+| `YIPYAP_SMTP_FROM` | `noreply@localhost` | Sender address for account email |
 | `YIPYAP_NOTIFICATION_KEY` | (none) | Hex-encoded 32-byte AES-256 key for encrypting notification channel configs |
 | `YIPYAP_REGISTRATION_ENABLED` | `true` | Allow new org+user registration |
 | `YIPYAP_DEV_SEED` | `false` | Populate database with mock development data |
 | `YIPYAP_MAX_MONITORS_PER_ORG` | (no cap) | Optional cap on monitors per organization |
 | `YIPYAP_MAX_NOTIFICATION_CHANNELS_PER_ORG` | (no cap) | Optional cap on notification channels per organization |
+| `YIPYAP_MAX_ESCALATION_POLICIES` | (no cap) | Optional cap on escalation policies per organization |
+| `YIPYAP_MAX_MEMBERS` | (no cap) | Optional cap on members per organization |
 | `YIPYAP_MIN_CHECK_INTERVAL_SECONDS` | `10` | Shortest check interval a monitor may use |
+| `YIPYAP_PUBLIC_BASE_URL` | (none) | Public URL of this server, used for acknowledge links in notifications, CORS and the WebSocket origin check |
+| `YIPYAP_ALLOW_PRIVATE_TARGETS` | `true` | Allow monitors and notification channels to reach private and local addresses |
+| `YIPYAP_TRUSTED_PROXY_CIDRS` | (none) | Proxies whose forwarded client IP headers are trusted (see `deploy/reverse-proxy/README.md`) |
+| `YIPYAP_TELEGRAM_BOT_TOKEN` | (none) | Token of your Telegram bot, for Telegram channels and contact methods |
+| `YIPYAP_TELEGRAM_BOT_USERNAME` | (none) | Username of that bot, shown in the channel form and used in the link command |
+| `YIPYAP_TELEGRAM_WEBHOOK_SECRET` | (none) | Secret that Telegram sends with each webhook call to `/api/v1/webhooks/telegram` |
 
 The open source build has no plan limits. The caps above are off unless you
 set them. When a user hits one, the error names the variable so they know
@@ -108,11 +122,17 @@ who to ask.
 ## How people get paged
 
 Escalation steps page people. Each user adds their own contact methods
-under Settings, Contact Methods (email, ntfy, Pushover, Slack DM, Discord
-DM, Telegram), verifies them with a code, and sets notification rules: which method,
-after how many minutes, for which alerts. Rules still waiting are dropped
+under Settings, Contact Methods (email, webhook, ntfy, Pushover, PagerDuty,
+Slack DM, Discord DM, Telegram), verifies them with a code, and sets
+notification rules: which method, after how many minutes, for which alerts. Rules still waiting are dropped
 once the alert is acknowledged. A step target can also post to a shared
-notification channel as an extra destination.
+notification channel as an extra destination. When the alert resolves, each
+contact method and channel that was paged gets one resolve notification.
+
+A personal webhook contact method with a signing secret signs every request
+with that secret. Requests carry `X-YipYap-Timestamp` and
+`X-YipYap-Signature: v1=<hex>`, where the signature is
+HMAC-SHA256(secret, timestamp + "." + raw body).
 
 Step options: wait time, repeat pages, page targets at once or one after
 another, and stop escalating at a step.
@@ -124,10 +144,10 @@ All channels are configured through the web UI under Settings → Notification C
 | Channel | Configuration |
 |---------|---------------|
 | **Email (SMTP)** | Host, port, username, password, from/to addresses |
-| **Webhook** | URL, method, custom headers |
+| **Webhook** | URL, payload format, custom headers. Requests are `POST` and signed with the channel's signing secret |
 | **Slack** | Bot token + channel ID |
-| **Discord** | Bot token + channel ID (webhook URL supported as fallback) |
-| **Telegram** | Platform bot token (`YIPYAP_TELEGRAM_BOT_TOKEN`) and webhook secret; each chat is linked with a one-time `/link CODE` from Settings, Channels |
+| **Discord** | Bot token + channel ID (for a Discord webhook URL, use a Webhook channel) |
+| **Telegram** | Your bot's token, username and webhook secret (`YIPYAP_TELEGRAM_*` above); each chat is linked with a one-time command from Settings, Channels, such as `/link@your_bot CODE` |
 | **ntfy.sh** | Server URL + topic |
 | **Pushover** | API token + user key |
 
@@ -139,15 +159,18 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instruct
 
 [AGPL-3.0](LICENSE)
 
-## YipYap Pro & Enterprise
+## YipYap Cloud
 
-Need more? [YipYap Pro](https://yipyap.run/pricing) adds:
+The hosted service at [yipyap.run](https://yipyap.run) runs the same core and
+adds features this edition does not include:
 
-- Teams and on-call scheduling with rotation
-- Escalation loops and advanced retry policies
-- SSO / OIDC authentication
-- SMS and voice call notifications
-- Public status pages
-- OpenTelemetry metrics export
+- Teams and on-call schedules with rotation (all plans)
+- Service catalog with runbooks and dependencies (all plans)
+- Two-factor sign-in with authenticator apps, security keys and passkeys (all plans)
+- Slack and Discord apps with Acknowledge and Resolve buttons
+- SSO / OIDC sign-in and org-wide MFA enforcement (Pro and Enterprise)
+- SMS and voice call notifications (Pro and Enterprise)
+- Public status pages and incidents (Pro and Enterprise)
+- OpenTelemetry export of your metrics to your own collector (Pro and Enterprise)
 
-[Learn more at yipyap.run](https://yipyap.run)
+See [plans and pricing](https://yipyap.run/pricing).

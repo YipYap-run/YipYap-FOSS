@@ -22,6 +22,9 @@ func (s *BillingStore) ApplyCheckout(_ context.Context, _ *domain.Billing) (bool
 func (s *BillingStore) GetByOrgID(_ context.Context, _ string) (*domain.Billing, error) {
 	return nil, fmt.Errorf("billing requires paid tier")
 }
+func (s *BillingStore) ListWithSubscription(_ context.Context) ([]*domain.Billing, error) {
+	return nil, nil
+}
 func (s *BillingStore) UpdateStatus(_ context.Context, _, _ string) error        { return nil }
 func (s *BillingStore) UpdateSeatCount(_ context.Context, _ string, _ int) error { return nil }
 func (s *BillingStore) ResetUsagePeriod(_ context.Context, _ string) error       { return nil }

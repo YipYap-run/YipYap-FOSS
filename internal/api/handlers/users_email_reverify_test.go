@@ -21,7 +21,7 @@ import (
 func TestChangeEmailClearsVerification(t *testing.T) {
 	// Register through the no-mailer server so the owner starts verified.
 	plain, s := setupTestServer(t)
-	selfServiceRegisterAndGetToken(t, plain, "ReverifyOrg", "reverify@contact.test", "reverifypass1")
+	selfServisignupAndGetToken(t, plain, "ReverifyOrg", "reverify@contact.test", "reverifypass1")
 
 	// Second server on the same store with a mailer. Sends go to a closed
 	// port and fail in the background, which the handler tolerates.
@@ -85,7 +85,7 @@ func TestChangeEmailClearsVerification(t *testing.T) {
 // is no way to verify, so the change applies and the account stays usable.
 func TestChangeEmailWithoutMailerStaysVerified(t *testing.T) {
 	ts, s := setupTestServer(t)
-	token := selfServiceRegisterAndGetToken(t, ts, "NoMailOrg", "nomail@contact.test", "nomailpass1")
+	token := selfServisignupAndGetToken(t, ts, "NoMailOrg", "nomail@contact.test", "nomailpass1")
 
 	b, _ := json.Marshal(map[string]string{"current_password": "nomailpass1", "new_email": "nomail2@contact.test"})
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v1/auth/email", bytes.NewReader(b))

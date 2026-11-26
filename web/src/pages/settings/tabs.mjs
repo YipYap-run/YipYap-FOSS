@@ -27,7 +27,8 @@ export function availableSettingsTabs(meta, paid) {
   return SETTING_TABS.filter(t => {
     if (t.key === 'billing' && (isFoss || !meta?.billing_enabled)) return false;
     if (isFoss && ['teams', 'status-page', 'sso', 'integrations'].includes(t.key)) return false;
-    if (!paid && ['sso', 'integrations'].includes(t.key)) return false;
+    // Free SaaS orgs see Integrations with an upgrade prompt; SSO stays hidden.
+    if (!paid && t.key === 'sso') return false;
     if (t.key === 'security' && isFoss) return false;
     if (t.key === 'support' && isFoss) return false;
     return true;

@@ -11,10 +11,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/YipYap-run/YipYap-FOSS/internal/telemetry"
 )
 
 const (
@@ -70,16 +70,42 @@ type Scheduler struct {
 	wg         sync.WaitGroup  // tracks worker goroutines
 	bw         *batchWriter    // async check result writer
 
-	// emitter publishes monitor lifecycle CloudEvents on state transitions.
+	// emitter publishes monitor lifecycle events on state transitions.
 	// A nil emitter disables emission (the default); wire one in via
-	// SetCloudEventEmitter before Start to avoid races.
-	emitter cloudevents.Emitter
+	// SetEventEmitter before Start to avoid races.
+	emitter events.Emitter
+
+	// orgRec records each org's check results for that org's own OTLP
+	// export. Nil disables it.
+	orgRec telemetry.OrgRecorder
 }
 
-// SetCloudEventEmitter attaches a CloudEvent emitter to the scheduler. A nil
+// SetOrgRecorder attaches the per-org metric recorder. Must be called
+// before Start.
+func (s *Scheduler) SetOrgRecorder(r telemetry.OrgRecorder) {
+	s.orgRec = r
+}
+
+// recordOrgCheck records one result for the monitor's org. m comes from the
+// store, so the org and name are trusted.
+func (s *Scheduler) recordOrgCheck(ctx context.Context, m *domain.Monitor, status domain.CheckStatus, latencyMS int) {
+	if s.orgRec == nil {
+		return
+	}
+	s.orgRec.RecordCheck(ctx, m.OrgID, telemetry.CheckSample{
+		MonitorID:   m.ID,
+		MonitorName: m.Name,
+		MonitorType: string(m.Type),
+		Status:      string(status),
+		LatencyMS:   latencyMS,
+		Interval:    time.Duration(m.IntervalSeconds) * time.Second,
+	})
+}
+
+// SetEventEmitter attaches an event emitter to the scheduler. A nil
 // emitter disables monitor.up/down/degraded/heartbeat_missed emission (the
 // default). Must be called before Start to avoid races with the workers.
-func (s *Scheduler) SetCloudEventEmitter(em cloudevents.Emitter) {
+func (s *Scheduler) SetEventEmitter(em events.Emitter) {
 	s.emitter = em
 }
 
@@ -539,6 +565,7 @@ func (s *Scheduler) executeCheck(ctx context.Context, m *domain.Monitor) {
 	// to read from here.
 	checkID := check.ID
 	s.bw.Enqueue(check)
+	s.recordOrgCheck(ctx, m, result.Status, result.LatencyMS)
 
 	// Detect state transitions and publish events. Lazily seed the
 	// last-known status from the DB on first check.
@@ -563,11 +590,11 @@ func (s *Scheduler) executeCheck(ctx context.Context, m *domain.Monitor) {
 		s.publishAlertEvent(ctx, subject, *m, result, now)
 	}
 
-	// Additive CloudEvent emission on the same transition boundaries.
+	// Additive event emission on the same transition boundaries.
 	s.emitMonitorTransition(ctx, m, result, prevStatus, checkID, now)
 }
 
-// emitMonitorTransition publishes monitor.up/down/degraded.v1 CloudEvents
+// emitMonitorTransition publishes monitor.up/down/degraded.v1 events
 // on state changes via the shared EmitMonitorTransition.
 func (s *Scheduler) emitMonitorTransition(ctx context.Context, m *domain.Monitor, result *Result, prevStatus domain.CheckStatus, checkID string, checkedAt time.Time) {
 	EmitMonitorTransition(ctx, s.emitter, MonitorTransition{
@@ -687,6 +714,7 @@ func (s *Scheduler) executeHeartbeatCheck(ctx context.Context, m *domain.Monitor
 	s.statusMu.Lock()
 	s.lastStatus[m.ID] = result.Status
 	s.statusMu.Unlock()
+	s.recordOrgCheck(ctx, m, result.Status, 0)
 
 	// Only write a check (and publish an alert event) on a real transition.
 	// Up checks are written by the POST ingest handler; Down checks come
@@ -714,7 +742,7 @@ func (s *Scheduler) executeHeartbeatCheck(ctx context.Context, m *domain.Monitor
 		s.publishAlertEvent(ctx, "alert.recover", *m, result, now)
 	}
 
-	// Additive CloudEvent emission on heartbeat transitions.
+	// Additive event emission on heartbeat transitions.
 	if s.emitter != nil {
 		switch {
 		case result.Status == domain.StatusDown && prevStatus == domain.StatusUp:
@@ -729,22 +757,22 @@ func (s *Scheduler) executeHeartbeatCheck(ctx context.Context, m *domain.Monitor
 				// stays zero (omitempty in the catalog).
 				expectedBy = now
 			}
-			d := types.MonitorHeartbeatMissedV1Data{
+			d := events.MonitorHeartbeatMissed{
 				MonitorID:  m.ID,
 				ExpectedBy: expectedBy,
 				LastSeenAt: lastSeenAt,
 			}
-			if err := cloudevents.EmitMonitorHeartbeatMissed(ctx, s.emitter, m.OrgID, m.ID, d); err != nil {
+			if err := events.EmitMonitorHeartbeatMissed(ctx, s.emitter, m.OrgID, m.ID, d); err != nil {
 				slog.Error("emit monitor.heartbeat_missed.v1", "monitor_id", m.ID, "error", err)
 			}
 		case result.Status == domain.StatusUp && prevStatus == domain.StatusDown:
-			d := types.MonitorUpV1Data{
+			d := events.MonitorUp{
 				MonitorID: m.ID,
 				CheckID:   checkID,
 				// LatencyMs is not meaningful for heartbeat monitors.
 				CheckedAt: now,
 			}
-			if err := cloudevents.EmitMonitorUp(ctx, s.emitter, m.OrgID, m.ID, d); err != nil {
+			if err := events.EmitMonitorUp(ctx, s.emitter, m.OrgID, m.ID, d); err != nil {
 				slog.Error("emit monitor.up.v1 (heartbeat)", "monitor_id", m.ID, "error", err)
 			}
 		}

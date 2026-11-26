@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
 func TestOrgSettingsSetAndGet(t *testing.T) {
@@ -109,5 +111,29 @@ func TestOrgSettingsGetAllIsolation(t *testing.T) {
 	}
 	if len(all) != 0 {
 		t.Errorf("GetAll for different org returned %d entries, want 0", len(all))
+	}
+}
+
+func TestOrgSettingsListOrgIDsWithKey(t *testing.T) {
+	s := setupTestDB(t)
+	a := createTestOrg(t, s)
+	b := createTestOrg(t, s)
+	c := createTestOrg(t, s)
+	ctx := context.Background()
+
+	_ = s.OrgSettings().Set(ctx, a.ID, "otel_endpoint", "otlp.example.com:4317")
+	_ = s.OrgSettings().Set(ctx, b.ID, "otel_endpoint", "")
+	_ = s.OrgSettings().Set(ctx, c.ID, "other", "x")
+
+	lister, ok := s.OrgSettings().(store.OrgSettingsKeyLister)
+	if !ok {
+		t.Fatal("org settings store does not list orgs by key")
+	}
+	ids, err := lister.ListOrgIDsWithKey(ctx, "otel_endpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != a.ID {
+		t.Fatalf("ids = %v, want only %s", ids, a.ID)
 	}
 }
