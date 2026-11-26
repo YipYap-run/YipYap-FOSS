@@ -102,14 +102,21 @@ type webhookConfig struct {
 	Secret string `json:"secret,omitempty"`
 }
 
+// A Slack or Discord DM sends through exactly one of: an org channel's own
+// bot (ViaChannelID) or a platform app install (ViaInstallID, SaaS only).
 type slackDMConfig struct {
 	SlackUserID  string `json:"slack_user_id"`
-	ViaChannelID string `json:"via_channel_id"`
+	ViaChannelID string `json:"via_channel_id,omitempty"`
+	ViaInstallID string `json:"via_install_id,omitempty"`
 }
 
+// discordDMConfig: an own bot posts to a DM channel ID the user copied
+// (DMChannelID); the platform app opens the DM from the user ID (UserID).
 type discordDMConfig struct {
-	DMChannelID  string `json:"dm_channel_id"`
-	ViaChannelID string `json:"via_channel_id"`
+	DMChannelID  string `json:"dm_channel_id,omitempty"`
+	UserID       string `json:"user_id,omitempty"`
+	ViaChannelID string `json:"via_channel_id,omitempty"`
+	ViaInstallID string `json:"via_install_id,omitempty"`
 }
 
 type telegramConfig struct {
@@ -330,7 +337,7 @@ func Normalize(ctx context.Context, s store.Store, orgID string, t domain.Contac
 		if !slackUserRe.MatchString(c.SlackUserID) {
 			return "", invalid("Slack member ID looks like U0123ABCD (Profile, then Copy member ID)")
 		}
-		if err := checkViaChannel(ctx, s, orgID, c.ViaChannelID, "slack", true); err != nil {
+		if err := checkVia(ctx, s, orgID, t, &c.ViaChannelID, &c.ViaInstallID, "slack"); err != nil {
 			return "", err
 		}
 		out = c
@@ -339,12 +346,24 @@ func Normalize(ctx context.Context, s store.Store, orgID string, t domain.Contac
 		if err := decodeStrict(raw, &c); err != nil {
 			return "", err
 		}
-		c.DMChannelID = strings.TrimSpace(c.DMChannelID)
-		if !snowflakeRe.MatchString(c.DMChannelID) {
-			return "", invalid("Discord DM channel ID must be the numeric ID of your direct message with the bot")
-		}
-		if err := checkViaChannel(ctx, s, orgID, c.ViaChannelID, "discord", true); err != nil {
+		c.DMChannelID, c.UserID = strings.TrimSpace(c.DMChannelID), strings.TrimSpace(c.UserID)
+		if err := checkVia(ctx, s, orgID, t, &c.ViaChannelID, &c.ViaInstallID, "discord"); err != nil {
 			return "", err
+		}
+		if c.ViaInstallID != "" {
+			if c.DMChannelID != "" {
+				return "", invalid("the YipYap Discord app sends to your Discord user ID, not a DM channel ID")
+			}
+			if !snowflakeRe.MatchString(c.UserID) {
+				return "", invalid("Discord user ID must be the number from Copy User ID (turn on Developer Mode first)")
+			}
+		} else {
+			if c.UserID != "" {
+				return "", invalid("your own Discord bot needs the DM channel ID, not a user ID")
+			}
+			if !snowflakeRe.MatchString(c.DMChannelID) {
+				return "", invalid("Discord DM channel ID must be the numeric ID of your direct message with the bot")
+			}
 		}
 		out = c
 	case domain.ContactTelegram:
@@ -366,6 +385,19 @@ func Normalize(ctx context.Context, s store.Store, orgID string, t domain.Contac
 		return "", err
 	}
 	return string(b), nil
+}
+
+// checkVia validates where a Slack or Discord DM sends from: exactly one of
+// an org channel of chType (its own bot) or a platform app install.
+func checkVia(ctx context.Context, s store.Store, orgID string, t domain.ContactMethodType, channelID, installID *string, chType string) error {
+	*channelID, *installID = strings.TrimSpace(*channelID), strings.TrimSpace(*installID)
+	switch {
+	case *channelID != "" && *installID != "":
+		return invalid("choose one %s integration to send through, not two", chType)
+	case *installID != "":
+		return checkAppInstall(ctx, s, orgID, t, *installID)
+	}
+	return checkViaChannel(ctx, s, orgID, *channelID, chType, true)
 }
 
 // checkViaChannel confirms channelID names an org channel of chType. The
@@ -437,6 +469,14 @@ func Target(ctx context.Context, s store.Store, m *domain.ContactMethod) (string
 		if err := json.Unmarshal([]byte(m.Config), &c); err != nil {
 			return "", nil, err
 		}
+		if c.ViaInstallID != "" {
+			ch, ac, err := appDMTarget(m.Type, c.ViaInstallID, c.SlackUserID)
+			if err != nil {
+				return "", nil, err
+			}
+			channel, cfg = ch, ac
+			break
+		}
 		tok, err := viaBotToken(ctx, s, m.OrgID, c.ViaChannelID, "slack")
 		if err != nil {
 			return "", nil, err
@@ -447,6 +487,14 @@ func Target(ctx context.Context, s store.Store, m *domain.ContactMethod) (string
 		var c discordDMConfig
 		if err := json.Unmarshal([]byte(m.Config), &c); err != nil {
 			return "", nil, err
+		}
+		if c.ViaInstallID != "" {
+			ch, ac, err := appDMTarget(m.Type, c.ViaInstallID, c.UserID)
+			if err != nil {
+				return "", nil, err
+			}
+			channel, cfg = ch, ac
+			break
 		}
 		tok, err := viaBotToken(ctx, s, m.OrgID, c.ViaChannelID, "discord")
 		if err != nil {

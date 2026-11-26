@@ -55,6 +55,13 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-mono);
+  /* Themed here, not only through .form-group, because the contact method
+     dialog renders it outside a form group. */
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 .telegram-link-status {

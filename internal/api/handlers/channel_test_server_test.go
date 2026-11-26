@@ -46,6 +46,13 @@ func setupChannelTestServer(t *testing.T) (*httptest.Server, *sqlite.SQLiteStore
 // optional notification envelope, needed to store contact method secrets.
 func setupChannelTestServerWith(t *testing.T, env *crypto.Envelope) (*httptest.Server, *sqlite.SQLiteStore, *capturingTestSender) {
 	t.Helper()
+	return setupChannelTestServerOpts(t, env, nil)
+}
+
+// setupChannelTestServerOpts is setupChannelTestServerWith with a hook to
+// change the server options before the server starts.
+func setupChannelTestServerOpts(t *testing.T, env *crypto.Envelope, tweak func(*api.ServerOptions)) (*httptest.Server, *sqlite.SQLiteStore, *capturingTestSender) {
+	t.Helper()
 	s, err := sqlite.New(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -58,11 +65,15 @@ func setupChannelTestServerWith(t *testing.T, env *crypto.Envelope) (*httptest.S
 	ts := &capturingTestSender{}
 
 	jwt := auth.NewJWTIssuer([]byte("test-secret-key-for-testing"), 1*time.Hour)
-	handler := api.NewServer(s, jwt, bus.NewChannel(), nil, nil, "", "", api.ServerOptions{
+	opt := api.ServerOptions{
 		RegistrationEnabled: true,
 		TestSender:          handlers.TestSender(ts),
 		Envelope:            env,
-	})
+	}
+	if tweak != nil {
+		tweak(&opt)
+	}
+	handler := api.NewServer(s, jwt, bus.NewChannel(), nil, nil, "", "", opt)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 

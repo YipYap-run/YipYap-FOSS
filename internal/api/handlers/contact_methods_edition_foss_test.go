@@ -40,3 +40,32 @@ func TestContactMethodOptionsFOSS(t *testing.T) {
 		}
 	}
 }
+
+// The self-hosted edition has no platform chat apps: DMs only send through
+// an org channel's own bot, and an app install reference is refused.
+func TestContactMethodAppInstallsUnavailableInFOSS(t *testing.T) {
+	f := newCMFixture(t)
+	code, ch, _ := f.owner.do(http.MethodPost, "/notification-channels", map[string]any{
+		"name": "Team Slack", "type": "slack", "enabled": true,
+		"config": map[string]any{"bot_token": "xoxb-secret-bot", "channel_id": "C0SHARED"},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create slack channel: %d %v", code, ch)
+	}
+	_, opts, _ := f.member.do(http.MethodGet, "/users/me/contact-method-options", nil)
+	for _, raw := range opts["integrations"].([]any) {
+		if in := raw.(map[string]any); in["source"] != "own_bot" {
+			t.Fatalf("integration %v", in)
+		}
+	}
+	if code, out, _ := f.member.do(http.MethodPost, "/users/me/contact-methods", map[string]any{
+		"type": "slack_dm", "config": map[string]any{"slack_user_id": "U0123ABCD", "via_install_id": ch["id"]},
+	}); code != http.StatusBadRequest {
+		t.Fatalf("app install in FOSS: %d %v", code, out)
+	}
+	if code, out, _ := f.member.do(http.MethodPost, "/users/me/contact-methods", map[string]any{
+		"type": "slack_dm", "config": map[string]any{"slack_user_id": "U0123ABCD", "via_channel_id": ch["id"]},
+	}); code != http.StatusCreated {
+		t.Fatalf("own bot in FOSS: %d %v", code, out)
+	}
+}

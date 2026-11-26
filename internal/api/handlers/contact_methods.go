@@ -18,6 +18,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/contactmethod"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
@@ -48,6 +49,12 @@ type ContactMethodHandler struct {
 	mailer CodeMailer
 	cipher contactmethod.Cipher
 	now    func() time.Time
+	// telegramLinking is true when the platform bot can receive link codes,
+	// so the form offers Connect Telegram.
+	telegramLinking bool
+	// slackAppDMs and discordAppDMs are true when this server can deliver
+	// DMs through the platform Slack and Discord apps (SaaS only).
+	slackAppDMs, discordAppDMs bool
 }
 
 // NewContactMethodHandler builds the handler. sender delivers test pages
@@ -56,6 +63,18 @@ type ContactMethodHandler struct {
 // provider config the same way the escalation engine does.
 func NewContactMethodHandler(s store.Store, sender TestSender, mailer CodeMailer, cipher contactmethod.Cipher) *ContactMethodHandler {
 	return &ContactMethodHandler{store: s, sender: sender, mailer: mailer, cipher: cipher, now: time.Now}
+}
+
+// SetTelegramLinking reports whether the platform Telegram bot can link
+// contact methods with a one-time code.
+func (h *ContactMethodHandler) SetTelegramLinking(enabled bool) { h.telegramLinking = enabled }
+
+// SetAppDMs reports whether personal Slack and Discord DMs can send through
+// the platform apps: Slack needs the notification key to open the stored
+// bot tokens, Discord needs the platform bot token. The self-hosted build
+// ignores both.
+func (h *ContactMethodHandler) SetAppDMs(slack, discord bool) {
+	h.slackAppDMs, h.discordAppDMs = slack, discord
 }
 
 // Mount registers the routes on an authenticated router.
@@ -484,6 +503,13 @@ func (h *ContactMethodHandler) TestMethod(w http.ResponseWriter, r *http.Request
 func (h *ContactMethodHandler) deliveryFailed(w http.ResponseWriter, err error) {
 	if errors.Is(err, errNoDelivery) {
 		errorResponse(w, http.StatusServiceUnavailable, errNoDelivery.Error())
+		return
+	}
+	// A provider that knows why the destination refused (Discord will not
+	// DM this user, the Slack member does not exist) says so.
+	var re *notify.RecipientError
+	if errors.As(err, &re) {
+		errorResponse(w, http.StatusBadGateway, notify.PublicDeliveryError(err))
 		return
 	}
 	errorResponse(w, http.StatusBadGateway, "could not deliver to this contact method. Check the details and try again")

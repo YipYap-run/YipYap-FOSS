@@ -211,6 +211,9 @@ type telegramLinkCodeResponse struct {
 	PrivateLink string    `json:"private_link,omitempty"`
 	ChannelID   string    `json:"channel_id,omitempty"`
 	ChatTitle   string    `json:"chat_title,omitempty"`
+
+	// Set instead of ChannelID for a contact_method code.
+	ContactMethodID string `json:"contact_method_id,omitempty"`
 }
 
 func telegramLinkStatus(c *domain.TelegramLinkCode, now time.Time) string {
@@ -234,10 +237,33 @@ func (h *NotificationChannelHandler) clock() time.Time {
 	return time.Now().UTC()
 }
 
+// allowChannelManage applies the org's channel permissions to a channel
+// link code. The route itself is open to every member because a
+// contact_method code only touches the caller's own contact methods.
+func (h *NotificationChannelHandler) allowChannelManage(w http.ResponseWriter, r *http.Request) bool {
+	claims := middleware.GetClaims(r.Context())
+	if claims.Role == "api_key" {
+		return true
+	}
+	p, err := middleware.LoadChannelPermissions(r.Context(), h.store, claims.OrgID)
+	if err != nil {
+		slog.Error("load channel permissions", "org_id", claims.OrgID, "error", err)
+		errorResponse(w, http.StatusInternalServerError, "failed to load permissions")
+		return false
+	}
+	if !p.Allows(claims.Role, domain.ChannelActionManage) {
+		errorResponse(w, http.StatusForbidden, "your role cannot change notification channels")
+		return false
+	}
+	return true
+}
+
 // CreateTelegramLinkCode handles POST /telegram/link-codes. Body:
 // {"purpose":"channel","channel_id":"..."} to link an existing telegram
-// channel, or {"purpose":"channel","name":"Ops"} to create a channel when
-// the chat is linked. The code is returned once and never stored in clear.
+// channel, {"purpose":"channel","name":"Ops"} to create a channel when
+// the chat is linked, or {"purpose":"contact_method"} to add the caller's
+// own Telegram contact method. The code is returned once and never stored
+// in clear.
 func (h *NotificationChannelHandler) CreateTelegramLinkCode(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r.Context())
 	codes := telegramLinkCodes(h.store)
@@ -257,45 +283,21 @@ func (h *NotificationChannelHandler) CreateTelegramLinkCode(w http.ResponseWrite
 	if req.Purpose == "" {
 		req.Purpose = domain.TelegramLinkPurposeChannel
 	}
-	if req.Purpose != domain.TelegramLinkPurposeChannel {
-		// Per-user contact methods arrive with P23; until then only
-		// channels can be linked.
+	subjectID := ""
+	switch req.Purpose {
+	case domain.TelegramLinkPurposeChannel:
+		if !h.allowChannelManage(w, r) || !h.prepareChannelLinkCode(w, r, &req.ChannelID, &req.Name) {
+			return
+		}
+		subjectID = req.ChannelID
+	case domain.TelegramLinkPurposeContactMethod:
+		if !h.prepareContactLinkCode(w, r) {
+			return
+		}
+		subjectID, req.Name = claims.UserID, ""
+	default:
 		errorResponse(w, http.StatusBadRequest, "unsupported purpose")
 		return
-	}
-	if !checkChannelPlanGate(h, w, r, "telegram") {
-		return
-	}
-
-	req.Name = strings.TrimSpace(req.Name)
-	if req.ChannelID != "" {
-		ch, err := h.store.NotificationChannels().GetByID(r.Context(), req.ChannelID)
-		if err != nil || ch.OrgID != claims.OrgID {
-			errorResponse(w, http.StatusNotFound, "notification channel not found")
-			return
-		}
-		if ch.Type != "telegram" {
-			errorResponse(w, http.StatusBadRequest, "only telegram channels can be linked to a chat")
-			return
-		}
-		if cfg, _ := parseTelegramConfig(ch.Config); !cfg.usesPlatformBot() {
-			errorResponse(w, http.StatusBadRequest, "this channel uses its own bot; set its chat_id directly")
-			return
-		}
-		req.Name = ""
-	} else {
-		if req.Name == "" {
-			errorResponse(w, http.StatusBadRequest, "name is required")
-			return
-		}
-		if len([]rune(req.Name)) > telegramLinkMaxNameLen {
-			errorResponse(w, http.StatusBadRequest, fmt.Sprintf("name must be at most %d characters", telegramLinkMaxNameLen))
-			return
-		}
-		if err := checkChannelLimit(r.Context(), h.store, claims.OrgID); err != nil {
-			errorResponse(w, http.StatusForbidden, err.Error())
-			return
-		}
 	}
 
 	now := h.clock()
@@ -321,7 +323,7 @@ func (h *NotificationChannelHandler) CreateTelegramLinkCode(w http.ResponseWrite
 		OrgID:       claims.OrgID,
 		CreatedBy:   claims.UserID,
 		Purpose:     req.Purpose,
-		SubjectID:   req.ChannelID,
+		SubjectID:   subjectID,
 		ChannelName: req.Name,
 		ExpiresAt:   now.Add(telegramLinkCodeTTL),
 		CreatedAt:   now,
@@ -344,10 +346,53 @@ func (h *NotificationChannelHandler) CreateTelegramLinkCode(w http.ResponseWrite
 		// go to another bot in the group.
 		resp.Command = "/link@" + h.telegramBotUsername + " " + code
 		base := "https://t.me/" + url.PathEscape(h.telegramBotUsername)
-		resp.GroupLink = base + "?startgroup=" + code
+		if req.Purpose == domain.TelegramLinkPurposeChannel {
+			resp.GroupLink = base + "?startgroup=" + code
+		}
 		resp.PrivateLink = base + "?start=" + code
 	}
 	jsonResponse(w, http.StatusCreated, resp)
+}
+
+// prepareChannelLinkCode checks a channel code request. channelID names an
+// existing platform bot channel to relink; otherwise name is the channel to
+// create. name is cleared for a relink.
+func (h *NotificationChannelHandler) prepareChannelLinkCode(w http.ResponseWriter, r *http.Request, channelID, name *string) bool {
+	claims := middleware.GetClaims(r.Context())
+	if !checkChannelPlanGate(h, w, r, "telegram") {
+		return false
+	}
+	*name = strings.TrimSpace(*name)
+	if *channelID != "" {
+		ch, err := h.store.NotificationChannels().GetByID(r.Context(), *channelID)
+		if err != nil || ch.OrgID != claims.OrgID {
+			errorResponse(w, http.StatusNotFound, "notification channel not found")
+			return false
+		}
+		if ch.Type != "telegram" {
+			errorResponse(w, http.StatusBadRequest, "only telegram channels can be linked to a chat")
+			return false
+		}
+		if cfg, _ := parseTelegramConfig(ch.Config); !cfg.usesPlatformBot() {
+			errorResponse(w, http.StatusBadRequest, "this channel uses its own bot; set its chat_id directly")
+			return false
+		}
+		*name = ""
+		return true
+	}
+	if *name == "" {
+		errorResponse(w, http.StatusBadRequest, "name is required")
+		return false
+	}
+	if len([]rune(*name)) > telegramLinkMaxNameLen {
+		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("name must be at most %d characters", telegramLinkMaxNameLen))
+		return false
+	}
+	if err := checkChannelLimit(r.Context(), h.store, claims.OrgID); err != nil {
+		errorResponse(w, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
 }
 
 // GetTelegramLinkCode handles GET /telegram/link-codes/{id}. The UI polls
@@ -368,10 +413,24 @@ func (h *NotificationChannelHandler) GetTelegramLinkCode(w http.ResponseWriter, 
 		errorResponse(w, http.StatusNotFound, "link code not found")
 		return
 	}
+	contact := row.Purpose == domain.TelegramLinkPurposeContactMethod
+	if contact {
+		// Only the person who made a contact method code may follow it.
+		if claims.Role == "api_key" || claims.UserID == "" || row.CreatedBy != claims.UserID {
+			errorResponse(w, http.StatusNotFound, "link code not found")
+			return
+		}
+	} else if !h.allowChannelManage(w, r) {
+		return
+	}
 	status := telegramLinkStatus(row, h.clock())
 	resp := telegramLinkCodeResponse{ID: row.ID, Status: status, ExpiresAt: row.ExpiresAt}
 	if status == telegramLinkStatusLinked {
-		resp.ChannelID = row.LinkedSubjectID
+		if contact {
+			resp.ContactMethodID = row.LinkedSubjectID
+		} else {
+			resp.ChannelID = row.LinkedSubjectID
+		}
 		resp.ChatTitle = row.LinkedChatTitle
 	}
 	jsonResponse(w, http.StatusOK, resp)
@@ -460,7 +519,7 @@ func (l *telegramLinker) link(ctx context.Context, rawCode string, chat telegram
 	}
 	if row == nil {
 		l.recordFail(chat.ID, now)
-		return "That code is not valid. Create a new one in YipYap under Settings, Channels."
+		return "That code is not valid. Create a new one in YipYap."
 	}
 	if row.UsedAt != nil {
 		return "That code was already used. Create a new one in YipYap."
@@ -468,7 +527,20 @@ func (l *telegramLinker) link(ctx context.Context, rawCode string, chat telegram
 	if !now.Before(row.ExpiresAt) {
 		return "That code has expired. Create a new one in YipYap."
 	}
-	if row.Purpose != domain.TelegramLinkPurposeChannel {
+	switch row.Purpose {
+	case domain.TelegramLinkPurposeChannel:
+	case domain.TelegramLinkPurposeContactMethod:
+		// A personal code links the account that sends it, so it only
+		// counts from a private chat. Sent anywhere else, everyone there has
+		// seen it and could link their own Telegram to this user, so it is
+		// burned and the user creates a new one.
+		if chat.Type != "private" {
+			if _, err := codes.Claim(ctx, row.ID, now); err != nil {
+				slog.Error("telegram link: burn code sent in a group", "error", err)
+			}
+			return telegramContactPrivateOnlyReply
+		}
+	default:
 		return "That code cannot be used here."
 	}
 	claimed, err := codes.Claim(ctx, row.ID, now)
@@ -483,6 +555,10 @@ func (l *telegramLinker) link(ctx context.Context, rawCode string, chat telegram
 	orgName := "your YipYap organization"
 	if org, err := l.store.Orgs().GetByID(ctx, row.OrgID); err == nil && strings.TrimSpace(org.Name) != "" {
 		orgName = strings.TrimSpace(org.Name)
+	}
+
+	if row.Purpose == domain.TelegramLinkPurposeContactMethod {
+		return l.linkContactMethod(ctx, codes, row, chat, orgName)
 	}
 
 	ch, msg := l.bindChannel(ctx, row, chat)
@@ -543,8 +619,10 @@ func (l *telegramLinker) bindChannel(ctx context.Context, row *domain.TelegramLi
 }
 
 const telegramStartReply = "Hi, this is the YipYap alerts bot.\n\n" +
-	"To get alerts in this chat, open YipYap, go to Settings, Channels, add a Telegram channel " +
-	"and copy the link command it shows. Then send it here, for example:\n/link ABCD2345EF\n\n" +
+	"To get your own pages here, open YipYap, go to Settings, Contact Methods, add Telegram " +
+	"and press Connect Telegram.\n\n" +
+	"To get a team's alerts in a chat, go to Settings, Channels, add a Telegram channel " +
+	"and copy the link command it shows. Then send it in that chat, for example:\n/link ABCD2345EF\n\n" +
 	"In a group, add this bot to the group first."
 
 // orgTelegramChatLinked reports whether chatID is the chat of an enabled

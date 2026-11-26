@@ -20,13 +20,29 @@ type contactTypeOption struct {
 	Integration string `json:"integration,omitempty"`
 }
 
-// contactIntegration is an org channel a personal DM can send through. Only
-// the id, name and type are exposed, never its config.
+// Where a personal DM sends from (contactIntegration.Source).
+const (
+	// integrationOwnBot is an org channel holding its own bot token. A
+	// method picks it with via_channel_id.
+	integrationOwnBot = "own_bot"
+	// integrationPlatformBot is a Telegram channel on the YipYap bot.
+	integrationPlatformBot = "platform_bot"
+)
+
+// contactIntegration is an org channel or app install a personal DM can
+// send through. Only the id, name and type are exposed, never its config
+// or token.
 type contactIntegration struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
+	// OwnBot marks a Telegram channel that sends through the org's own bot
+	// rather than the YipYap bot.
+	OwnBot bool `json:"own_bot,omitempty"`
+	// Source is own_bot, platform_bot, or app for a platform Slack or
+	// Discord app install (SaaS only, picked with via_install_id).
+	Source string `json:"source"`
 }
 
 func integrationFor(t domain.ContactMethodType) string {
@@ -68,13 +84,30 @@ func (h *ContactMethodHandler) Options(w http.ResponseWriter, r *http.Request) {
 	for _, ch := range channels {
 		switch ch.Type {
 		case "slack", "discord", "telegram":
-			integrations = append(integrations, contactIntegration{ID: ch.ID, Name: ch.Name, Type: ch.Type, Enabled: ch.Enabled})
+			in := contactIntegration{ID: ch.ID, Name: ch.Name, Type: ch.Type, Enabled: ch.Enabled, Source: integrationOwnBot}
+			if ch.Type == "telegram" {
+				cfg, _ := parseTelegramConfig(ch.Config)
+				in.OwnBot = !cfg.usesPlatformBot()
+				if !in.OwnBot {
+					in.Source = integrationPlatformBot
+				}
+			}
+			integrations = append(integrations, in)
 		}
 	}
+	apps, err := appContactIntegrations(r.Context(), h.store, claims.OrgID, h.slackAppDMs, h.discordAppDMs)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "failed to list integrations")
+		return
+	}
+	// App installs first: they need no bot of the org's own.
+	integrations = append(apps, integrations...)
 
 	jsonResponse(w, http.StatusOK, map[string]any{
 		"types":        types,
 		"integrations": integrations,
+		// The form offers Connect Telegram when this is true.
+		"telegram_linking": h.telegramLinking,
 		"limits": map[string]int{
 			"max_methods":       contactmethod.MaxMethodsPerUser,
 			"max_rules":         contactmethod.MaxRulesPerUser,

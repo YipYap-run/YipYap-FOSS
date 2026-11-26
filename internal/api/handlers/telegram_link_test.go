@@ -125,6 +125,13 @@ func (e *telegramLinkEnv) codeStatus(org *domain.Org, id string) (int, telegramL
 // returns the bot's reply text ("" when the bot said nothing).
 func (e *telegramLinkEnv) sendMessage(chatID int64, chatType, title, text string) string {
 	e.t.Helper()
+	return e.sendFromChat(map[string]any{"id": chatID, "type": chatType, "title": title}, text)
+}
+
+// sendFromChat is sendMessage with the full chat object.
+func (e *telegramLinkEnv) sendFromChat(chat map[string]any, text string) string {
+	e.t.Helper()
+	chatID, _ := chat["id"].(int64)
 	e.mu.Lock()
 	before := len(e.sent)
 	e.mu.Unlock()
@@ -133,7 +140,7 @@ func (e *telegramLinkEnv) sendMessage(chatID int64, chatType, title, text string
 		"message": map[string]any{
 			"message_id": 2,
 			"from":       map[string]any{"id": 3, "username": "jane"},
-			"chat":       map[string]any{"id": chatID, "type": chatType, "title": title},
+			"chat":       chat,
 			"text":       text,
 		},
 	}
@@ -317,7 +324,7 @@ func TestTelegramLinkCodeRequests(t *testing.T) {
 		{"not telegram", map[string]any{"channel_id": other.ID}, http.StatusBadRequest},
 		{"own bot", map[string]any{"channel_id": own.ID}, http.StatusBadRequest},
 		{"unknown channel", map[string]any{"channel_id": "nope"}, http.StatusNotFound},
-		{"contact method not here yet", map[string]any{"purpose": "contact_method"}, http.StatusBadRequest},
+		{"unknown purpose", map[string]any{"purpose": "team"}, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		rec := env.call(env.chans.CreateTelegramLinkCode, http.MethodPost, "/telegram/link-codes", env.orgA, tc.body, nil)

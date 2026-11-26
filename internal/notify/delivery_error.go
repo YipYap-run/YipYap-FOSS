@@ -28,6 +28,24 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("%s returned status %d: %s", e.Provider, e.StatusCode, e.Detail)
 }
 
+// RecipientError is a provider error whose Msg is written for the person
+// who owns the destination, such as "Discord will not deliver to this
+// user". Msg must never carry upstream bodies, addresses or credentials.
+// Err keeps the underlying error for logs and errors.Is.
+type RecipientError struct {
+	Msg string
+	Err error
+}
+
+func (e *RecipientError) Error() string {
+	if e.Err == nil {
+		return e.Msg
+	}
+	return e.Msg + ": " + e.Err.Error()
+}
+
+func (e *RecipientError) Unwrap() error { return e.Err }
+
 // PublicDeliveryError turns a provider error into a message that is safe
 // to show to org members. It names the class of failure only: no upstream
 // response body, resolved address, or internal error text, so a channel
@@ -35,6 +53,10 @@ func (e *StatusError) Error() string {
 func PublicDeliveryError(err error) string {
 	if err == nil {
 		return ""
+	}
+	var re *RecipientError
+	if errors.As(err, &re) && re.Msg != "" {
+		return "Delivery failed: " + re.Msg
 	}
 	var se *StatusError
 	switch {
