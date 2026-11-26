@@ -163,6 +163,8 @@ func NewServer(s store.Store, jwt *auth.JWTIssuer, msgBus bus.Bus, wsHub *Hub, b
 	accountDeleteH := handlers.NewAccountDeleteHandler(s, jwt, opt.Mailer, publicBaseURL)
 	sessionH := handlers.NewSessionHandler(s)
 	contactH := newContactMethodHandler(s, opt)
+	contactH.SetTelegramLinking(opt.TelegramWebhookSecret != "" && opt.TelegramBotToken != "")
+	contactH.SetAppDMs(opt.Envelope != nil, opt.DiscordBotToken != "")
 
 	authMiddleware := middleware.Auth(jwt, s.APIKeys(), opt.APIKeyHasher, session.Checker(s))
 	// Full chain for user-facing authenticated routes (auth-2).

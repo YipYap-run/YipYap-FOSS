@@ -2,6 +2,12 @@ import { useState, useEffect, useId, useRef } from 'preact/hooks';
 import { get, post, patch, del } from '../../api/client';
 import { Modal, LoadingPage, ErrorMessage, Spinner, useToast, ToastContainer } from '../../components/ui';
 import { appMeta } from '../../state/auth';
+import { TelegramContactConnect } from './telegram-link.jsx';
+import { telegramContactMode, ownBotIntegrations, isPlatformTelegramMethod } from './contact-telegram-state.mjs';
+import {
+  viaOptions, viaValue, viaSource, applyVia, defaultVia, viaIntegration, fieldApplies,
+  slackLookupResult, slackLookupError,
+} from './contact-chat-app-state.mjs';
 
 /*
  * Personal contact methods and notification rules (Settings, Contact methods).
@@ -9,8 +15,17 @@ import { appMeta } from '../../state/auth';
  * API contract (all under /api/v1):
  *  - GET  users/me/contact-method-options: {types:[{type, supported,
  *    paid_only, available, integration}], integrations:[{id, name, type,
- *    enabled}], limits:{max_methods, max_rules, max_delay_minutes,
- *    max_label_length, code_ttl_minutes}}.
+ *    enabled, own_bot, source}], telegram_linking, limits:{max_methods,
+ *    max_rules, max_delay_minutes, max_label_length, code_ttl_minutes}}.
+ *  - Slack and Discord DMs send through a YipYap app install (source "app",
+ *    config.via_install_id) or an org channel's own bot (source "own_bot",
+ *    config.via_channel_id). With a Slack app install, Find me in Slack
+ *    looks up the caller's own email (see contact-chat-app-state.mjs).
+ *  - Telegram on the YipYap bot is added with Connect Telegram: POST
+ *    telegram/link-codes {purpose: "contact_method"}, then the user sends
+ *    the code to the bot in a private chat and the bot adds the method,
+ *    verified (see contact-telegram-state.mjs). A typed chat ID is only for
+ *    a channel on the org's own bot, which YipYap cannot read.
  *  - users/me/contact-methods: GET/POST, {id} GET/PATCH/DELETE, and POST
  *    {id}/send-code, {id}/verify {code}, {id}/test. Secret config fields come
  *    back as SENTINEL; sending SENTINEL back keeps the stored value. A
@@ -28,8 +43,13 @@ export const SENTINEL = '••••••••';
 
 const PHONE_HELP = 'Include the country code, for example +1 212 555 4240. US and Canada (+1) numbers only.';
 
-// Form fields per contact method type. "integration" fields pick an org
-// Slack, Discord or Telegram channel whose bot sends the DM.
+const SLACK_MEMBER_HELP = 'In Slack, open your profile, choose the more menu, then Copy member ID.';
+const DISCORD_USER_HELP = 'In Discord, open User Settings, Advanced, and turn on Developer Mode. Then right-click your name and choose Copy User ID. The YipYap bot can only message you if you share a server with it and allow direct messages from that server\'s members.';
+
+// Form fields per contact method type. "integration" fields pick where a DM
+// is sent from: for Slack and Discord (key "via") a YipYap app install or an
+// org channel with its own bot, for Telegram an org channel. A field with
+// "via" only applies to that sender ("app" or "own_bot").
 export const METHOD_TYPES = {
   email: {
     label: 'Email',
@@ -82,22 +102,25 @@ export const METHOD_TYPES = {
   slack_dm: {
     label: 'Slack DM',
     fields: [
-      { key: 'via_channel_id', label: 'Send through', input: 'integration', integration: 'slack', required: true },
-      { key: 'slack_user_id', label: 'Slack member ID', input: 'text', required: true, placeholder: 'U0123ABCD', help: 'In Slack, open your profile, choose the more menu, then Copy member ID.' },
+      { key: 'via', label: 'Send through', input: 'integration', integration: 'slack', required: true },
+      { key: 'slack_user_id', label: 'Slack member ID', input: 'text', required: true, placeholder: 'U0123ABCD', help: SLACK_MEMBER_HELP, findMe: true },
     ],
   },
   discord_dm: {
     label: 'Discord DM',
     fields: [
-      { key: 'via_channel_id', label: 'Send through', input: 'integration', integration: 'discord', required: true },
-      { key: 'dm_channel_id', label: 'DM channel ID', input: 'text', required: true, placeholder: '123456789012345678', help: 'Open a direct message with the bot, turn on Developer Mode in Discord settings, then right-click the conversation and choose Copy Channel ID.' },
+      { key: 'via', label: 'Send through', input: 'integration', integration: 'discord', required: true },
+      { key: 'user_id', label: 'Discord user ID', input: 'text', required: true, via: 'app', placeholder: '123456789012345678', help: DISCORD_USER_HELP },
+      { key: 'dm_channel_id', label: 'DM channel ID', input: 'text', required: true, via: 'own_bot', placeholder: '123456789012345678', help: 'Open a direct message with your organization\'s bot, turn on Developer Mode in Discord settings, then right-click the conversation and choose Copy Channel ID.' },
     ],
   },
+  // On the YipYap bot, Telegram is added with Connect Telegram instead of
+  // these fields. They are for a channel on the org's own bot only.
   telegram: {
     label: 'Telegram',
     fields: [
-      { key: 'via_channel_id', label: 'Send through', input: 'integration', integration: 'telegram' },
-      { key: 'chat_id', label: 'Chat ID', input: 'text', required: true, placeholder: '123456789', help: 'Start a chat with the bot, send /start, then paste the chat ID it replies with.' },
+      { key: 'via_channel_id', label: 'Send through', input: 'integration', integration: 'telegram', required: true },
+      { key: 'chat_id', label: 'Your Telegram user ID', input: 'text', required: true, placeholder: '123456789', help: 'A number. In a private chat it is also the chat ID. YipYap only reads messages sent to its own bot, so it cannot look this up for you through your organization\'s bot. Send /start to that bot first so it is allowed to message you.' },
     ],
   },
 };
@@ -130,7 +153,8 @@ export function delayLabel(minutes) {
 // (the server already replaced them with SENTINEL).
 export function methodDestination(m, integrations = []) {
   const c = m.config || {};
-  const via = id => integrations.find(i => i.id === id)?.name;
+  const via = id => integrations.find(i => i.id === id && i.source !== 'app')?.name;
+  const sender = () => viaIntegration(integrations, c)?.name;
   switch (m.type) {
     case 'email': return c.address || '';
     case 'sms':
@@ -139,9 +163,9 @@ export function methodDestination(m, integrations = []) {
     case 'pushover': return c.device ? `Device ${c.device}` : 'All devices';
     case 'pagerduty': return 'PagerDuty service';
     case 'webhook': return (c.url || '').replace(/^https?:\/\//, '');
-    case 'slack_dm': return `${c.slack_user_id || ''}${via(c.via_channel_id) ? ` via ${via(c.via_channel_id)}` : ''}`;
-    case 'discord_dm': return `DM ${c.dm_channel_id || ''}${via(c.via_channel_id) ? ` via ${via(c.via_channel_id)}` : ''}`;
-    case 'telegram': return `Chat ${c.chat_id || ''}`;
+    case 'slack_dm': return `${c.slack_user_id || ''}${sender() ? ` via ${sender()}` : ''}`;
+    case 'discord_dm': return `${c.user_id ? `User ${c.user_id}` : `DM ${c.dm_channel_id || ''}`}${sender() ? ` via ${sender()}` : ''}`;
+    case 'telegram': return `Chat ${c.chat_id || ''}${via(c.via_channel_id) ? ` via ${via(c.via_channel_id)}` : ''}`;
     default: return m.summary || '';
   }
 }
@@ -370,6 +394,7 @@ export function ContactMethodsTab() {
         method={editing}
         options={options}
         onClose={() => setEditing(null)}
+        onConnected={() => load()}
         onSaved={async (saved, isNew) => {
           setEditing(null);
           await load();
@@ -457,17 +482,29 @@ function DeleteBody({ method, rules, methods, busy, onCancel, onConfirm }) {
 
 /* ─── Add / edit method ─── */
 
-function emptyConfig(type) {
+function emptyConfig(type, integrations) {
   const out = {};
-  for (const f of METHOD_TYPES[type]?.fields || []) out[f.key] = '';
-  return out;
+  for (const f of METHOD_TYPES[type]?.fields || []) {
+    if (f.key === 'via') continue;
+    out[f.key] = '';
+  }
+  const kind = METHOD_TYPES[type]?.fields.find(f => f.key === 'via')?.integration;
+  return kind ? applyVia(out, defaultVia(integrations, kind)) : out;
 }
 
-// configForSave drops blank optional fields and keeps stored secrets (sent
-// back as SENTINEL) unless the user typed a new value or cleared it.
+// configForSave drops blank optional fields and fields for the other
+// sender, and keeps stored secrets (sent back as SENTINEL) unless the user
+// typed a new value or cleared it. "via" becomes via_install_id or
+// via_channel_id.
 export function configForSave(type, config, { clearSecrets = {} } = {}) {
   const out = {};
   for (const f of METHOD_TYPES[type]?.fields || []) {
+    if (f.key === 'via') {
+      if (config.via_install_id) out.via_install_id = config.via_install_id;
+      else if (config.via_channel_id) out.via_channel_id = config.via_channel_id;
+      continue;
+    }
+    if (!fieldApplies(f, config)) continue;
     let v = config[f.key];
     if (typeof v === 'string') v = v.trim();
     if (f.input === 'secret' && clearSecrets[f.key]) continue;
@@ -477,7 +514,7 @@ export function configForSave(type, config, { clearSecrets = {} } = {}) {
   return out;
 }
 
-function MethodModal({ method, options, onClose, onSaved }) {
+function MethodModal({ method, options, onClose, onSaved, onConnected }) {
   const open = method !== null;
   const isNew = open && !method.id;
   const formId = useId();
@@ -500,7 +537,7 @@ function MethodModal({ method, options, onClose, onSaved }) {
       const first = types.find(t => t.available)?.type || 'email';
       setType(first);
       setLabel('');
-      setConfig(emptyConfig(first));
+      setConfig(emptyConfig(first, integrations));
     } else {
       setType(method.type);
       setLabel(method.label || '');
@@ -514,20 +551,33 @@ function MethodModal({ method, options, onClose, onSaved }) {
 
   function changeType(t) {
     setType(t);
-    setConfig(emptyConfig(t));
+    setConfig(emptyConfig(t, integrations));
     setError('');
   }
 
   const typeOpt = types.find(t => t.type === type);
   const def = METHOD_TYPES[type];
-  const needsIntegration = def?.fields.some(f => f.input === 'integration' && f.required);
-  const usable = integrations.filter(i => i.type === typeOpt?.integration);
+  const telegram = type === 'telegram';
+  // New Telegram methods: Connect Telegram, a typed ID on the org's own
+  // bot, or nothing. An existing one on the YipYap bot keeps its chat; only
+  // its name can change.
+  const tgMode = telegram && isNew ? telegramContactMode(options) : null;
+  const tgPlatform = telegram && !isNew && isPlatformTelegramMethod(method);
+  const showFields = !tgPlatform && tgMode !== 'connect' && tgMode !== 'unavailable';
+  const needsIntegration = showFields && def?.fields.some(f => f.input === 'integration' && f.required);
+  const usable = telegram
+    ? integrations.filter(i => i.type === 'telegram' && (i.own_bot || (!isNew && i.id === method.config?.via_channel_id)))
+    : integrations.filter(i => i.type === typeOpt?.integration);
   const blockedByIntegration = needsIntegration && !usable.some(i => i.enabled);
   const blockedByPlan = isNew && typeOpt && !typeOpt.available;
   const lockedTypes = types.filter(t => !t.available);
+  const integrationName = { slack: 'Slack', discord: 'Discord', telegram: 'Telegram' }[typeOpt?.integration] || '';
+  const appSender = viaSource(config) === 'app' ? viaIntegration(integrations, config) : undefined;
 
   async function submit(e) {
     e.preventDefault();
+    // Connect Telegram saves through the bot, not this form.
+    if (tgMode === 'connect') return;
     setSaving(true);
     setError('');
     const cfg = configForSave(type, config, { clearSecrets });
@@ -535,6 +585,9 @@ function MethodModal({ method, options, onClose, onSaved }) {
       let saved;
       if (isNew) {
         saved = await post('/users/me/contact-methods', { type, label, config: cfg });
+      } else if (tgPlatform) {
+        // The chat was set by Connect Telegram; only the name changes.
+        saved = await patch(`/users/me/contact-methods/${method.id}`, { label });
       } else {
         saved = await patch(`/users/me/contact-methods/${method.id}`, { label, config: cfg });
       }
@@ -573,6 +626,22 @@ function MethodModal({ method, options, onClose, onSaved }) {
             <p class="text-muted" style="margin-top: 0">Type: {typeLabel(type)}</p>
           )}
 
+          {tgMode === 'connect' ? (
+            blockedByPlan ? (
+              <div class="btn-group">
+                <button type="button" class="btn" onClick={onClose}>Cancel</button>
+              </div>
+            ) : (
+              <TelegramContactConnect botUsername={appMeta.value?.telegram_bot_username}
+                onLinked={() => onConnected && onConnected()} onClose={onClose} />
+            )
+          ) : (<>
+          {tgMode === 'unavailable' && (
+            <div class="form-warning" role="status" style="margin-bottom: 12px">
+              Telegram is not set up on this server. Ask your YipYap operator to configure the Telegram bot.
+            </div>
+          )}
+
           <div class="form-group">
             <label for={`${formId}-label`}>Name <span class="form-optional">optional</span></label>
             <input id={`${formId}-label`} type="text" value={label} maxLength={options?.limits?.max_label_length || 100}
@@ -582,22 +651,35 @@ function MethodModal({ method, options, onClose, onSaved }) {
 
           {def?.note && <p class="text-muted cm-note">{def.note}</p>}
 
-          {def?.fields.map(f => (
-            <ConfigField key={`${type}-${f.key}`} formId={formId} field={f} value={config[f.key] ?? ''}
+          {tgPlatform && (
+            <p class="form-help cm-note">
+              Connected to Telegram chat {method.config?.chat_id}. To use a different Telegram account, remove this
+              method and add Telegram again with Connect Telegram.
+            </p>
+          )}
+
+          {showFields && def?.fields.filter(f => fieldApplies(f, config)).map(f => (
+            <ConfigField key={`${type}-${f.key}`} formId={formId} field={f}
+              value={f.key === 'via' ? viaValue(config) : (config[f.key] ?? '')}
               integrations={usable} storedSecret={!isNew && method.config?.[f.key] === SENTINEL}
               cleared={!!clearSecrets[f.key]}
               onClear={v => setClearSecrets({ ...clearSecrets, [f.key]: v })}
-              onInput={v => setConfig({ ...config, [f.key]: v })} />
+              onInput={v => setConfig(c => (f.key === 'via' ? applyVia(c, v) : { ...c, [f.key]: v }))}>
+              {f.findMe && appSender && (
+                <SlackFindMe key={appSender.id} formId={formId} install={appSender}
+                  onFound={id => setConfig(c => ({ ...c, slack_user_id: id }))} />
+              )}
+            </ConfigField>
           ))}
 
           {blockedByIntegration && (
             <div class="form-warning" role="status" style="margin-bottom: 12px">
-              Your organization has no enabled {typeOpt?.integration === 'slack' ? 'Slack' : 'Discord'} integration
-              to send through. Ask an admin to add one under Settings, Channels.
+              Your organization has no {integrationName} connection to send through. Ask an admin to
+              add the YipYap {integrationName} app or a {integrationName} channel with its own bot under Settings, Channels.
             </div>
           )}
 
-          {!isNew && (
+          {!isNew && !tgPlatform && (
             <p class="form-help" style="margin-bottom: 12px">Changing where this method delivers means verifying it again.</p>
           )}
 
@@ -605,18 +687,19 @@ function MethodModal({ method, options, onClose, onSaved }) {
             <div class="form-error" role="alert" tabIndex={-1} ref={errRef}>{error}</div>
           )}
           <div class="btn-group">
-            <button type="submit" class="btn btn-primary" disabled={saving || blockedByPlan || blockedByIntegration}>
+            <button type="submit" class="btn btn-primary" disabled={saving || blockedByPlan || blockedByIntegration || tgMode === 'unavailable'}>
               {saving ? 'Saving...' : isNew ? 'Add and verify' : 'Save'}
             </button>
             <button type="button" class="btn" onClick={onClose}>Cancel</button>
           </div>
+          </>)}
         </form>
       )}
     </Modal>
   );
 }
 
-function ConfigField({ formId, field, value, integrations, storedSecret, cleared, onClear, onInput }) {
+function ConfigField({ formId, field, value, integrations, storedSecret, cleared, onClear, onInput, children }) {
   const id = `${formId}-${field.key}`;
   const helpId = field.help ? `${id}-help` : undefined;
   const [show, setShow] = useState(false);
@@ -626,6 +709,29 @@ function ConfigField({ formId, field, value, integrations, storedSecret, cleared
       {!field.required && field.input !== 'integration' && <span class="form-optional">optional</span>}
     </label>
   );
+
+  if (field.input === 'integration' && field.key === 'via') {
+    const opts = viaOptions(integrations, field.integration);
+    const hasApp = opts.some(o => o.source === 'app');
+    const viaHelp = `${id}-help`;
+    return (
+      <div class="form-group">
+        {label}
+        <select id={id} value={value} required={field.required} onChange={e => onInput(e.target.value)}
+          aria-describedby={viaHelp}>
+          <option value="">Choose where to send from</option>
+          {opts.map(o => (
+            <option key={o.value} value={o.value} disabled={!o.enabled}>{o.label}</option>
+          ))}
+        </select>
+        <p class="form-help" id={viaHelp}>
+          {hasApp
+            ? `The ${field.integration === 'slack' ? 'Slack' : 'Discord'} app needs no setup from you. An own bot is a channel your organization set up with its own bot token.`
+            : 'Channels your organization set up with its own bot token.'}
+        </p>
+      </div>
+    );
+  }
 
   if (field.input === 'integration') {
     return (
@@ -643,10 +749,7 @@ function ConfigField({ formId, field, value, integrations, storedSecret, cleared
           ))}
         </select>
         {field.integration === 'telegram' && (
-          <p class="form-help">
-            Your organization's Telegram integrations, or the YipYap bot
-            {appMeta.value?.telegram_bot_username ? ` (@${appMeta.value.telegram_bot_username})` : ''}.
-          </p>
+          <p class="form-help">Telegram channels that send through your organization's own bot.</p>
         )}
       </div>
     );
@@ -690,6 +793,45 @@ function ConfigField({ formId, field, value, integrations, storedSecret, cleared
         inputMode={field.input === 'tel' ? 'tel' : undefined}
         onInput={e => onInput(e.target.value)} aria-describedby={helpId} />
       {field.help && <p class="form-help" id={helpId}>{field.help}</p>}
+      {children}
+    </div>
+  );
+}
+
+// SlackFindMe fills the Slack member ID by looking up the signed-in user's
+// own YipYap email in the chosen workspace. The member ID field stays as
+// the fallback.
+function SlackFindMe({ formId, install, onFound }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null); // {found, message}
+  const [error, setError] = useState('');
+  const statusId = `${formId}-findme-status`;
+
+  async function lookup() {
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await get(`/integrations/slack/installations/${encodeURIComponent(install.id)}/me`);
+      const r = slackLookupResult(res, install.name);
+      setResult(r);
+      if (r.found) onFound(r.id);
+    } catch (err) {
+      setError(slackLookupError(err));
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div class="cm-findme" style="margin-top: 8px">
+      <button type="button" class="btn btn-sm" onClick={lookup} disabled={busy}
+        aria-describedby={statusId}>
+        {busy ? 'Looking you up...' : 'Find me in Slack'}
+      </button>
+      <p class="form-help" id={statusId} role="status" aria-live="polite">
+        {result ? result.message : 'Looks up your YipYap account email in this workspace.'}
+      </p>
+      {error && <div class="form-error" role="alert">{error}</div>}
     </div>
   );
 }

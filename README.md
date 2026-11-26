@@ -123,8 +123,8 @@ who to ask.
 
 Escalation steps page people. Each user adds their own contact methods
 under Settings, Contact Methods (email, webhook, ntfy, Pushover, PagerDuty,
-Slack DM, Discord DM, Telegram), verifies them with a code, and sets
-notification rules: which method, after how many minutes, for which alerts. Rules still waiting are dropped
+Slack DM, Discord DM, Telegram), verifies them with a code (Telegram is
+verified by Connect Telegram instead), and sets notification rules: which method, after how many minutes, for which alerts. Rules still waiting are dropped
 once the alert is acknowledged. A step target can also post to a shared
 notification channel as an extra destination. When the alert resolves, each
 contact method and channel that was paged gets one resolve notification.
@@ -147,7 +147,7 @@ All channels are configured through the web UI under Settings → Notification C
 | **Webhook** | URL, payload format, custom headers. Requests are `POST` and signed with the channel's signing secret |
 | **Slack** | Bot token + channel ID |
 | **Discord** | Bot token + channel ID (for a Discord webhook URL, use a Webhook channel) |
-| **Telegram** | Your bot's token, username and webhook secret (`YIPYAP_TELEGRAM_*` above); each chat is linked with a one-time command from Settings, Channels, such as `/link@your_bot CODE` |
+| **Telegram** | Your bot's token, username and webhook secret (`YIPYAP_TELEGRAM_*` above); each chat is linked with a one-time command from Settings, Channels, such as `/link@your_bot CODE`. People add Telegram as a personal contact method with **Connect Telegram** under Settings, Contact Methods, which opens a private chat with the bot and adds the method already verified |
 | **ntfy.sh** | Server URL + topic |
 | **Pushover** | API token + user key |
 

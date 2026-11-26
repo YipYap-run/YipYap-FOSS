@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 )
 
 // The pairing UI (web/src/pages/settings/telegram-link-state.mjs) reads
@@ -108,4 +110,40 @@ func TestTelegramLinkCodeStatusUnknownID(t *testing.T) {
 	if status, _ := env.codeStatus(env.orgA, "no-such-code"); status != http.StatusNotFound {
 		t.Fatalf("unknown id = %d", status)
 	}
+}
+
+// A contact_method code has no group link, and once linked it names the
+// contact method instead of a channel.
+func TestTelegramContactLinkCodeContract(t *testing.T) {
+	env := newTelegramLinkEnv(t)
+	member := env.addUser(env.orgA, domain.RoleMember)
+
+	rec := env.callAs(member, "member", env.chans.CreateTelegramLinkCode, http.MethodPost, "/telegram/link-codes",
+		map[string]any{"purpose": "contact_method"}, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	created, keys := jsonKeys(t, rec.Body.Bytes())
+	wantKeys(t, "create", keys, "id", "status", "expires_at", "code", "command", "bot_username", "private_link")
+	code, _ := created["code"].(string)
+	if created["command"] != "/link@YipYapBot "+code || created["private_link"] != "https://t.me/YipYapBot?start="+code {
+		t.Fatalf("create body = %v", created)
+	}
+	id := created["id"].(string)
+
+	get := func() []string {
+		rec := env.callAs(member, "member", env.chans.GetTelegramLinkCode, http.MethodGet, "/telegram/link-codes/"+id,
+			nil, map[string]string{"id": id})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("get: %d %s", rec.Code, rec.Body.String())
+		}
+		_, k := jsonKeys(t, rec.Body.Bytes())
+		return k
+	}
+	wantKeys(t, "pending", get(), "id", "status", "expires_at")
+
+	if reply := env.sendFromChat(privateChat(4242, "jane"), "/start "+code); !strings.Contains(reply, "Connected") {
+		t.Fatalf("reply = %q", reply)
+	}
+	wantKeys(t, "linked", get(), "id", "status", "expires_at", "contact_method_id", "chat_title")
 }

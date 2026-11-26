@@ -49,7 +49,7 @@ func TestContactMethodOptions(t *testing.T) {
 		t.Fatalf("want only the slack integration, got %v", opts["integrations"])
 	}
 	in := ints[0].(map[string]any)
-	if in["id"] != ch["id"] || in["name"] != "Team Slack" || in["type"] != "slack" {
+	if in["id"] != ch["id"] || in["name"] != "Team Slack" || in["type"] != "slack" || in["source"] != "own_bot" {
 		t.Fatalf("integration = %v", in)
 	}
 	if _, leaked := in["config"]; leaked {

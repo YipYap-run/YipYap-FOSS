@@ -43,8 +43,10 @@ func registerNotificationChannelRoutes(r chi.Router, s store.Store, notifChanH *
 		r.With(middleware.RequireChannelPermission(s, domain.ChannelActionTest)).Post("/notification-channels/{id}/test", notifChanH.Test)
 		r.With(manage).Post("/notification-channels/{id}/rotate-secret", notifChanH.RotateSecret)
 		registerPhoneVerifyRoutes(r, s, opt.PhoneVerifySender)
-		// Telegram chats are linked with a one-time code (notif-16).
-		r.With(manage).Post("/telegram/link-codes", notifChanH.CreateTelegramLinkCode)
-		r.With(manage).Get("/telegram/link-codes/{id}", notifChanH.GetTelegramLinkCode)
+		// Telegram chats are linked with a one-time code (notif-16). Any
+		// member may link their own contact method, so the handler applies
+		// the channel permission to channel codes itself.
+		r.Post("/telegram/link-codes", notifChanH.CreateTelegramLinkCode)
+		r.Get("/telegram/link-codes/{id}", notifChanH.GetTelegramLinkCode)
 	})
 }

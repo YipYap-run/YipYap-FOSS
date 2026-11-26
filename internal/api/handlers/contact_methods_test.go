@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/YipYap-run/YipYap-FOSS/internal/api"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/handlers"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
@@ -72,11 +73,18 @@ var cmTestEnvelopeHex = strings.Repeat("22", 32)
 
 func newCMFixture(t *testing.T) cmFixture {
 	t.Helper()
+	return newCMFixtureOpts(t, nil)
+}
+
+// newCMFixtureOpts is newCMFixture with a hook to change the server
+// options.
+func newCMFixtureOpts(t *testing.T, tweak func(*api.ServerOptions)) cmFixture {
+	t.Helper()
 	env, err := crypto.NewEnvelopeFromHex(cmTestEnvelopeHex)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, s, sender := setupChannelTestServerWith(t, env)
+	srv, s, sender := setupChannelTestServerOpts(t, env, tweak)
 	owner := cmClient{t, srv.URL, signupAndGetToken(t, srv, "CM Org", "cm-owner@test.com", "supersecret123")}
 	other := cmClient{t, srv.URL, signupAndGetToken(t, srv, "CM Other", "cm-other@test.com", "supersecret123")}
 	code, obj, _ := owner.do(http.MethodPost, "/users/invites", map[string]any{

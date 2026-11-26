@@ -30,6 +30,7 @@ func TestPublicDeliveryError(t *testing.T) {
 		{"smtp auth", fmt.Errorf("smtp send: %w", &textproto.Error{Code: 535, Msg: "5.7.8 user@10.0.0.7 bad credentials"}), "rejected the login"},
 		{"smtp rcpt", &textproto.Error{Code: 550, Msg: "no such user user@10.0.0.7"}, "recipient or sender"},
 		{"smtp other", &textproto.Error{Code: 421, Msg: "nginx busy at 10.0.0.7"}, "code 421"},
+		{"recipient", fmt.Errorf("wrap: %w", &RecipientError{Msg: "Discord will not deliver to this user.", Err: errors.New("http 403 from 10.0.0.7")}), "Discord will not deliver to this user."},
 		{"dns", &url.Error{Op: "Post", URL: "https://nope.invalid/x", Err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "10.0.0.7.invalid", IsNotFound: true}}}, "does not resolve"},
 	}
 	for _, tc := range cases {

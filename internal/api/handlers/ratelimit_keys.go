@@ -22,6 +22,15 @@ func RateLimitKeyByOrg(r *http.Request) (string, error) {
 	return "anonymous", nil
 }
 
+// RateLimitKeyByUser keys on the authenticated user ID, falling back to
+// the org and then "anonymous" like RateLimitKeyByOrg.
+func RateLimitKeyByUser(r *http.Request) (string, error) {
+	if claims := middleware.GetClaims(r.Context()); claims != nil && claims.UserID != "" {
+		return "user:" + claims.UserID, nil
+	}
+	return RateLimitKeyByOrg(r)
+}
+
 // RateLimitKeyByClientIP keys rate limits on the resolved client IP. The
 // trustedProxyRealIP middleware already overwrites r.RemoteAddr with the
 // trusted client IP (CF-Connecting-IP / X-Real-IP / X-Forwarded-For) when the

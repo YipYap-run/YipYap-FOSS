@@ -40,11 +40,26 @@ func TestContactMethodsUIContract(t *testing.T) {
 		requireKeys(t, "rule", r.(map[string]any), "id", "contact_method_id", "delay_minutes", "urgency")
 	}
 
+	if code, ch, _ := f.owner.do(http.MethodPost, "/notification-channels", map[string]any{
+		"name": "Team Slack", "type": "slack", "enabled": true,
+		"config": map[string]any{"bot_token": "xoxb-secret-bot", "channel_id": "C0SHARED"},
+	}); code != http.StatusCreated {
+		t.Fatalf("create slack channel: %d %v", code, ch)
+	}
 	code, opts, _ := f.member.do(http.MethodGet, "/users/me/contact-method-options", nil)
 	if code != http.StatusOK {
 		t.Fatalf("options: %d %v", code, opts)
 	}
 	requireKeys(t, "options", opts, "types", "integrations", "limits")
+	ints, _ := opts["integrations"].([]any)
+	if len(ints) == 0 {
+		t.Fatalf("options.integrations empty: %v", opts)
+	}
+	for _, in := range ints {
+		// source tells an app install (via_install_id) from an org channel
+		// (via_channel_id).
+		requireKeys(t, "integration", in.(map[string]any), "id", "name", "type", "enabled", "source")
+	}
 	types, _ := opts["types"].([]any)
 	if len(types) == 0 {
 		t.Fatalf("options.types empty: %v", opts)
