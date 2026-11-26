@@ -13,8 +13,6 @@ import (
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/checker"
-	cevents "github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
-	cetypes "github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify"
 	"github.com/YipYap-run/YipYap-FOSS/internal/notify/providers"
@@ -37,14 +35,13 @@ const configSentinel = "••••••••"
 // are not). Endpoint URLs that carry a credential are handled separately
 // in notification_channels_redact.go.
 var secretFields = map[string][]string{
-	"webhook":         {"headers.*"},
-	"slack":           {"bot_token"},
-	"discord":         {"bot_token"},
-	"telegram":        {"bot_token"},
-	"smtp":            {"password"},
-	"ntfy":            {"token"},
-	"pushover":        {"api_token"},
-	"cloudevent_http": {"auth.oidc.client_secret"},
+	"webhook":  {"headers.*"},
+	"slack":    {"bot_token"},
+	"discord":  {"bot_token"},
+	"telegram": {"bot_token"},
+	"smtp":     {"password"},
+	"ntfy":     {"token"},
+	"pushover": {"api_token"},
 }
 
 func init() {
@@ -179,33 +176,6 @@ type TestSender interface {
 	TestSend(ctx context.Context, job domain.NotificationJob) (string, error)
 }
 
-// validateCloudEventHTTPURLs applies SSRF protection to every control-plane
-// URL on a cloudevent_http channel config: sink_url (outbound event
-// delivery), auth.oidc.token_url (client_credentials POST), and
-// auth.oidc.issuer (if set, informational on the cache key but also used
-// as fallback identifier). A private/loopback/link-local result on ANY of
-// them is fatal at create/update time so credentials never leave the
-// process for an attacker-chosen host. See security review 02 (C-3) and
-// (H-2) on the split allow-private toggle.
-func validateCloudEventHTTPURLs(sinkURL, tokenURL, issuer string) error {
-	if sinkURL != "" {
-		if err := checker.ValidateControlPlaneHTTPTarget(sinkURL); err != nil {
-			return err
-		}
-	}
-	if tokenURL != "" {
-		if err := checker.ValidateControlPlaneHTTPTarget(tokenURL); err != nil {
-			return err
-		}
-	}
-	if issuer != "" {
-		if err := checker.ValidateControlPlaneHTTPTarget(issuer); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type NotificationChannelHandler struct {
 	store         store.Store
 	testSender    TestSender
@@ -299,20 +269,9 @@ func (h *NotificationChannelHandler) prepareChannelConfig(ctx context.Context, o
 	if err := validateUserURLs(channelType, config); err != nil {
 		return nil, err
 	}
-	if channelType == "cloudevent_http" && len(config) > 0 {
-		var cfg struct {
-			SinkURL string `json:"sink_url"`
-			Auth    struct {
-				OIDC struct {
-					Issuer   string `json:"issuer"`
-					TokenURL string `json:"token_url"`
-				} `json:"oidc"`
-			} `json:"auth"`
-		}
-		if json.Unmarshal(config, &cfg) == nil {
-			if err := validateCloudEventHTTPURLs(cfg.SinkURL, cfg.Auth.OIDC.TokenURL, cfg.Auth.OIDC.Issuer); err != nil {
-				return nil, err
-			}
+	if check := channelURLChecks[channelType]; check != nil && len(config) > 0 {
+		if err := check(config); err != nil {
+			return nil, err
 		}
 	}
 	phoneCfg, err := validatePhoneIfNeeded(channelType, config)
@@ -478,23 +437,12 @@ func (h *NotificationChannelHandler) Update(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		// SSRF protection: reject cloudevent_http channels targeting private/internal URLs.
-		// Covers sink_url, auth.oidc.token_url, and auth.oidc.issuer. See C-3.
-		if ch.Type == "cloudevent_http" {
-			var cfg struct {
-				SinkURL string `json:"sink_url"`
-				Auth    struct {
-					OIDC struct {
-						Issuer   string `json:"issuer"`
-						TokenURL string `json:"token_url"`
-					} `json:"oidc"`
-				} `json:"auth"`
-			}
-			if json.Unmarshal([]byte(merged), &cfg) == nil {
-				if err := validateCloudEventHTTPURLs(cfg.SinkURL, cfg.Auth.OIDC.TokenURL, cfg.Auth.OIDC.Issuer); err != nil {
-					errorResponse(w, http.StatusBadRequest, err.Error())
-					return
-				}
+		// SSRF protection for channel types with control-plane URLs
+		// (registered in channelURLChecks). See C-3.
+		if check := channelURLChecks[ch.Type]; check != nil {
+			if err := check([]byte(merged)); err != nil {
+				errorResponse(w, http.StatusBadRequest, err.Error())
+				return
 			}
 		}
 
@@ -640,8 +588,8 @@ func (h *NotificationChannelHandler) Test(w http.ResponseWriter, r *http.Request
 		}
 		testConfig = string(canon)
 	}
-	// A row saved before typed checks (for example a CloudEvents filter
-	// stored as a string) fails every send. Say which field instead of
+	// A row saved before typed checks (for example a list filter stored
+	// as a string) fails every send. Say which field instead of
 	// sending a test that cannot decode its config. Keys the row already
 	// holds are tolerated, as on update.
 	if err := validateChannelConfig(ch.Type, []byte(ch.Config), []byte(ch.Config)); err != nil {
@@ -670,44 +618,18 @@ func (h *NotificationChannelHandler) Test(w http.ResponseWriter, r *http.Request
 		DedupeKey:    "test-" + uuid.New().String(),
 	}
 
-	// For cloudevent_http channels, the provider expects job.Message to be
-	// canonical CloudEvent JSON. Synthesize a run.yipyap.alert.fired.v1 event.
-	if ch.Type == "cloudevent_http" {
-		ev, err := cevents.NewAlertFiredV1(
-			cevents.OrgSource(ch.OrgID),
-			cetypes.AlertFiredV1Data{
-				AlertID:   "test-" + uuid.New().String(),
-				MonitorID: "test-" + uuid.New().String(),
-				Severity:  "info",
-				Reason:    "Test event from yipyap",
-				FiredAt:   time.Now().UTC(),
-			},
-		)
+	// Channel types whose provider needs a specific message body build it
+	// here, or report that the channel would drop the test.
+	if build := channelTestMessages[ch.Type]; build != nil {
+		skip, err := build(ch.OrgID, testConfig, &job)
 		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, "failed to build test event")
+			errorResponse(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		// The provider drops events its filter does not match without an
-		// error, so a filter that leaves out alert.fired would report a test
-		// as sent while nothing reached the sink. Say so instead.
-		var filter struct {
-			EventTypes []string `json:"event_types"`
-		}
-		_ = json.Unmarshal([]byte(testConfig), &filter)
-		if len(filter.EventTypes) > 0 && !cevents.MatchAnyGlob(ev.Type(), filter.EventTypes) {
-			jsonResponse(w, http.StatusOK, map[string]interface{}{
-				"status":     "filtered",
-				"filtered":   true,
-				"event_type": ev.Type(),
-			})
+		if skip != nil {
+			jsonResponse(w, http.StatusOK, skip)
 			return
 		}
-		evJSON, err := json.Marshal(ev)
-		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, "failed to marshal test event")
-			return
-		}
-		job.Message = string(evJSON)
 	}
 
 	// Last check before the send, so a phone test that fails validation

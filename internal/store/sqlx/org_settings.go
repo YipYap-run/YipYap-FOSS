@@ -68,3 +68,24 @@ func (s *OrgSettingsStore) GetAll(ctx context.Context, orgID string) (map[string
 	}
 	return out, rows.Err()
 }
+
+// ListOrgIDsWithKey returns the IDs of orgs that have a non-empty value for
+// key, for example every org with OTEL export configured.
+func (s *OrgSettingsStore) ListOrgIDsWithKey(ctx context.Context, key string) ([]string, error) {
+	rows, err := s.q.QueryContext(ctx,
+		`SELECT org_id FROM org_settings WHERE "key" = ? AND value <> '' ORDER BY org_id`, key)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}

@@ -22,3 +22,10 @@ test('members and viewers do not get the Billing tab', () => {
   assert.equal(keys(visibleSettingsTabs(promo, true, 'member')).includes('billing'), false);
   assert.equal(keys(visibleSettingsTabs(promo, true, 'viewer')).includes('billing'), false);
 });
+
+test('Free SaaS orgs see Integrations (upgrade prompt) but not SSO; FOSS sees neither', () => {
+  const free = { edition: 'saas', plan: 'free', billing_enabled: true };
+  assert.ok(keys(visibleSettingsTabs(free, false, 'owner')).includes('integrations'));
+  assert.equal(keys(visibleSettingsTabs(free, false, 'owner')).includes('sso'), false);
+  assert.equal(keys(availableSettingsTabs({ edition: 'foss' }, true)).includes('integrations'), false);
+});

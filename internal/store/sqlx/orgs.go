@@ -81,8 +81,9 @@ func (s *OrgStore) Delete(ctx context.Context, id string) error {
 	// org_id nor a foreign key, so ON DELETE CASCADE does not reach them.
 	_, _ = s.q.ExecContext(ctx,
 		`DELETE FROM alert_status_page_refs WHERE alert_id IN (SELECT id FROM alerts WHERE org_id = ?)`, id)
-	_, _ = s.q.ExecContext(ctx,
-		`DELETE FROM cloudevent_ingest_idempotency WHERE monitor_id IN (SELECT id FROM monitors WHERE org_id = ?)`, id)
+	for _, stmt := range orgDeleteExtras {
+		_, _ = s.q.ExecContext(ctx, stmt, id)
+	}
 
 	// Delete every org_id-bearing table. Their children are removed by
 	// ON DELETE CASCADE (foreign_keys=ON). Ordering matters only for two
@@ -91,7 +92,6 @@ func (s *OrgStore) Delete(ctx context.Context, id string) error {
 	// org_monitor_states).
 	tables := []string{
 		"alert_remediations", "alert_routing_rules", "alert_suppressions",
-		"cloudevent_reply_audit",
 		"alerts",
 		"escalation_policies",
 		"notification_channels", "phone_verifications", "maintenance_windows",

@@ -65,7 +65,7 @@ func TestUpdateUserContactDetails(t *testing.T) {
 	ts, s := setupTestServer(t)
 	ctx := context.Background()
 
-	ownerToken := selfServiceRegisterAndGetToken(t, ts, "ContactOrg", "owner@contact.test", "ownerpass1")
+	ownerToken := selfServisignupAndGetToken(t, ts, "ContactOrg", "owner@contact.test", "ownerpass1")
 	owner, err := s.Users().GetByEmail(ctx, "owner@contact.test")
 	if err != nil {
 		t.Fatal(err)
@@ -166,8 +166,8 @@ func TestUpdateUserContactDetails(t *testing.T) {
 
 func TestChangeEmailValidation(t *testing.T) {
 	ts, _ := setupTestServer(t)
-	token := selfServiceRegisterAndGetToken(t, ts, "ValidateOrg", "valid@contact.test", "validpass1")
-	selfServiceRegisterAndGetToken(t, ts, "OtherOrg", "taken@contact.test", "otherpass1")
+	token := selfServisignupAndGetToken(t, ts, "ValidateOrg", "valid@contact.test", "validpass1")
+	selfServisignupAndGetToken(t, ts, "OtherOrg", "taken@contact.test", "otherpass1")
 
 	put := func(email string) int {
 		b, _ := json.Marshal(map[string]string{"current_password": "validpass1", "new_email": email})
@@ -200,8 +200,8 @@ func TestChangeEmailValidation(t *testing.T) {
 // web/src/pages/settings/account.jsx). Changing them breaks that mapping.
 func TestChangeEmailErrorContract(t *testing.T) {
 	ts, _ := setupTestServer(t)
-	token := selfServiceRegisterAndGetToken(t, ts, "ContractOrg", "contract@contact.test", "contractpass1")
-	selfServiceRegisterAndGetToken(t, ts, "ContractOther", "used@contact.test", "otherpass1")
+	token := selfServisignupAndGetToken(t, ts, "ContractOrg", "contract@contact.test", "contractpass1")
+	selfServisignupAndGetToken(t, ts, "ContractOther", "used@contact.test", "otherpass1")
 
 	put := func(password, email string) (int, string) {
 		b, _ := json.Marshal(map[string]string{"current_password": password, "new_email": email})

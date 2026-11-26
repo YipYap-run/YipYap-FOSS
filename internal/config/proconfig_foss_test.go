@@ -22,3 +22,25 @@ func TestLoadOperatorCaps(t *testing.T) {
 		t.Errorf("bad values = %d/%d, want ignored (0)", c.MaxNotificationChannelsPerOrg, c.MinCheckIntervalSeconds)
 	}
 }
+
+// Transactional email (password resets, invites, contact method
+// verification) needs the YIPYAP_SMTP_* settings in FOSS too.
+func TestLoadSMTPConfig(t *testing.T) {
+	t.Setenv("YIPYAP_SMTP_HOST", "smtp.example.com")
+	t.Setenv("YIPYAP_SMTP_PORT", "465")
+	t.Setenv("YIPYAP_SMTP_USER", "mailer")
+	t.Setenv("YIPYAP_SMTP_PASS", "s3cret")
+	t.Setenv("YIPYAP_SMTP_FROM", "alerts@example.com")
+	c := Load()
+	if c.SMTPHost != "smtp.example.com" || c.SMTPPort != 465 || c.SMTPUser != "mailer" || c.SMTPPass != "s3cret" || c.SMTPFrom != "alerts@example.com" {
+		t.Fatalf("smtp = %q:%d user %q from %q (pass set %v)", c.SMTPHost, c.SMTPPort, c.SMTPUser, c.SMTPFrom, c.SMTPPass != "")
+	}
+
+	for _, k := range []string{"YIPYAP_SMTP_HOST", "YIPYAP_SMTP_PORT", "YIPYAP_SMTP_USER", "YIPYAP_SMTP_PASS", "YIPYAP_SMTP_FROM"} {
+		t.Setenv(k, "")
+	}
+	c = Load()
+	if c.SMTPHost != "" || c.SMTPPort != 587 || c.SMTPFrom != "" {
+		t.Fatalf("unset smtp = %q:%d from %q, want empty host, port 587, empty from", c.SMTPHost, c.SMTPPort, c.SMTPFrom)
+	}
+}

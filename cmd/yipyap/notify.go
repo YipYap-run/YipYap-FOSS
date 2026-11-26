@@ -9,7 +9,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
-func setupDispatcher(msgBus bus.Bus, _ store.Store, decrypt notify.DecryptFunc, cfg *config.Config, rec *notify.Recorder) (*notify.Dispatcher, *providers.CloudEventHTTP) {
+func setupDispatcher(msgBus bus.Bus, _ store.Store, decrypt notify.DecryptFunc, cfg *config.Config, rec *notify.Recorder) *notify.Dispatcher {
 	// FOSS: no dedup, no outbox, no paid notification providers.
 	d := notify.NewDispatcher(msgBus, nil, notify.WithRecorder(rec))
 
@@ -28,10 +28,7 @@ func setupDispatcher(msgBus bus.Bus, _ store.Store, decrypt notify.DecryptFunc, 
 	d.Register(providers.NewPushover(providers.PushoverConfig{}, decrypt), 100)
 	d.Register(providers.NewPagerDuty(providers.PagerDutyConfig{}, decrypt), 100)
 
-	cehttp := providers.NewCloudEventHTTP(decrypt)
-	d.Register(cehttp, 100)
-
-	return d, cehttp
+	return d
 }
 
 // phoneVerifySender is nil in FOSS: there are no SMS or voice channels.

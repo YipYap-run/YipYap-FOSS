@@ -339,6 +339,10 @@ func (h *NotificationChannelHandler) CreateTelegramLinkCode(w http.ResponseWrite
 		BotUsername: h.telegramBotUsername,
 	}
 	if h.telegramBotUsername != "" {
+		// Address the command to our bot. Under Telegram's group privacy
+		// mode a bot gets "/cmd@this_bot" reliably, while a bare "/cmd" can
+		// go to another bot in the group.
+		resp.Command = "/link@" + h.telegramBotUsername + " " + code
 		base := "https://t.me/" + url.PathEscape(h.telegramBotUsername)
 		resp.GroupLink = base + "?startgroup=" + code
 		resp.PrivateLink = base + "?start=" + code

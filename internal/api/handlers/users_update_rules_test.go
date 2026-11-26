@@ -18,7 +18,7 @@ func TestUserUpdateAndRemoveRules(t *testing.T) {
 	ts, s := setupTestServer(t)
 	ctx := context.Background()
 
-	ownerToken := selfServiceRegisterAndGetToken(t, ts, "RulesOrg", "owner@rules.test", "ownerpass1")
+	ownerToken := selfServisignupAndGetToken(t, ts, "RulesOrg", "owner@rules.test", "ownerpass1")
 	owner, err := s.Users().GetByEmail(ctx, "owner@rules.test")
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +30,7 @@ func TestUserUpdateAndRemoveRules(t *testing.T) {
 	memberToken := loginAndGetToken(t, ts, member.Email, "memberpass1")
 	viewerToken := loginAndGetToken(t, ts, viewer.Email, "viewerpass1")
 
-	_ = selfServiceRegisterAndGetToken(t, ts, "OtherOrg", "owner@other.test", "otherpass1")
+	_ = selfServisignupAndGetToken(t, ts, "OtherOrg", "owner@other.test", "otherpass1")
 	outsider, err := s.Users().GetByEmail(ctx, "owner@other.test")
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestTransferOwnershipGuards(t *testing.T) {
 	ts, s := setupTestServer(t)
 	ctx := context.Background()
 
-	ownerToken := selfServiceRegisterAndGetToken(t, ts, "GuardOrg", "owner@guard.test", "ownerpass1")
+	ownerToken := selfServisignupAndGetToken(t, ts, "GuardOrg", "owner@guard.test", "ownerpass1")
 	owner, err := s.Users().GetByEmail(ctx, "owner@guard.test")
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func TestTransferOwnershipGuards(t *testing.T) {
 	}
 	adminToken := loginAndGetToken(t, ts, admin.Email, "adminpass1")
 
-	_ = selfServiceRegisterAndGetToken(t, ts, "ElsewhereOrg", "owner@elsewhere.test", "elsewherepass1")
+	_ = selfServisignupAndGetToken(t, ts, "ElsewhereOrg", "owner@elsewhere.test", "elsewherepass1")
 	outsider, err := s.Users().GetByEmail(ctx, "owner@elsewhere.test")
 	if err != nil {
 		t.Fatal(err)

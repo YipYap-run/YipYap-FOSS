@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"path"
 	"sort"
 	"strings"
 )
@@ -98,32 +97,6 @@ var channelConfigSchemas = map[string]map[string]cfgField{
 		"user_key":  {kind: cfgString, required: true},
 		"device":    {kind: cfgString},
 		"sound":     {kind: cfgString},
-	},
-	"cloudevent_http": {
-		"sink_url":     {kind: cfgString, required: true},
-		"mode":         {kind: cfgString, check: oneOf("binary", "structured")},
-		"event_types":  {kind: cfgStringList, example: `["run.yipyap.alert.*"]`, check: checkGlobs},
-		"ce_overrides": {kind: cfgStringMap, example: `{"environment": "production"}`, check: checkCEOverrides},
-		"auth": {kind: cfgObject, fields: map[string]cfgField{
-			"type": {kind: cfgString, check: oneOf("none", "oidc")},
-			"oidc": {kind: cfgObject, fields: map[string]cfgField{
-				"issuer":        {kind: cfgString},
-				"token_url":     {kind: cfgString},
-				"client_id":     {kind: cfgString},
-				"client_secret": {kind: cfgString},
-				"audience":      {kind: cfgString},
-				"scopes":        {kind: cfgStringList, example: `["events.write"]`},
-			}},
-		}},
-		"accepted_replies": {kind: cfgObject, fields: map[string]cfgField{
-			"types":                      {kind: cfgStringList, example: `["run.yipyap.reply.alert.*"]`, check: checkGlobs},
-			"rate_limit":                 {kind: cfgInt},
-			"trust_elevated":             {kind: cfgBool},
-			"allow_deregister":           {kind: cfgBool},
-			"max_suppress_seconds":       {kind: cfgInt},
-			"max_remediation_seconds":    {kind: cfgInt},
-			"max_route_duration_seconds": {kind: cfgInt},
-		}},
 	},
 }
 
@@ -286,17 +259,8 @@ func checkConfigKind(f cfgField, v any) string {
 }
 
 func checkConfigCrossFields(channelType string, cfg map[string]any) error {
-	if channelType != "cloudevent_http" {
-		return nil
-	}
-	authM, _ := cfg["auth"].(map[string]any)
-	if t, _ := authM["type"].(string); t == "oidc" {
-		oidc, _ := authM["oidc"].(map[string]any)
-		for _, k := range []string{"token_url", "client_id", "client_secret"} {
-			if s, _ := oidc[k].(string); strings.TrimSpace(s) == "" {
-				return &channelConfigError{Field: "auth.oidc." + k, Msg: "is required when auth.type is oidc"}
-			}
-		}
+	if check := channelCrossChecks[channelType]; check != nil {
+		return check(cfg)
 	}
 	return nil
 }
@@ -314,57 +278,6 @@ func oneOf(allowed ...string) func(any) string {
 		}
 		return "must be one of " + strings.Join(allowed, ", ")
 	}
-}
-
-// checkGlobs refuses empty entries and patterns path.Match cannot parse. A
-// bad pattern never matches, so a filter holding one would drop events
-// without saying why.
-func checkGlobs(v any) string {
-	for _, item := range v.([]any) {
-		p := strings.TrimSpace(item.(string))
-		if p == "" {
-			return "entries cannot be empty"
-		}
-		if _, err := path.Match(p, ""); err != nil {
-			return fmt.Sprintf("%q is not a valid pattern", p)
-		}
-	}
-	return ""
-}
-
-// ceSpecAttributes are the CloudEvents v1 context attributes. The SDK
-// refuses an extension with one of these names, which would fail every send.
-var ceSpecAttributes = map[string]bool{
-	"specversion": true, "id": true, "source": true, "type": true,
-	"datacontenttype": true, "dataschema": true, "subject": true, "time": true,
-	"data": true, "data_base64": true,
-}
-
-// ceReservedExtensions are extensions YipYap sets itself. alertref
-// correlates replies to the outbound event, so a channel cannot replace it.
-var ceReservedExtensions = map[string]bool{"alertref": true}
-
-func checkCEOverrides(v any) string {
-	m := v.(map[string]any)
-	names := make([]string, 0, len(m))
-	for k := range m {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, k := range names {
-		if k == "" {
-			return "attribute names cannot be empty"
-		}
-		for _, c := range k {
-			if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
-				return fmt.Sprintf("%q is not a valid attribute name (use lower-case letters and digits only)", k)
-			}
-		}
-		if ceSpecAttributes[k] || ceReservedExtensions[k] {
-			return fmt.Sprintf("%q is set by YipYap and cannot be overridden", k)
-		}
-	}
-	return ""
 }
 
 const (

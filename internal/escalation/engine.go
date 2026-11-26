@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/crypto"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/YipYap-run/YipYap-FOSS/internal/telemetry"
 	"github.com/google/uuid"
 )
 
@@ -47,7 +47,10 @@ type Engine struct {
 	envelope *crypto.Envelope
 	oncall   *OnCallResolver
 	metrics  EngineMetrics
-	emitter  cloudevents.Emitter
+	emitter  events.Emitter
+	// orgRec records escalation steps for each org's own OTLP export.
+	// Nil disables it.
+	orgRec telemetry.OrgRecorder
 	// quotaMailer and quotaBaseURL send SMS/voice usage warnings to org
 	// owners and admins (SaaS only). A nil mailer only logs.
 	quotaMailer  Mailer
@@ -72,11 +75,17 @@ const (
 	escalationLeaderTTL = escalationTickInterval - time.Second
 )
 
-// SetCloudEventEmitter attaches a CloudEvent emitter to the engine. A nil
-// emitter disables CloudEvent emission (the default). Must be called before
+// SetEventEmitter attaches an event emitter to the engine. A nil
+// emitter disables event emission (the default). Must be called before
 // Start to avoid races with the handlers.
-func (e *Engine) SetCloudEventEmitter(em cloudevents.Emitter) {
+func (e *Engine) SetEventEmitter(em events.Emitter) {
 	e.emitter = em
+}
+
+// SetOrgRecorder attaches the per-org metric recorder. Must be called
+// before Start.
+func (e *Engine) SetOrgRecorder(r telemetry.OrgRecorder) {
+	e.orgRec = r
 }
 
 // Mailer is the subset of the SMTP mailer the engine needs.
@@ -229,8 +238,8 @@ func (e *Engine) handleTrigger(ctx context.Context, subject string, data []byte)
 	e.createEvent(ctx, alertID, domain.EventTriggered, "", "", nil)
 	e.announce(ctx, alert)
 
-	// Emit CloudEvent (no-op if no emitter is attached).
-	if err := cloudevents.EmitAlertFired(ctx, e.emitter, alert.OrgID, types.AlertFiredV1Data{
+	// Emit the domain event (no-op if no emitter is attached).
+	if err := events.EmitAlertFired(ctx, e.emitter, alert.OrgID, events.AlertFired{
 		AlertID:   alert.ID,
 		MonitorID: alert.MonitorID,
 		Severity:  string(alert.Severity),
@@ -317,9 +326,9 @@ func (e *Engine) handleRecover(ctx context.Context, subject string, data []byte)
 	e.createEvent(ctx, alert.ID, domain.EventResolved, evt.Channel, evt.ResolvedBy, nil)
 	e.announce(ctx, alert)
 
-	// Emit CloudEvent (no-op if no emitter is attached). resolved_by is empty
+	// Emit the domain event (no-op if no emitter is attached). resolved_by is empty
 	// when a successful check resolved the alert, set for a chat button.
-	if err := cloudevents.EmitAlertResolved(ctx, e.emitter, alert.OrgID, types.AlertResolvedV1Data{
+	if err := events.EmitAlertResolved(ctx, e.emitter, alert.OrgID, events.AlertResolved{
 		AlertID:    alert.ID,
 		MonitorID:  alert.MonitorID,
 		ResolvedBy: evt.ResolvedBy,
@@ -365,7 +374,7 @@ func (e *Engine) autoResolveAlerts(ctx context.Context, monitor *domain.Monitor)
 		e.createEvent(ctx, active.ID, domain.EventResolved, "", "", nil)
 		e.announce(ctx, active)
 
-		if err := cloudevents.EmitAlertResolved(ctx, e.emitter, active.OrgID, types.AlertResolvedV1Data{
+		if err := events.EmitAlertResolved(ctx, e.emitter, active.OrgID, events.AlertResolved{
 			AlertID:    active.ID,
 			MonitorID:  active.MonitorID,
 			ResolvedAt: *active.ResolvedAt,
@@ -419,7 +428,7 @@ func (e *Engine) handleAck(ctx context.Context, subject string, data []byte) err
 	e.broadcastAcked(ctx, alert)
 	e.announce(ctx, alert)
 
-	if err := cloudevents.EmitAlertAcknowledged(ctx, e.emitter, alert.OrgID, types.AlertAcknowledgedV1Data{
+	if err := events.EmitAlertAcknowledged(ctx, e.emitter, alert.OrgID, events.AlertAcknowledged{
 		AlertID:   alert.ID,
 		MonitorID: alert.MonitorID,
 		AckedBy:   evt.UserID,
@@ -620,6 +629,9 @@ func (e *Engine) enterStep(ctx context.Context, alert *domain.Alert, monitor *do
 	if e.metrics != nil {
 		e.metrics.RecordEscalationStep(ctx, alert.OrgID, int64(step.Position))
 	}
+	if e.orgRec != nil {
+		e.orgRec.RecordEscalationStep(ctx, alert.OrgID, step.Position)
+	}
 	_ = e.store.Alerts().UpsertEscalationState(ctx, state)
 
 	alert.CurrentEscalationStep = step.ID
@@ -633,7 +645,7 @@ func (e *Engine) enterStep(ctx context.Context, alert *domain.Alert, monitor *do
 	})
 	e.createEvent(ctx, alert.ID, domain.EventEscalated, "", "", escDetail)
 
-	if err := cloudevents.EmitAlertEscalated(ctx, e.emitter, alert.OrgID, types.AlertEscalatedV1Data{
+	if err := events.EmitAlertEscalated(ctx, e.emitter, alert.OrgID, events.AlertEscalated{
 		AlertID:     alert.ID,
 		MonitorID:   alert.MonitorID,
 		StepIndex:   int64(step.Position),
@@ -832,7 +844,7 @@ func (e *Engine) createEvent(ctx context.Context, alertID string, eventType doma
 
 // stepChannelHint returns the notification channel type of the first target
 // on the step that has a channel, or "" if there is none. A step may fan out
-// to multiple channels; the CloudEvent to_channel field is a hint rather
+// to multiple channels; the event to_channel field is a hint rather
 // than an exhaustive list.
 func (e *Engine) stepChannelHint(ctx context.Context, stepID string) string {
 	targets, err := e.store.EscalationPolicies().GetTargets(ctx, stepID)

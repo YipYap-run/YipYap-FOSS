@@ -11,9 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
@@ -159,7 +158,7 @@ func validateWindow(mw *domain.MaintenanceWindow) error {
 
 type MaintenanceHandler struct {
 	store   store.Store
-	emitter cloudevents.Emitter
+	emitter events.Emitter
 }
 
 func NewMaintenanceHandler(s store.Store) *MaintenanceHandler {
@@ -167,13 +166,13 @@ func NewMaintenanceHandler(s store.Store) *MaintenanceHandler {
 }
 
 // NewMaintenanceHandlerWithEmitter builds a MaintenanceHandler that emits
-// maintenance.started.v1 / maintenance.ended.v1 CloudEvents on synchronous
+// maintenance.started.v1 / maintenance.ended.v1 events on synchronous
 // lifecycle transitions driven by API requests (create, update, delete).
 // Scheduled transitions (start_at/end_at reached without a user action) are
 // handled by the Ticker in internal/maintenance, not here.
 //
 // Pass nil for em to disable emission.
-func NewMaintenanceHandlerWithEmitter(s store.Store, em cloudevents.Emitter) *MaintenanceHandler {
+func NewMaintenanceHandlerWithEmitter(s store.Store, em events.Emitter) *MaintenanceHandler {
 	return &MaintenanceHandler{store: s, emitter: em}
 }
 
@@ -300,7 +299,7 @@ func (h *MaintenanceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// synchronously. Future-dated windows are picked up by the ticker when
 	// StartAt is reached.
 	if mw.IsActiveAt(now) {
-		_ = cloudevents.EmitMaintenanceStarted(r.Context(), h.emitter, mw.OrgID, types.MaintenanceStartedV1Data{
+		_ = events.EmitMaintenanceStarted(r.Context(), h.emitter, mw.OrgID, events.MaintenanceStarted{
 			WindowID:     mw.ID,
 			Monitors:     monitorsList(&mw),
 			StartedAt:    now,
@@ -391,14 +390,14 @@ func (h *MaintenanceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	newActive := mw.IsActiveAt(now)
 	switch {
 	case !prevActive && newActive:
-		_ = cloudevents.EmitMaintenanceStarted(r.Context(), h.emitter, mw.OrgID, types.MaintenanceStartedV1Data{
+		_ = events.EmitMaintenanceStarted(r.Context(), h.emitter, mw.OrgID, events.MaintenanceStarted{
 			WindowID:     mw.ID,
 			Monitors:     monitorsList(mw),
 			StartedAt:    now,
 			ScheduledEnd: scheduledEnd(mw),
 		})
 	case prevActive && !newActive:
-		_ = cloudevents.EmitMaintenanceEnded(r.Context(), h.emitter, mw.OrgID, types.MaintenanceEndedV1Data{
+		_ = events.EmitMaintenanceEnded(r.Context(), h.emitter, mw.OrgID, events.MaintenanceEnded{
 			WindowID:   mw.ID,
 			EndedAt:    now,
 			EndedEarly: true,
@@ -431,7 +430,7 @@ func (h *MaintenanceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if wasActive {
-		_ = cloudevents.EmitMaintenanceEnded(r.Context(), h.emitter, mw.OrgID, types.MaintenanceEndedV1Data{
+		_ = events.EmitMaintenanceEnded(r.Context(), h.emitter, mw.OrgID, events.MaintenanceEnded{
 			WindowID:   mw.ID,
 			EndedAt:    now,
 			EndedEarly: true,

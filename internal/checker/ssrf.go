@@ -26,7 +26,7 @@ var ErrControlPlanePrivateTarget = errors.New("control-plane URL cannot target p
 // monitor their own internal networks. Override via
 // YIPYAP_ALLOW_PRIVATE_TARGETS.
 //
-// This toggle does NOT govern control-plane targets (CloudEvent sink URLs,
+// This toggle does NOT govern control-plane targets (outbound sink URLs,
 // OIDC token_url / issuer / JWKS), those are gated separately by
 // AllowPrivateControlPlaneTargets. Splitting the two lets an operator run
 // intranet monitors without simultaneously opening an SSRF avenue through
@@ -34,9 +34,9 @@ var ErrControlPlanePrivateTarget = errors.New("control-plane URL cannot target p
 var AllowPrivateTargets bool
 
 // AllowPrivateControlPlaneTargets disables SSRF protection for
-// CONTROL-PLANE URLs only: CloudEvent sink_url, OIDC token_url, OIDC
+// CONTROL-PLANE URLs only: outbound sink URLs, OIDC token_url, OIDC
 // issuer, JWKS URLs. Defaults to false in every build, an operator who
-// genuinely wants to deliver CloudEvents to localhost for development
+// genuinely wants to deliver to localhost for development
 // sets YIPYAP_ALLOW_PRIVATE_CONTROL_PLANE_TARGETS=true explicitly.
 //
 // Keep this distinct from AllowPrivateTargets: monitor targets are user-
@@ -55,7 +55,7 @@ func ValidateHTTPTarget(rawURL string) error {
 }
 
 // ValidateControlPlaneHTTPTarget checks that a control-plane HTTP URL
-// (CloudEvent sink, OIDC endpoint, JWKS, etc.) does not target
+// (outbound sink, OIDC endpoint, JWKS, etc.) does not target
 // private/internal networks. Governed by AllowPrivateControlPlaneTargets,
 // crucially NOT by AllowPrivateTargets. A FOSS deployment that legitimately
 // monitors 10.0.0.0/8 does not also want attacker-submitted sink_url to

@@ -41,7 +41,7 @@ func TestContactMethodConfigSealedAtRest(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := cmClient{t, srv.URL, ceRegisterAndGetToken(t, srv, "Sealed Org", "sealed@test.com", "supersecret123")}
+	client := cmClient{t, srv.URL, signupAndGetToken(t, srv, "Sealed Org", "sealed@test.com", "supersecret123")}
 	const token = "abcdefghij0123456789ABCDEFGHIJ"
 	code, m, _ := client.do(http.MethodPost, "/users/me/contact-methods", map[string]any{
 		"type": "pushover",

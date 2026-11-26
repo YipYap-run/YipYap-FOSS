@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
@@ -212,7 +211,9 @@ func (s *MonitorStore) Delete(ctx context.Context, id string) error {
 		`DELETE FROM alert_remediations WHERE alert_id IN (SELECT id FROM alerts WHERE monitor_id = ?)`, id)
 	_, _ = s.q.ExecContext(ctx,
 		`DELETE FROM alert_suppressions WHERE monitor_id = ? OR alert_id IN (SELECT id FROM alerts WHERE monitor_id = ?)`, id, id)
-	_, _ = s.q.ExecContext(ctx, `DELETE FROM cloudevent_ingest_idempotency WHERE monitor_id = ?`, id)
+	for _, stmt := range monitorDeleteExtras {
+		_, _ = s.q.ExecContext(ctx, stmt, id)
+	}
 	if _, err := s.q.ExecContext(ctx, `DELETE FROM alerts WHERE monitor_id = ?`, id); err != nil {
 		return err
 	}
@@ -288,23 +289,6 @@ func (s *MonitorStore) DeleteLabel(ctx context.Context, monitorID, key string) e
 	_, err := s.q.ExecContext(ctx,
 		`DELETE FROM monitor_labels WHERE monitor_id = ? AND key = ?`, monitorID, key)
 	return err
-}
-
-// Disable flips enabled=false on the given monitor. The reason is captured by
-// the caller's audit log, not here; the monitors table has no disabled_reason
-// column. Returns an error if no row with that id exists.
-func (s *MonitorStore) Disable(ctx context.Context, monitorID, reason string) error {
-	if monitorID == "" {
-		return fmt.Errorf("Disable: empty monitor id")
-	}
-	_ = reason
-	res, err := s.q.ExecContext(ctx,
-		`UPDATE monitors SET enabled = ?, updated_at = ? WHERE id = ?`,
-		s.d.BoolArg(false), s.d.TimeArg(time.Now()), monitorID)
-	if err != nil {
-		return err
-	}
-	return ExpectOneRow(res)
 }
 
 func scanMonitorRow(r Scanner) (*domain.Monitor, error) {

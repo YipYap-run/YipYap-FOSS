@@ -21,7 +21,7 @@ type AllowPolicy func() bool
 func MonitorTargetPolicy() bool { return AllowPrivateTargets }
 
 // ControlPlanePolicy follows AllowPrivateControlPlaneTargets, the toggle
-// behind ValidateControlPlaneHTTPTarget (CloudEvent sinks, OIDC URLs).
+// behind ValidateControlPlaneHTTPTarget (outbound sinks, OIDC URLs).
 func ControlPlanePolicy() bool { return AllowPrivateControlPlaneTargets }
 
 // guardedControl returns a net.Dialer Control hook that rejects the
@@ -111,7 +111,7 @@ func guardedDialContext(allow AllowPolicy) func(ctx context.Context, network, ad
 }
 
 // NewGuardedHTTPClient returns the HTTP client for requests to URLs that
-// an org member typed in (webhooks, ntfy servers, CloudEvent sinks, OIDC
+// an org member typed in (webhooks, ntfy servers, outbound sinks, OIDC
 // token endpoints). Unless allow reports true:
 //
 //   - every TCP connect is refused when the peer IP is loopback, private,

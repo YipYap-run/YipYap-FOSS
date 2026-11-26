@@ -65,7 +65,7 @@ func TestUserListPagedWithTotal(t *testing.T) {
 	ts, s := setupTestServer(t)
 	ctx := context.Background()
 
-	ownerToken := selfServiceRegisterAndGetToken(t, ts, "ListOrg", "owner@list.test", "ownerpass1")
+	ownerToken := selfServisignupAndGetToken(t, ts, "ListOrg", "owner@list.test", "ownerpass1")
 	owner, err := s.Users().GetByEmail(ctx, "owner@list.test")
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestUserListPagedWithTotal(t *testing.T) {
 		lastID = u.ID
 	}
 	admin := seedOrgUser(t, s, owner.OrgID, "zed.admin@list.test", "adminpass1", domain.RoleAdmin, "")
-	selfServiceRegisterAndGetToken(t, ts, "OtherOrg", "owner@other.test", "otherpass1")
+	selfServisignupAndGetToken(t, ts, "OtherOrg", "owner@other.test", "otherpass1")
 	outsider, err := s.Users().GetByEmail(ctx, "owner@other.test")
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestTransferOwnership(t *testing.T) {
 	ts, s := setupTestServer(t)
 	ctx := context.Background()
 
-	ownerToken := selfServiceRegisterAndGetToken(t, ts, "XferOrg", "owner@xfer.test", "ownerpass1")
+	ownerToken := selfServisignupAndGetToken(t, ts, "XferOrg", "owner@xfer.test", "ownerpass1")
 	owner, err := s.Users().GetByEmail(ctx, "owner@xfer.test")
 	if err != nil {
 		t.Fatal(err)

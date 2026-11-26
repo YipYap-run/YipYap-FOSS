@@ -111,16 +111,6 @@ export function testSentMessage(resp) {
   return 'Test notification sent';
 }
 
-// A CloudEvents test whose Event Types Filter leaves out the type Test sends
-// is not delivered. The API answers { filtered: true, event_type } so the
-// page can say why nothing arrived. Returns copy, or null for any other
-// response.
-export function testFilteredMessage(resp) {
-  if (!resp || resp.filtered !== true) return null;
-  const t = typeof resp.event_type === 'string' && resp.event_type ? resp.event_type : 'the test event';
-  return 'Nothing was sent. Test sends ' + t + ', and this channel\'s Event Types Filter does not match it. Add "run.yipyap.alert.*" to the filter to test this channel.';
-}
-
 // testFailureNote is the row note for a Test that was sent and failed. It
 // stays under the row until dismissed or the next Test, so the reason is
 // not lost to a timer.

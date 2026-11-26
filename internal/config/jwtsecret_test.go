@@ -199,6 +199,8 @@ func withDriver(c Config, driver string) Config {
 }
 
 func TestResolveDataDir(t *testing.T) {
+	stubUserDataDir(t, "/home/u/.config/yipyap")
+	t.Chdir(t.TempDir())
 	tests := []struct {
 		name string
 		cfg  Config
@@ -206,10 +208,11 @@ func TestResolveDataDir(t *testing.T) {
 	}{
 		{"explicit wins", Config{DataDir: "/srv/yy", DBDsn: "/data/yipyap.db"}, "/srv/yy"},
 		{"sqlite absolute", Config{DBDsn: "/data/yipyap.db"}, "/data"},
-		{"sqlite relative", Config{DBDsn: "yipyap.db"}, "."},
+		{"sqlite bare file uses the user dir", Config{DBDsn: "yipyap.db"}, "/home/u/.config/yipyap"},
+		{"sqlite relative dir", Config{DBDsn: "state/yipyap.db"}, "state"},
 		{"sqlite file uri", Config{DBDsn: "file:/var/lib/yy/db.sqlite?_pragma=busy_timeout(5000)"}, "/var/lib/yy"},
-		{"sqlite memory", Config{DBDsn: ":memory:"}, "."},
-		{"sqlite shared memory", Config{DBDsn: "file::memory:?cache=shared"}, "."},
+		{"sqlite memory", Config{DBDsn: ":memory:"}, "/home/u/.config/yipyap"},
+		{"sqlite shared memory", Config{DBDsn: "file::memory:?cache=shared"}, "/home/u/.config/yipyap"},
 		{"explicit sqlite driver", withDriver(Config{DBDsn: "/data/yipyap.db"}, "sqlite"), "/data"},
 		{"postgres needs an explicit dir", withDriver(Config{DBDsn: "postgres://u:p@db:5432/yy"}, "postgres"), ""},
 		{"postgres with explicit dir", withDriver(Config{DataDir: "/srv/yy", DBDsn: "postgres://u:p@db:5432/yy"}, "postgres"), "/srv/yy"},
@@ -274,5 +277,53 @@ func TestStoredSecretModeIsTightened(t *testing.T) {
 	}
 	if fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+func stubUserDataDir(t *testing.T, dir string) {
+	t.Helper()
+	old := userDataDir
+	userDataDir = func() string { return dir }
+	t.Cleanup(func() { userDataDir = old })
+}
+
+// An install that already keeps jwt_secret in the working directory (bare
+// SQLite DSN) keeps using it, so upgrading does not sign everyone out.
+func TestResolveDataDirKeepsLegacyWorkingDirSecret(t *testing.T) {
+	stubUserDataDir(t, "/home/u/.config/yipyap")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(JWTSecretFile, []byte(strings.Repeat("a", 64)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := (&Config{DBDsn: "yipyap.db"}).ResolveDataDir(); got != "." {
+		t.Fatalf("got %q, want . (existing secret)", got)
+	}
+}
+
+func TestResolveDataDirNoUserDir(t *testing.T) {
+	stubUserDataDir(t, "")
+	t.Chdir(t.TempDir())
+	if got := (&Config{DBDsn: ":memory:"}).ResolveDataDir(); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+// A generated secret is never written into a source checkout.
+func TestResolveJWTSecretRefusesSourceTree(t *testing.T) {
+	for _, marker := range []string{"go.mod", ".git"} {
+		t.Run(marker, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, marker), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, _, _, err := ResolveJWTSecret(JWTSecretOptions{DataDir: dir, AllowGenerate: true})
+			if err == nil || !strings.Contains(err.Error(), "YIPYAP_DATA_DIR") || !strings.Contains(err.Error(), marker) {
+				t.Fatalf("err = %v, want a refusal naming YIPYAP_DATA_DIR and %s", err, marker)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, JWTSecretFile)); statErr == nil {
+				t.Fatal("secret written into the source tree")
+			}
+		})
 	}
 }

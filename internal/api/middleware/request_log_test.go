@@ -18,24 +18,24 @@ func TestRequestLogOmitsPathParamsAndQuery(t *testing.T) {
 	r := chi.NewRouter()
 	r.Use(RequestLog(logger))
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/cloudevents/ingest/{token}", func(w http.ResponseWriter, _ *http.Request) {
+		r.Post("/heartbeat/{token}", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusAccepted)
 		})
 	})
 
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/cloudevents/ingest/ingest-secret-abc?token=query-secret-xyz", nil)
+		"/api/v1/heartbeat/path-secret-abc?token=query-secret-xyz", nil)
 	req.RemoteAddr = "203.0.113.7:51234"
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
 	line := buf.String()
-	for _, secret := range []string{"ingest-secret-abc", "query-secret-xyz"} {
+	for _, secret := range []string{"path-secret-abc", "query-secret-xyz"} {
 		if strings.Contains(line, secret) {
 			t.Fatalf("log line leaks %q: %s", secret, line)
 		}
 	}
 	for _, want := range []string{
-		`"route":"/api/v1/cloudevents/ingest/{token}"`,
+		`"route":"/api/v1/heartbeat/{token}"`,
 		`"method":"POST"`,
 		`"status":202`,
 		`"client_ip":"203.0.113.7"`,

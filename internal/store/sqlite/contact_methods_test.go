@@ -291,30 +291,99 @@ func TestContactMethodSendBudget(t *testing.T) {
 	now := time.Now().UTC()
 
 	for i := 0; i < 3; i++ {
-		ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, now, false, 3, 100)
+		ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, now, "", 3, 100, 10)
 		if err != nil || !ok {
 			t.Fatalf("reserve %d = %v, %v", i, ok, err)
 		}
 	}
-	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, now, false, 3, 100); err != nil || ok {
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, now, "", 3, 100, 10); err != nil || ok {
 		t.Fatalf("over-budget reserve = %v, %v", ok, err)
 	}
-	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, org.ID, now, false, 3, 100); err != nil || !ok {
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, org.ID, now, "", 3, 100, 10); err != nil || !ok {
 		t.Fatalf("other user reserve = %v, %v", ok, err)
 	}
 
 	nextDay := now.AddDate(0, 0, 1)
-	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, nextDay, false, 3, 100); err != nil || !ok {
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, nextDay, "", 3, 100, 10); err != nil || !ok {
 		t.Fatalf("next-day reserve = %v, %v", ok, err)
 	}
 
-	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, now, true, 100, 2); err != nil || !ok {
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, org.ID, now, "+15555550100", 100, 2, 10); err != nil || !ok {
 		t.Fatalf("org sms 1 = %v, %v", ok, err)
 	}
-	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, org.ID, now, true, 100, 2); err != nil || !ok {
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, org.ID, now, "+15555550100", 100, 2, 10); err != nil || !ok {
 		t.Fatalf("org sms 2 = %v, %v", ok, err)
 	}
-	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, org.ID, now, true, 100, 2); err != nil || ok {
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, org.ID, now, "+15555550100", 100, 2, 10); err != nil || ok {
 		t.Fatalf("org sms over budget = %v, %v", ok, err)
+	}
+}
+
+// Migration 077 seeds verified users who have no contact method (SSO users
+// provisioned before the fix) and leaves users with a method alone.
+func TestSSOEmailMethodBackfill(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	org := createTestOrg(t, s)
+	bare := createTestUser(t, s, org.ID)
+	other := createTestUser(t, s, org.ID)
+	for _, id := range []string{bare.ID, other.ID} {
+		if _, err := s.db.ExecContext(ctx, `UPDATE users SET email_verified_at = ? WHERE id = ?`, timeNowUTC(), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// other already has a deliberate setup: one SMS method, no rules.
+	if err := s.ContactMethods().Create(ctx, newContactMethod(other.ID, org.ID, domain.ContactSMS, `{"phone":"+15555550100"}`, true)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := migrationsFS.ReadFile("migrations/077_backfill_sso_email_methods.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for run := 0; run < 2; run++ {
+		for _, stmt := range store.SplitSQLStatements(string(data)) {
+			if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+				t.Fatalf("run %d: %v", run, err)
+			}
+		}
+	}
+	targets, err := s.NotificationRules().ListPagingTargets(ctx, bare.ID)
+	if err != nil || len(targets) != 1 || targets[0].Method.Type != domain.ContactEmail {
+		t.Fatalf("backfill targets = %+v, %v", targets, err)
+	}
+	methods, _ := s.ContactMethods().ListByUser(ctx, other.ID)
+	rules, _ := s.NotificationRules().ListByUser(ctx, other.ID)
+	if len(methods) != 1 || len(rules) != 0 {
+		t.Fatalf("user with a method changed: %d methods, %d rules", len(methods), len(rules))
+	}
+}
+
+// Codes to one number are capped per day across orgs, and a refused
+// reservation gives back the units it already took.
+func TestContactMethodSendBudgetPerPhoneAcrossOrgs(t *testing.T) {
+	s := setupTestDB(t)
+	ctx := context.Background()
+	orgA, orgB := createTestOrg(t, s), createTestOrg(t, s)
+	alice := createTestUser(t, s, orgA.ID)
+	bob := createTestUser(t, s, orgB.ID)
+	now := time.Now().UTC()
+	const phone = "+15555550199"
+
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, alice.ID, orgA.ID, now, phone, 100, 100, 2); err != nil || !ok {
+		t.Fatalf("org A = %v, %v", ok, err)
+	}
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, orgB.ID, now, phone, 100, 100, 2); err != nil || !ok {
+		t.Fatalf("org B = %v, %v", ok, err)
+	}
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, orgB.ID, now, phone, 2, 100, 2); err != nil || ok {
+		t.Fatalf("third code to the same number = %v, %v, want refused", ok, err)
+	}
+	// Bob's user unit taken before the phone refusal was returned: with a
+	// user limit of 2 he can still send one non-phone code.
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, orgB.ID, now, "", 2, 100, 2); err != nil || !ok {
+		t.Fatalf("user budget leaked on refusal = %v, %v", ok, err)
+	}
+	if ok, err := s.ContactMethods().ReserveSendBudget(ctx, bob.ID, orgB.ID, now, "+15555550198", 100, 100, 2); err != nil || !ok {
+		t.Fatalf("other number = %v, %v", ok, err)
 	}
 }

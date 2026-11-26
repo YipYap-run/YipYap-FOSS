@@ -13,6 +13,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/bus"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
+	"github.com/YipYap-run/YipYap-FOSS/internal/telemetry"
 )
 
 // DispatcherMetrics records notification metrics. Pass nil to disable.
@@ -37,6 +38,7 @@ type Dispatcher struct {
 	dedup             store.DedupStore  // DB-backed dedup (nil falls back to in-memory)
 	outbox            store.OutboxStore // DB-backed outbox (nil disables polling)
 	metrics           DispatcherMetrics
+	orgRec            telemetry.OrgRecorder
 	recorder          OutcomeRecorder
 	workerID          string // unique identifier for this instance
 	mu                sync.RWMutex
@@ -78,6 +80,27 @@ func WithOutbox(o store.OutboxStore) DispatcherOption {
 // WithMetrics enables metrics recording on the dispatcher.
 func WithMetrics(m DispatcherMetrics) DispatcherOption {
 	return func(d *Dispatcher) { d.metrics = m }
+}
+
+// WithOrgRecorder records notification outcomes for each org's own OTLP
+// export. Only jobs built from the org's notification channels count;
+// staff and support notifications that name an org do not.
+func WithOrgRecorder(r telemetry.OrgRecorder) DispatcherOption {
+	return func(d *Dispatcher) { d.orgRec = r }
+}
+
+// SetOrgRecorder is WithOrgRecorder for an existing dispatcher. Call it
+// before Start.
+func (d *Dispatcher) SetOrgRecorder(r telemetry.OrgRecorder) { d.orgRec = r }
+
+// recordOrgOutcome counts job for its org's export. A job without a
+// ChannelID did not come from the org's channels (support, staff alerts,
+// tests) and is skipped.
+func (d *Dispatcher) recordOrgOutcome(job domain.NotificationJob, sent bool) {
+	if d.orgRec == nil || job.OrgID == "" || job.ChannelID == "" {
+		return
+	}
+	d.orgRec.RecordNotification(context.Background(), job.OrgID, job.Channel, sent)
 }
 
 // WithRecorder records each successful send (timeline event and channel
@@ -306,6 +329,7 @@ func (d *Dispatcher) dispatch(job domain.NotificationJob, done DoneFunc) error {
 			if d.metrics != nil {
 				d.metrics.IncNotificationSent(context.Background(), job.OrgID)
 			}
+			d.recordOrgOutcome(job, true)
 			d.recordSent(job)
 		} else if key != "" {
 			d.release(key)
@@ -552,6 +576,7 @@ func (d *Dispatcher) handleDeadLetter(job domain.NotificationJob, err error) {
 	if d.metrics != nil {
 		d.metrics.IncNotificationFail(context.Background(), job.OrgID)
 	}
+	d.recordOrgOutcome(job, false)
 
 	slog.Error("notification dead letter",
 		"job_id", job.ID,

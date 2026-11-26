@@ -66,9 +66,9 @@ func createPatchTestPolicy(t *testing.T, url, token string) string {
 // decoded into domain.Monitor, so a body with only a name set enabled to
 // false and cleared the escalation policy, description and runbook.
 func TestMonitorPatch_OmittedFieldsKeepValues(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "PatchOrg", "patch@test.com", "supersecret123")
-	ceBumpToProByEmail(t, s, "patch@test.com")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "PatchOrg", "patch@test.com", "supersecret123")
+	bumpToProByEmail(t, s, "patch@test.com")
 	policyID := createPatchTestPolicy(t, ts.URL, token)
 
 	resp := doJSONReq(t, http.MethodPost, ts.URL+"/api/v1/monitors", token, map[string]any{
@@ -140,9 +140,9 @@ func TestMonitorPatch_OmittedFieldsKeepValues(t *testing.T) {
 // TestMonitorPatch_RejectsBadValues checks the 400s the pointer struct
 // makes possible: a sent-but-invalid value is an error, not a no-op.
 func TestMonitorPatch_RejectsBadValues(t *testing.T) {
-	ts, s, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, ts, "PatchBad", "patchbad@test.com", "supersecret123")
-	ceBumpToProByEmail(t, s, "patchbad@test.com")
+	ts, s, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, ts, "PatchBad", "patchbad@test.com", "supersecret123")
+	bumpToProByEmail(t, s, "patchbad@test.com")
 
 	resp := doJSONReq(t, http.MethodPost, ts.URL+"/api/v1/monitors", token, map[string]any{
 		"name": "hb", "type": "heartbeat", "interval_seconds": 300, "enabled": true,

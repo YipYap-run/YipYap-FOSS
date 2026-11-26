@@ -13,6 +13,7 @@ import { StaffSessionBanner, MFAGraceBanner } from '../edition/mfa-ui';
 import { PromoBanner } from './promo-banner';
 import { SSOLinkBanner } from './sso-link-banner';
 import { theme, toggleTheme } from '../state/theme';
+import { EVENTING_NAV_ITEMS } from '../edition/eventing.mjs';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: 'grid' },
@@ -21,7 +22,7 @@ const NAV_ITEMS = [
   { href: '/incidents', label: 'Incidents', icon: 'megaphone', saasOnly: true, paidOnly: true },
   { href: '/oncall', label: 'On-Call', icon: 'phone', saasOnly: true },
   { href: '/services', label: 'Services', icon: 'layers', saasOnly: true },
-  { href: '/admin/reply-activity', label: 'Reply Activity', icon: 'activity', saasOnly: true, ownerAdminOnly: true },
+  ...EVENTING_NAV_ITEMS,
   { href: '/support', label: 'Support', icon: 'help-circle', saasOnly: true },
   { href: '/settings', label: 'Settings', icon: 'settings' },
 ];

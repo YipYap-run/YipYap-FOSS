@@ -1,5 +1,5 @@
 // Package jwks implements the self-hosted OIDC identity-provider surface
-// yipyap SaaS uses to sign CloudEvent reply tokens. It owns:
+// yipyap SaaS uses to sign outbound tokens. It owns:
 //
 //   - signing-key generation and envelope-encrypted persistence
 //   - weekly rotation with a two-week overlap window

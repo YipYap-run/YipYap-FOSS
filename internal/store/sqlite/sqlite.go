@@ -143,11 +143,4 @@ func (s *SQLiteStore) Stats() store.StatsStore                         { return 
 func (s *SQLiteStore) MFA() store.MFAStore                             { return sqlx.NewMFAStore(s.q, dialect) }
 func (s *SQLiteStore) OrgSettings() store.OrgSettingsStore              { return sqlx.NewOrgSettingsStore(s.q, dialect) }
 func (s *SQLiteStore) Sessions() store.SessionStore { return sqlx.NewSessionStore(s.q, dialect) }
-func (s *SQLiteStore) CloudEventIngest() store.CloudEventIngest          { return sqlx.NewCloudEventIngestStore(s.q, dialect) }
-func (s *SQLiteStore) CloudEventPositions() store.CloudEventPositionStore { return sqlx.NewCloudEventPositionStore(s.q, dialect) }
-func (s *SQLiteStore) CloudEventReplyAudit() store.CloudEventReplyAudit  { return sqlx.NewCloudEventReplyAuditStore(s.q, dialect) }
-func (s *SQLiteStore) AlertSuppressions() store.AlertSuppressionStore    { return sqlx.NewAlertSuppressionStore(s.q, dialect) }
-func (s *SQLiteStore) AlertRemediations() store.AlertRemediationStore    { return sqlx.NewAlertRemediationStore(s.q, dialect) }
-func (s *SQLiteStore) AlertRoutingRules() store.AlertRoutingRuleStore    { return sqlx.NewAlertRoutingRuleStore(s.q, dialect) }
-func (s *SQLiteStore) AlertStatusPageRefs() store.AlertStatusPageRefStore { return sqlx.NewAlertStatusPageRefStore(s.q, dialect) }
 func (s *SQLiteStore) OIDCSigningKeys() store.OIDCSigningKeyStore        { return sqlx.NewOIDCSigningKeyStore(s.q, dialect) }

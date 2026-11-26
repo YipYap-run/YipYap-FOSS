@@ -13,8 +13,8 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/handlers"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store/sqlite"
 )
 
@@ -29,64 +29,64 @@ type captureEmitter struct {
 	captured []capturedEmit
 }
 
-func (c *captureEmitter) EmitAlertFired(_ context.Context, orgID string, d types.AlertFiredV1Data) error {
+func (c *captureEmitter) EmitAlertFired(_ context.Context, orgID string, d events.AlertFired) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeAlertFiredV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "alert.fired", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitAlertAcknowledged(_ context.Context, orgID string, d types.AlertAcknowledgedV1Data) error {
+func (c *captureEmitter) EmitAlertAcknowledged(_ context.Context, orgID string, d events.AlertAcknowledged) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeAlertAcknowledgedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "alert.acknowledged", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitAlertResolved(_ context.Context, orgID string, d types.AlertResolvedV1Data) error {
+func (c *captureEmitter) EmitAlertResolved(_ context.Context, orgID string, d events.AlertResolved) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeAlertResolvedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "alert.resolved", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitAlertEscalated(_ context.Context, orgID string, d types.AlertEscalatedV1Data) error {
+func (c *captureEmitter) EmitAlertEscalated(_ context.Context, orgID string, d events.AlertEscalated) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeAlertEscalatedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "alert.escalated", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitMonitorUp(_ context.Context, orgID, _ string, d types.MonitorUpV1Data) error {
+func (c *captureEmitter) EmitMonitorUp(_ context.Context, orgID, _ string, d events.MonitorUp) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMonitorUpV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "monitor.up", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitMonitorDown(_ context.Context, orgID, _ string, d types.MonitorDownV1Data) error {
+func (c *captureEmitter) EmitMonitorDown(_ context.Context, orgID, _ string, d events.MonitorDown) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMonitorDownV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "monitor.down", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitMonitorDegraded(_ context.Context, orgID, _ string, d types.MonitorDegradedV1Data) error {
+func (c *captureEmitter) EmitMonitorDegraded(_ context.Context, orgID, _ string, d events.MonitorDegraded) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMonitorDegradedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "monitor.degraded", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitMonitorHeartbeatMissed(_ context.Context, orgID, _ string, d types.MonitorHeartbeatMissedV1Data) error {
+func (c *captureEmitter) EmitMonitorHeartbeatMissed(_ context.Context, orgID, _ string, d events.MonitorHeartbeatMissed) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMonitorHeartbeatMissedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "monitor.heartbeat_missed", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitMaintenanceStarted(_ context.Context, orgID string, d types.MaintenanceStartedV1Data) error {
+func (c *captureEmitter) EmitMaintenanceStarted(_ context.Context, orgID string, d events.MaintenanceStarted) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMaintenanceStartedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "maintenance.started", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *captureEmitter) EmitMaintenanceEnded(_ context.Context, orgID string, d types.MaintenanceEndedV1Data) error {
+func (c *captureEmitter) EmitMaintenanceEnded(_ context.Context, orgID string, d events.MaintenanceEnded) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMaintenanceEndedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "maintenance.ended", OrgID: orgID, Data: d})
 	return nil
 }
 
@@ -173,13 +173,13 @@ func TestAlertHandler_Ack_EmitsAcknowledged(t *testing.T) {
 		t.Fatalf("expected 1 emit, got %d", len(captured))
 	}
 	got := captured[0]
-	if got.Type != types.TypeAlertAcknowledgedV1 {
+	if got.Type != "alert.acknowledged" {
 		t.Errorf("type: %q", got.Type)
 	}
 	if got.OrgID != alert.OrgID {
 		t.Errorf("org: %q want %q", got.OrgID, alert.OrgID)
 	}
-	d, ok := got.Data.(types.AlertAcknowledgedV1Data)
+	d, ok := got.Data.(events.AlertAcknowledged)
 	if !ok {
 		t.Fatalf("bad data type %T", got.Data)
 	}
@@ -213,10 +213,10 @@ func TestAlertHandler_Resolve_EmitsResolved(t *testing.T) {
 		t.Fatalf("expected 1 emit, got %d", len(captured))
 	}
 	got := captured[0]
-	if got.Type != types.TypeAlertResolvedV1 {
+	if got.Type != "alert.resolved" {
 		t.Errorf("type: %q", got.Type)
 	}
-	d, ok := got.Data.(types.AlertResolvedV1Data)
+	d, ok := got.Data.(events.AlertResolved)
 	if !ok {
 		t.Fatalf("bad data type %T", got.Data)
 	}

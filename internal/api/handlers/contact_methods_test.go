@@ -15,6 +15,7 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
 	"github.com/YipYap-run/YipYap-FOSS/internal/contactmethod"
+	"github.com/YipYap-run/YipYap-FOSS/internal/crypto"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store/sqlite"
 )
@@ -65,11 +66,19 @@ type cmFixture struct {
 	other  cmClient // owner of a different org
 }
 
+// cmTestEnvelopeHex is the notification key of the contact method fixture.
+// The SaaS build refuses to store contact method secrets without one.
+var cmTestEnvelopeHex = strings.Repeat("22", 32)
+
 func newCMFixture(t *testing.T) cmFixture {
 	t.Helper()
-	srv, s, sender := setupCloudEventTestServer(t)
-	owner := cmClient{t, srv.URL, ceRegisterAndGetToken(t, srv, "CM Org", "cm-owner@test.com", "supersecret123")}
-	other := cmClient{t, srv.URL, ceRegisterAndGetToken(t, srv, "CM Other", "cm-other@test.com", "supersecret123")}
+	env, err := crypto.NewEnvelopeFromHex(cmTestEnvelopeHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, s, sender := setupChannelTestServerWith(t, env)
+	owner := cmClient{t, srv.URL, signupAndGetToken(t, srv, "CM Org", "cm-owner@test.com", "supersecret123")}
+	other := cmClient{t, srv.URL, signupAndGetToken(t, srv, "CM Other", "cm-other@test.com", "supersecret123")}
 	code, obj, _ := owner.do(http.MethodPost, "/users/invites", map[string]any{
 		"email": "cm-member@test.com", "role": "member",
 	})

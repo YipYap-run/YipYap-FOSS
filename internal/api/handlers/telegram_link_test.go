@@ -170,7 +170,7 @@ func (e *telegramLinkEnv) channelsOf(org *domain.Org) []*domain.NotificationChan
 func TestTelegramLinkCreatesChannelWithChatTitle(t *testing.T) {
 	env := newTelegramLinkEnv(t)
 	code := env.createCode(env.orgA, map[string]any{"name": "Ops Telegram"})
-	if len(code.Code) != telegramLinkCodeLen || code.Command != "/link "+code.Code || code.Status != "pending" {
+	if len(code.Code) != telegramLinkCodeLen || code.Command != "/link@YipYapBot "+code.Code || code.Status != "pending" {
 		t.Fatalf("code response = %+v", code)
 	}
 	if code.GroupLink != "https://t.me/YipYapBot?startgroup="+code.Code || code.PrivateLink != "https://t.me/YipYapBot?start="+code.Code {
@@ -209,7 +209,7 @@ func TestTelegramLinkCreatesChannelWithChatTitle(t *testing.T) {
 func TestTelegramLinkCodeIsSingleUse(t *testing.T) {
 	env := newTelegramLinkEnv(t)
 	code := env.createCode(env.orgA, map[string]any{"name": "Ops"})
-	if reply := env.sendMessage(-1001, "group", "First", "/link "+code.Code); !strings.Contains(reply, "Linked") {
+	if reply := env.sendMessage(-1001, "group", "First", code.Command); !strings.Contains(reply, "Linked") {
 		t.Fatalf("first reply = %q", reply)
 	}
 	reply := env.sendMessage(-2002, "group", "Second", "/link "+code.Code)

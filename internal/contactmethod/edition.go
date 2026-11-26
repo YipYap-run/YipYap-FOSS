@@ -22,3 +22,7 @@ func PaidOnly(domain.ContactMethodType) bool { return false }
 
 // PlanError is a no-op in the self-hosted edition.
 func PlanError(context.Context, store.Store, string, domain.ContactMethodType) error { return nil }
+
+// requireSealing is false for self-hosted installs: without
+// YIPYAP_NOTIFICATION_KEY secrets are stored as is, and startup warns.
+const requireSealing = false

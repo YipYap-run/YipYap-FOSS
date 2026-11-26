@@ -9,8 +9,8 @@ import (
 // The policy form saves a description; it must come back from create, get,
 // list and update, and a PATCH without it must leave it alone (ux-9).
 func TestEscalationPolicyDescriptionRoundTrip(t *testing.T) {
-	srv, _, _ := setupCloudEventTestServer(t)
-	c := cmClient{t, srv.URL, ceRegisterAndGetToken(t, srv, "Desc Org", "desc@test.com", "supersecret123")}
+	srv, _, _ := setupChannelTestServer(t)
+	c := cmClient{t, srv.URL, signupAndGetToken(t, srv, "Desc Org", "desc@test.com", "supersecret123")}
 
 	code, created, _ := c.do(http.MethodPost, "/escalation-policies", map[string]any{
 		"name": "  Payments  ", "description": "  Pages the payments on-call first.  ",
@@ -51,8 +51,8 @@ func TestEscalationPolicyDescriptionRoundTrip(t *testing.T) {
 }
 
 func TestEscalationPolicyFieldValidation(t *testing.T) {
-	srv, _, _ := setupCloudEventTestServer(t)
-	c := cmClient{t, srv.URL, ceRegisterAndGetToken(t, srv, "Val Org", "polval@test.com", "supersecret123")}
+	srv, _, _ := setupChannelTestServer(t)
+	c := cmClient{t, srv.URL, signupAndGetToken(t, srv, "Val Org", "polval@test.com", "supersecret123")}
 
 	code, body, _ := c.do(http.MethodPost, "/escalation-policies", map[string]any{"name": "   "})
 	if code != http.StatusBadRequest || body["field"] != "name" {

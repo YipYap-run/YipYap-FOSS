@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
@@ -368,94 +366,6 @@ func (s *AlertStore) ListPagedTargets(ctx context.Context, alertID string) ([]*d
 func (s *AlertStore) DeletePagedTarget(ctx context.Context, alertID, targetKey string) error {
 	_, err := s.q.ExecContext(ctx, `DELETE FROM alert_paged_targets WHERE alert_id = ? AND target_key = ?`, alertID, targetKey)
 	return err
-}
-
-func (s *AlertStore) MarkDuplicate(ctx context.Context, alertID, duplicateOfID, reason string) error {
-	if alertID == "" || duplicateOfID == "" {
-		return fmt.Errorf("MarkDuplicate: empty alert id or duplicate_of")
-	}
-	res, err := s.q.ExecContext(ctx,
-		`UPDATE alerts SET duplicate_of = ? WHERE id = ?`,
-		duplicateOfID, alertID)
-	if err != nil {
-		return err
-	}
-	if err := ExpectOneRow(res); err != nil {
-		return err
-	}
-	detail, _ := json.Marshal(map[string]string{
-		"duplicate_of": duplicateOfID,
-		"reason":       reason,
-	})
-	return s.CreateEvent(ctx, &domain.AlertEvent{
-		ID:        uuid.New().String(),
-		AlertID:   alertID,
-		EventType: domain.EventDuplicated,
-		Detail:    detail,
-		CreatedAt: time.Now().UTC(),
-	})
-}
-
-func (s *AlertStore) SetOwner(ctx context.Context, alertID, ownerKind, ownerID, reason string) error {
-	if alertID == "" {
-		return fmt.Errorf("SetOwner: empty alert id")
-	}
-	res, err := s.q.ExecContext(ctx,
-		`UPDATE alerts SET owner_kind = ?, owner_id = ? WHERE id = ?`,
-		ownerKind, ownerID, alertID)
-	if err != nil {
-		return err
-	}
-	if err := ExpectOneRow(res); err != nil {
-		return err
-	}
-	detail, _ := json.Marshal(map[string]string{
-		"owner_kind": ownerKind,
-		"owner_id":   ownerID,
-		"reason":     reason,
-	})
-	return s.CreateEvent(ctx, &domain.AlertEvent{
-		ID:        uuid.New().String(),
-		AlertID:   alertID,
-		EventType: domain.EventOwnershipTransferred,
-		Detail:    detail,
-		CreatedAt: time.Now().UTC(),
-	})
-}
-
-func (s *AlertStore) AckWithContext(ctx context.Context, alertID, reasonCode, note, referenceID, ackedBy string) error {
-	if alertID == "" {
-		return fmt.Errorf("AckWithContext: empty alert id")
-	}
-	now := time.Now().UTC()
-	res, err := s.q.ExecContext(ctx,
-		`UPDATE alerts
-		 SET status = 'acknowledged',
-		     acknowledged_at = ?,
-		     acknowledged_by = ?,
-		     ack_reason_code = ?,
-		     ack_reference_id = ?
-		 WHERE id = ?`,
-		s.d.TimeArg(now), ackedBy, reasonCode, referenceID, alertID)
-	if err != nil {
-		return err
-	}
-	if err := ExpectOneRow(res); err != nil {
-		return err
-	}
-	detail, _ := json.Marshal(map[string]string{
-		"reason_code":  reasonCode,
-		"note":         note,
-		"reference_id": referenceID,
-		"acked_by":     ackedBy,
-	})
-	return s.CreateEvent(ctx, &domain.AlertEvent{
-		ID:        uuid.New().String(),
-		AlertID:   alertID,
-		EventType: domain.EventAckWithContext,
-		Detail:    detail,
-		CreatedAt: now,
-	})
 }
 
 func scanAlert(r Scanner) (*domain.Alert, error) {

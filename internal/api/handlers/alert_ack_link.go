@@ -26,7 +26,7 @@ const maxAckTokenLen = 2048
 // GET only shows a confirm page, so mail scanners and link previews that
 // fetch the URL do not acknowledge anything. POST performs the ack through
 // the escalation engine (the same alert.ack path as the chat buttons), which
-// writes the timeline entry, emits the CloudEvent, and notifies live views.
+// writes the timeline entry, emits the domain event, and notifies live views.
 type AckLinkHandler struct {
 	store  store.Store
 	jwt    *auth.JWTIssuer

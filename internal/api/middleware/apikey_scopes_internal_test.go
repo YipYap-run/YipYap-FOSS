@@ -24,7 +24,6 @@ func TestNormalizeAPIKeyScopes(t *testing.T) {
 		{in: []string{"alerts:read", " monitors:write ", "monitors:read"}, want: []string{"monitors:write", "alerts:read"}},
 		{in: []string{"monitors:write", "full-access"}, want: []string{"full-access"}},
 		{in: []string{"alerts:read", "read-only", "monitors:write"}, want: []string{"read-only", "monitors:write"}},
-		{in: []string{"events:read", "events:read"}, want: []string{"events:read"}},
 	}
 	for _, c := range cases {
 		got, err := NormalizeAPIKeyScopes(c.in)
@@ -106,9 +105,6 @@ func TestAPIKeyRouteAllowed(t *testing.T) {
 		{"legacy empty still closed on account routes", nil, http.MethodPut, "/api/v1/auth/email", false},
 		{"legacy bare resource", []string{"alerts"}, http.MethodPost, "/api/v1/alerts/a1/resolve", true},
 		{"legacy read", []string{"read"}, http.MethodGet, "/api/v1/schedules", true},
-		{"event stream via events", []string{"events:read"}, http.MethodGet, "/api/v1/cloudevents/poll", true},
-		{"event stream via monitors read", []string{"monitors:read"}, http.MethodGet, "/api/v1/knative/source-config", true},
-		{"event stream without grant", []string{"teams:read"}, http.MethodGet, "/api/v1/cloudevents/stream", false},
 		{"prefix is segment aligned", []string{"monitors:read"}, http.MethodGet, "/api/v1/monitorsx", false},
 	}
 	for _, c := range cases {

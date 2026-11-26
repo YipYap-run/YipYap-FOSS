@@ -41,7 +41,7 @@ func setupEmailChannelServer(t *testing.T, withPlatform bool) (*httptest.Server,
 	// and returns no token, so register through a mailer-less server that
 	// shares the store and signing key.
 	regSrv := httptest.NewServer(api.NewServer(s, jwt, bus.NewChannel(), nil, nil, "", "", api.ServerOptions{RegistrationEnabled: true}))
-	token := ceRegisterAndGetToken(t, regSrv, "EmailOrg", "owner@email.test", "supersecret123")
+	token := signupAndGetToken(t, regSrv, "EmailOrg", "owner@email.test", "supersecret123")
 	regSrv.Close()
 
 	opts := api.ServerOptions{TestSender: handlers.TestSender(ts)}

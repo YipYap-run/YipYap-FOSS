@@ -12,8 +12,8 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
 )
 
-// selfServiceRegisterAndGetToken registers a new org+user and returns the bearer token.
-func selfServiceRegisterAndGetToken(t *testing.T, ts *httptest.Server, orgName, email, password string) string {
+// selfServisignupAndGetToken registers a new org+user and returns the bearer token.
+func selfServisignupAndGetToken(t *testing.T, ts *httptest.Server, orgName, email, password string) string {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{
 		"org_name": orgName,
@@ -43,7 +43,7 @@ func selfServiceRegisterAndGetToken(t *testing.T, ts *httptest.Server, orgName, 
 func TestChangePassword(t *testing.T) {
 	ts, _ := setupTestServer(t)
 
-	token := selfServiceRegisterAndGetToken(t, ts, "PwOrg", "pw@test.com", "oldpassword")
+	token := selfServisignupAndGetToken(t, ts, "PwOrg", "pw@test.com", "oldpassword")
 
 	t.Run("success", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]string{
@@ -94,7 +94,7 @@ func TestChangePassword(t *testing.T) {
 
 	t.Run("wrong current password", func(t *testing.T) {
 		// Re-register a fresh user for this sub-test.
-		token2 := selfServiceRegisterAndGetToken(t, ts, "PwOrg2", "pw2@test.com", "correctpass")
+		token2 := selfServisignupAndGetToken(t, ts, "PwOrg2", "pw2@test.com", "correctpass")
 
 		body, _ := json.Marshal(map[string]string{
 			"current_password": "wrongpass",
@@ -115,7 +115,7 @@ func TestChangePassword(t *testing.T) {
 	})
 
 	t.Run("rejects a short or unchanged new password", func(t *testing.T) {
-		token3 := selfServiceRegisterAndGetToken(t, ts, "PwOrg3", "pw3@test.com", "correctpass")
+		token3 := selfServisignupAndGetToken(t, ts, "PwOrg3", "pw3@test.com", "correctpass")
 		for _, newPw := range []string{"short", "correctpass"} {
 			body, _ := json.Marshal(map[string]string{
 				"current_password": "correctpass",
@@ -139,7 +139,7 @@ func TestChangePassword(t *testing.T) {
 func TestChangeEmail(t *testing.T) {
 	ts, _ := setupTestServer(t)
 
-	token := selfServiceRegisterAndGetToken(t, ts, "EmailOrg", "old@test.com", "mypassword")
+	token := selfServisignupAndGetToken(t, ts, "EmailOrg", "old@test.com", "mypassword")
 
 	t.Run("success", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]string{
@@ -189,7 +189,7 @@ func TestChangeEmail(t *testing.T) {
 	})
 
 	t.Run("wrong password", func(t *testing.T) {
-		token2 := selfServiceRegisterAndGetToken(t, ts, "EmailOrg2", "user2@test.com", "correctpass")
+		token2 := selfServisignupAndGetToken(t, ts, "EmailOrg2", "user2@test.com", "correctpass")
 
 		body, _ := json.Marshal(map[string]string{
 			"current_password": "wrongpass",
@@ -211,8 +211,8 @@ func TestChangeEmail(t *testing.T) {
 
 	t.Run("email already taken", func(t *testing.T) {
 		// Register two users; try to change second user's email to first user's email.
-		selfServiceRegisterAndGetToken(t, ts, "EmailOrg3", "taken@test.com", "password1!")
-		token4 := selfServiceRegisterAndGetToken(t, ts, "EmailOrg4", "other@test.com", "password2!")
+		selfServisignupAndGetToken(t, ts, "EmailOrg3", "taken@test.com", "password1!")
+		token4 := selfServisignupAndGetToken(t, ts, "EmailOrg4", "other@test.com", "password2!")
 
 		body, _ := json.Marshal(map[string]string{
 			"current_password": "password2!",
@@ -318,7 +318,7 @@ func TestAdminResetPassword(t *testing.T) {
 	t.Run("owner resets member password", func(t *testing.T) {
 		ts, _ := setupTestServer(t)
 
-		ownerToken := selfServiceRegisterAndGetToken(t, ts, "ResetOrg", "owner@reset.com", "ownerpass")
+		ownerToken := selfServisignupAndGetToken(t, ts, "ResetOrg", "owner@reset.com", "ownerpass")
 		member := createMember(t, ts, ownerToken, "member@reset.com", "memberpass")
 
 		// Reset the member's password.
@@ -365,7 +365,7 @@ func TestAdminResetPassword(t *testing.T) {
 	t.Run("member cannot reset passwords", func(t *testing.T) {
 		ts, _ := setupTestServer(t)
 
-		ownerToken := selfServiceRegisterAndGetToken(t, ts, "ResetOrg2", "owner2@reset.com", "ownerpass")
+		ownerToken := selfServisignupAndGetToken(t, ts, "ResetOrg2", "owner2@reset.com", "ownerpass")
 		_ = createMember(t, ts, ownerToken, "member2@reset.com", "memberpass")
 		member2 := createMember(t, ts, ownerToken, "member3@reset.com", "memberpass2")
 

@@ -34,7 +34,7 @@ import { IncidentDetailPage } from './pages/incidents/detail';
 import { SupportListPage } from './pages/support/list';
 import { SupportFeedbackPage } from './pages/support/feedback';
 import { SupportDetailPage } from './pages/support/detail';
-import { ReplyActivityPage } from './pages/admin/reply-activity';
+import { EVENTING_ROUTES } from './edition/eventing-ui';
 
 function AuthGuard({ children }) {
   if (authLoading.value) {
@@ -110,7 +110,7 @@ export function App() {
       {appMeta.value?.edition !== 'foss' && <SupportFeedbackPage path="/support/:id/feedback" />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/support" component={SupportListPage} />}
       {appMeta.value?.edition !== 'foss' && <AuthRoute path="/support/:id" component={SupportDetailPage} />}
-      {appMeta.value?.edition !== 'foss' && <AuthRoute path="/admin/reply-activity" component={ReplyActivityPage} />}
+      {appMeta.value?.edition !== 'foss' && EVENTING_ROUTES.map(r => <AuthRoute key={r.path} path={r.path} component={r.component} />)}
     </Router>
   );
 }

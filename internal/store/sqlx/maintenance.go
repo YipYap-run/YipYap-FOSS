@@ -193,3 +193,48 @@ func (s *MaintenanceWindowStore) scanMWRows(rows *sql.Rows) ([]*domain.Maintenan
 	}
 	return out, rows.Err()
 }
+
+// ListLifecycleStates implements store.MaintenanceWindowStore.
+func (s *MaintenanceWindowStore) ListLifecycleStates(ctx context.Context) ([]store.MaintenanceLifecycleState, error) {
+	rows, err := s.q.QueryContext(ctx,
+		`SELECT window_id, org_id, monitor_id, active FROM maintenance_lifecycle_state`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []store.MaintenanceLifecycleState
+	for rows.Next() {
+		var st store.MaintenanceLifecycleState
+		if err := rows.Scan(&st.WindowID, &st.OrgID, &st.MonitorID, &st.Active); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// SeedLifecycleState implements store.MaintenanceWindowStore.
+func (s *MaintenanceWindowStore) SeedLifecycleState(ctx context.Context, st store.MaintenanceLifecycleState, at time.Time) (bool, error) {
+	res, err := s.q.ExecContext(ctx,
+		`INSERT INTO maintenance_lifecycle_state (window_id, org_id, monitor_id, active, changed_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (window_id) DO NOTHING`,
+		st.WindowID, st.OrgID, st.MonitorID, s.d.BoolArg(st.Active), s.d.TimeArg(at))
+	return affectedOne(res, err)
+}
+
+// ClaimLifecycleTransition implements store.MaintenanceWindowStore.
+func (s *MaintenanceWindowStore) ClaimLifecycleTransition(ctx context.Context, windowID string, from bool, at time.Time) (bool, error) {
+	res, err := s.q.ExecContext(ctx,
+		`UPDATE maintenance_lifecycle_state SET active = ?, changed_at = ?
+		  WHERE window_id = ? AND active = ?`,
+		s.d.BoolArg(!from), s.d.TimeArg(at), windowID, s.d.BoolArg(from))
+	return affectedOne(res, err)
+}
+
+// ClaimLifecycleDeletion implements store.MaintenanceWindowStore.
+func (s *MaintenanceWindowStore) ClaimLifecycleDeletion(ctx context.Context, windowID string) (bool, error) {
+	res, err := s.q.ExecContext(ctx,
+		`DELETE FROM maintenance_lifecycle_state WHERE window_id = ?`, windowID)
+	return affectedOne(res, err)
+}

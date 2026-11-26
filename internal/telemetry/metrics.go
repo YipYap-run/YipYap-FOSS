@@ -24,24 +24,19 @@ type Metrics struct {
 	HTTPRequestLatencyMS metric.Float64Histogram
 
 	// Business metrics (SaaS only).
-	TotalUsers       metric.Int64Gauge
-	TotalMonitors    metric.Int64Gauge
-	MonitorsByType   metric.Int64Gauge
-	CustomersByPlan  metric.Int64Gauge
+	TotalUsers      metric.Int64Gauge
+	TotalMonitors   metric.Int64Gauge
+	MonitorsByType  metric.Int64Gauge
+	CustomersByPlan metric.Int64Gauge
 
-	// CloudEvents metrics.
-	CloudEventsEmitted          metric.Int64Counter     // yipyap.cloudevents.emitted (type, channel, result)
-	CloudEventsIngested         metric.Int64Counter     // yipyap.cloudevents.ingested (type, result)
-	CloudEventsIngestDuplicates metric.Int64Counter     // yipyap.cloudevents.ingest_duplicates (type)
-	CloudEventsReplyReceived    metric.Int64Counter     // yipyap.cloudevents.reply_received (type, valid, accepted)
-	CloudEventsDeadLetter       metric.Int64Counter     // yipyap.cloudevents.dead_letter (channel_id)
-	CloudEventsEmitLatencyMS    metric.Float64Histogram // yipyap.cloudevents.emit.latency_ms (type)
+	// Edition-specific metrics, declared in build-tagged files.
+	eventingMetrics
 
 	// JWKS metrics (SaaS-only). Safe to read/write with nil checks.
-	JWKSActiveKeys       metric.Int64Gauge       // yipyap.jwks.active_keys (active + retiring)
-	JWKSTokensSigned     metric.Int64Counter     // yipyap.jwks.tokens_signed_total (alg, kid)
-	JWKSRotations        metric.Int64Counter     // yipyap.jwks.rotations_total (result)
-	JWKSActiveKeyAgeSecs metric.Int64Gauge       // yipyap.jwks.active_key_age_seconds
+	JWKSActiveKeys       metric.Int64Gauge   // yipyap.jwks.active_keys (active + retiring)
+	JWKSTokensSigned     metric.Int64Counter // yipyap.jwks.tokens_signed_total (alg, kid)
+	JWKSRotations        metric.Int64Counter // yipyap.jwks.rotations_total (result)
+	JWKSActiveKeyAgeSecs metric.Int64Gauge   // yipyap.jwks.active_key_age_seconds
 }
 
 func NewMetrics(meter metric.Meter) (*Metrics, error) {
@@ -147,40 +142,7 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 		return nil, err
 	}
 
-	m.CloudEventsEmitted, err = meter.Int64Counter("yipyap.cloudevents.emitted",
-		metric.WithDescription("CloudEvents emitted (labels: type, channel, result)"))
-	if err != nil {
-		return nil, err
-	}
-
-	m.CloudEventsIngested, err = meter.Int64Counter("yipyap.cloudevents.ingested",
-		metric.WithDescription("CloudEvents ingested via the /cloudevents/ingest endpoint (labels: type, result)"))
-	if err != nil {
-		return nil, err
-	}
-
-	m.CloudEventsIngestDuplicates, err = meter.Int64Counter("yipyap.cloudevents.ingest_duplicates",
-		metric.WithDescription("CloudEvents ingest duplicates suppressed by the idempotency ring (labels: type)"))
-	if err != nil {
-		return nil, err
-	}
-
-	m.CloudEventsReplyReceived, err = meter.Int64Counter("yipyap.cloudevents.reply_received",
-		metric.WithDescription("Reply CloudEvents received on outbound cloudevent_http sends (labels: type, valid, accepted)"))
-	if err != nil {
-		return nil, err
-	}
-
-	m.CloudEventsDeadLetter, err = meter.Int64Counter("yipyap.cloudevents.dead_letter",
-		metric.WithDescription("CloudEvents dead-lettered after retry exhaustion (labels: channel_id)"))
-	if err != nil {
-		return nil, err
-	}
-
-	m.CloudEventsEmitLatencyMS, err = meter.Float64Histogram("yipyap.cloudevents.emit.latency_ms",
-		metric.WithDescription("CloudEvents publisher emit latency in milliseconds (labels: type)"),
-		metric.WithUnit("ms"))
-	if err != nil {
+	if err := m.initEventingMetrics(meter); err != nil {
 		return nil, err
 	}
 

@@ -7,48 +7,11 @@ package api_test
 //
 // API keys ARE shared across editions (server_saas_extras_foss.go +
 // routes_foss.go retain ListAPIKeys/CreateAPIKey/DeleteAPIKey).
-//
-// Tier gates (RequirePaidPlan) are no-ops in FOSS so cloudevents/poll,
-// cloudevents/stream, knative/source-config and notification-channels
-// cloudevent_http creation MUST succeed regardless of plan.
 
 import (
 	"net/http"
 	"testing"
 )
-
-// fossOnlyAuthedCases, endpoints that only exist on FOSS, OR are wired
-// the same way but where FOSS-specific behaviour matters.
-func fossOnlyAuthedCases() []endpointCase {
-	return []endpointCase{
-		// Cloudevents poll/stream/source-config are reachable on Free in
-		// FOSS (RequirePaidPlan no-op).
-		{name: "cloudevents-poll-foss", method: http.MethodGet, path: "/api/v1/cloudevents/poll", authMode: authSession,
-			wantStatuses: []int{http.StatusOK, http.StatusNoContent, http.StatusBadRequest},
-			notes:        "FOSS: tier-blind, must NOT 403"},
-		{name: "cloudevents-stream-foss", method: http.MethodGet, path: "/api/v1/cloudevents/stream", authMode: authSession,
-			wantStatuses: []int{http.StatusOK, http.StatusNoContent, http.StatusBadRequest},
-			notes:        "FOSS: tier-blind, must NOT 403",
-			streaming:    true},
-		{name: "cloudevents-ack-foss", method: http.MethodPost, path: "/api/v1/cloudevents/ack", authMode: authSession,
-			wantStatuses: []int{http.StatusBadRequest},
-			notes:        "FOSS: tier-blind, must NOT 403"},
-		{name: "knative-source-config-foss", method: http.MethodGet, path: "/api/v1/knative/source-config", authMode: authSession,
-			wantStatuses: []int{http.StatusOK},
-			notes:        "FOSS: tier-blind, must NOT 403"},
-
-		// In FOSS the cloudevent_http channel plan-gate is also a no-op,
-		// so create succeeds even from PlanFree (the default).
-		{name: "notif-channel-cloudevent-http-foss", method: http.MethodPost, path: "/api/v1/notification-channels", authMode: authSession,
-			body: map[string]interface{}{
-				"name": "cloudevent-on-foss", "type": "cloudevent_http",
-				"config":  map[string]interface{}{"sink_url": "https://broker.example.com/", "mode": "binary"},
-				"enabled": true,
-			},
-			wantStatuses: []int{http.StatusCreated, http.StatusBadRequest},
-			notes:        "FOSS: cloudevent_http create allowed on free"},
-	}
-}
 
 // TestSmoke_FOSSBuild_AllEndpoints is the entry point for FOSS smoke.
 func TestSmoke_FOSSBuild_AllEndpoints(t *testing.T) {
@@ -69,12 +32,7 @@ func TestSmoke_FOSSBuild_AllEndpoints(t *testing.T) {
 		runAll(t, f, commonAuthedCases())
 	})
 
-	// 4. FOSS-specific authed routes (tier-blind cloudevents).
-	t.Run("authed-foss", func(t *testing.T) {
-		runAll(t, f, fossOnlyAuthedCases())
-	})
-
-	// 5. JWKS, FOSS variant is a no-op MountJWKS, so we expect 404 (or
+	// 4. JWKS, FOSS variant is a no-op MountJWKS, so we expect 404 (or
 	// SPA fallback OK from the static handler) on /.well-known/jwks.json.
 	t.Run("jwks-foss-noop", func(t *testing.T) {
 		f.runCase(endpointCase{
@@ -84,7 +42,7 @@ func TestSmoke_FOSSBuild_AllEndpoints(t *testing.T) {
 		})
 	})
 
-	// 6. /internal/v1/* must NOT exist on FOSS even with an ops token,
+	// 5. /internal/v1/* must NOT exist on FOSS even with an ops token,
 	// the handler is build-tagged out. Hitting any internal path returns
 	// SPA fallback OR chi 404; never 401 (no ops middleware) and never
 	// 5xx.
@@ -96,7 +54,7 @@ func TestSmoke_FOSSBuild_AllEndpoints(t *testing.T) {
 		})
 	})
 
-	// 7. Twilio voice routes are absent in FOSS (registerTwilioRoutes is
+	// 6. Twilio voice routes are absent in FOSS (registerTwilioRoutes is
 	// a no-op). They should 404 (or be served by the SPA fallback).
 	t.Run("twilio-foss-absent", func(t *testing.T) {
 		f.runCase(endpointCase{
@@ -138,10 +96,10 @@ func TestSmoke_FOSSBuild_SSRFGate(t *testing.T) {
 		url   string
 		notes string
 	}{
-		{field: "sink-link-local", url: "http://169.254.169.254/", notes: "AWS metadata IP"},
-		{field: "sink-private-v4", url: "http://10.0.0.1/", notes: "RFC 1918"},
-		{field: "sink-private-v6", url: "http://[fd00::1]/", notes: "ULA v6"},
-		{field: "sink-ipv4-mapped-v6", url: "http://[::169.254.169.254]/", notes: "R2-H4 regression"},
+		{field: "webhook-link-local", url: "http://169.254.169.254/", notes: "AWS metadata IP"},
+		{field: "webhook-private-v4", url: "http://10.0.0.1/", notes: "RFC 1918"},
+		{field: "webhook-private-v6", url: "http://[fd00::1]/", notes: "ULA v6"},
+		{field: "webhook-ipv4-mapped-v6", url: "http://[::169.254.169.254]/", notes: "R2-H4 regression"},
 	}
 	for _, u := range urls {
 		c := endpointCase{
@@ -149,8 +107,8 @@ func TestSmoke_FOSSBuild_SSRFGate(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/api/v1/notification-channels",
 			body: map[string]interface{}{
-				"name": "ssrf-" + u.field, "type": "cloudevent_http",
-				"config":  map[string]interface{}{"sink_url": u.url, "mode": "binary"},
+				"name": "ssrf-" + u.field, "type": "webhook",
+				"config":  map[string]interface{}{"url": u.url},
 				"enabled": true,
 			},
 			authMode:     authSession,

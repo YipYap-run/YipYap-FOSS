@@ -257,7 +257,7 @@ func TestRecorder_IdempotentPerJob(t *testing.T) {
 	}
 }
 
-// Jobs without an alert (CloudEvent deliveries) still update channel
+// Jobs without an alert (event sink deliveries) still update channel
 // health.
 func TestRecorder_NoAlertStillTracksChannel(t *testing.T) {
 	f := newOutcomeFixture(t)

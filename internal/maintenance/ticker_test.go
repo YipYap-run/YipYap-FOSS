@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store/sqlite"
 )
 
@@ -21,7 +21,7 @@ type capturedEmit struct {
 	Data  interface{}
 }
 
-// fakeEmitter satisfies cloudevents.Emitter but only cares about maintenance
+// fakeEmitter satisfies events.Emitter but only cares about maintenance
 // methods; all other methods are no-ops. It stores each captured call in a
 // mutex-guarded slice for later assertion.
 type fakeEmitter struct {
@@ -29,40 +29,40 @@ type fakeEmitter struct {
 	captured []capturedEmit
 }
 
-func (c *fakeEmitter) EmitAlertFired(_ context.Context, _ string, _ types.AlertFiredV1Data) error {
+func (c *fakeEmitter) EmitAlertFired(_ context.Context, _ string, _ events.AlertFired) error {
 	return nil
 }
-func (c *fakeEmitter) EmitAlertAcknowledged(_ context.Context, _ string, _ types.AlertAcknowledgedV1Data) error {
+func (c *fakeEmitter) EmitAlertAcknowledged(_ context.Context, _ string, _ events.AlertAcknowledged) error {
 	return nil
 }
-func (c *fakeEmitter) EmitAlertResolved(_ context.Context, _ string, _ types.AlertResolvedV1Data) error {
+func (c *fakeEmitter) EmitAlertResolved(_ context.Context, _ string, _ events.AlertResolved) error {
 	return nil
 }
-func (c *fakeEmitter) EmitAlertEscalated(_ context.Context, _ string, _ types.AlertEscalatedV1Data) error {
+func (c *fakeEmitter) EmitAlertEscalated(_ context.Context, _ string, _ events.AlertEscalated) error {
 	return nil
 }
-func (c *fakeEmitter) EmitMonitorUp(_ context.Context, _, _ string, _ types.MonitorUpV1Data) error {
+func (c *fakeEmitter) EmitMonitorUp(_ context.Context, _, _ string, _ events.MonitorUp) error {
 	return nil
 }
-func (c *fakeEmitter) EmitMonitorDown(_ context.Context, _, _ string, _ types.MonitorDownV1Data) error {
+func (c *fakeEmitter) EmitMonitorDown(_ context.Context, _, _ string, _ events.MonitorDown) error {
 	return nil
 }
-func (c *fakeEmitter) EmitMonitorDegraded(_ context.Context, _, _ string, _ types.MonitorDegradedV1Data) error {
+func (c *fakeEmitter) EmitMonitorDegraded(_ context.Context, _, _ string, _ events.MonitorDegraded) error {
 	return nil
 }
-func (c *fakeEmitter) EmitMonitorHeartbeatMissed(_ context.Context, _, _ string, _ types.MonitorHeartbeatMissedV1Data) error {
+func (c *fakeEmitter) EmitMonitorHeartbeatMissed(_ context.Context, _, _ string, _ events.MonitorHeartbeatMissed) error {
 	return nil
 }
-func (c *fakeEmitter) EmitMaintenanceStarted(_ context.Context, orgID string, d types.MaintenanceStartedV1Data) error {
+func (c *fakeEmitter) EmitMaintenanceStarted(_ context.Context, orgID string, d events.MaintenanceStarted) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMaintenanceStartedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "maintenance.started", OrgID: orgID, Data: d})
 	return nil
 }
-func (c *fakeEmitter) EmitMaintenanceEnded(_ context.Context, orgID string, d types.MaintenanceEndedV1Data) error {
+func (c *fakeEmitter) EmitMaintenanceEnded(_ context.Context, orgID string, d events.MaintenanceEnded) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.captured = append(c.captured, capturedEmit{Type: types.TypeMaintenanceEndedV1, OrgID: orgID, Data: d})
+	c.captured = append(c.captured, capturedEmit{Type: "maintenance.ended", OrgID: orgID, Data: d})
 	return nil
 }
 func (c *fakeEmitter) snapshot() []capturedEmit {
@@ -124,7 +124,7 @@ func TestTicker_EmitsStartedOnSchedule(t *testing.T) {
 
 	tk.poll(context.Background(), now.Add(2*time.Minute))
 	got := em.snapshot()
-	if len(got) != 1 || got[0].Type != types.TypeMaintenanceStartedV1 {
+	if len(got) != 1 || got[0].Type != "maintenance.started" {
 		t.Fatalf("expected 1 started on schedule, got %+v", got)
 	}
 
@@ -158,10 +158,10 @@ func TestTicker_EmitsEndedOnSchedule(t *testing.T) {
 	// Advance past EndAt.
 	tk.poll(context.Background(), now.Add(10*time.Minute))
 	got := em.snapshot()
-	if len(got) != 1 || got[0].Type != types.TypeMaintenanceEndedV1 {
+	if len(got) != 1 || got[0].Type != "maintenance.ended" {
 		t.Fatalf("expected 1 ended, got %+v", got)
 	}
-	d := got[0].Data.(types.MaintenanceEndedV1Data)
+	d := got[0].Data.(events.MaintenanceEnded)
 	if d.WindowID != mw.ID {
 		t.Errorf("window_id: %q want %q", d.WindowID, mw.ID)
 	}
@@ -196,10 +196,10 @@ func TestTicker_EmitsEndedEarly_WhenDeleted(t *testing.T) {
 
 	tk.poll(context.Background(), now.Add(1*time.Second))
 	got := em.snapshot()
-	if len(got) != 1 || got[0].Type != types.TypeMaintenanceEndedV1 {
+	if len(got) != 1 || got[0].Type != "maintenance.ended" {
 		t.Fatalf("expected 1 ended, got %+v", got)
 	}
-	d := got[0].Data.(types.MaintenanceEndedV1Data)
+	d := got[0].Data.(events.MaintenanceEnded)
 	if !d.EndedEarly {
 		t.Error("deletion of active window should emit ended_early=true")
 	}
@@ -232,7 +232,7 @@ func TestTicker_Recurring(t *testing.T) {
 	// During today's active hour: started.
 	tk.poll(context.Background(), base.Add(5*time.Minute))
 	got := em.snapshot()
-	if len(got) != 1 || got[0].Type != types.TypeMaintenanceStartedV1 {
+	if len(got) != 1 || got[0].Type != "maintenance.started" {
 		t.Fatalf("expected started on day-1 active, got %+v", got)
 	}
 	em.reset()
@@ -240,7 +240,7 @@ func TestTicker_Recurring(t *testing.T) {
 	// After today's active hour: ended.
 	tk.poll(context.Background(), base.Add(2*time.Hour))
 	got = em.snapshot()
-	if len(got) != 1 || got[0].Type != types.TypeMaintenanceEndedV1 {
+	if len(got) != 1 || got[0].Type != "maintenance.ended" {
 		t.Fatalf("expected ended after day-1 window, got %+v", got)
 	}
 	em.reset()
@@ -249,7 +249,7 @@ func TestTicker_Recurring(t *testing.T) {
 	nextDay := base.Add(24 * time.Hour)
 	tk.poll(context.Background(), nextDay.Add(5*time.Minute))
 	got = em.snapshot()
-	if len(got) != 1 || got[0].Type != types.TypeMaintenanceStartedV1 {
+	if len(got) != 1 || got[0].Type != "maintenance.started" {
 		t.Fatalf("expected started on day-2 active, got %+v", got)
 	}
 }
@@ -277,7 +277,7 @@ func TestTicker_StartedPayloadShape(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 emit, got %+v", got)
 	}
-	d := got[0].Data.(types.MaintenanceStartedV1Data)
+	d := got[0].Data.(events.MaintenanceStarted)
 	if len(d.Monitors) != 1 || d.Monitors[0] != monID {
 		t.Errorf("monitors: got %v want [%s]", d.Monitors, monID)
 	}
@@ -323,7 +323,73 @@ func TestTicker_RestartDoesNotDuplicateStarted(t *testing.T) {
 
 	restarted.poll(context.Background(), now.Add(2*time.Hour))
 	got := second.snapshot()
-	if len(got) != 1 || got[0].Type != types.TypeMaintenanceEndedV1 {
+	if len(got) != 1 || got[0].Type != "maintenance.ended" {
 		t.Fatalf("expected 1 ended after restart, got %+v", got)
+	}
+}
+
+// Two web replicas share one store: each transition is emitted once in total.
+func TestTicker_ReplicasEmitOnce(t *testing.T) {
+	s, org := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	mw := &domain.MaintenanceWindow{
+		ID: uuid.New().String(), OrgID: org.ID, Name: "shared",
+		StartAt: now.Add(time.Minute), EndAt: now.Add(time.Hour),
+		RecurrenceType: "none", DaysOfWeek: "[]", CreatedAt: now,
+	}
+	if err := s.MaintenanceWindows().Create(ctx, mw); err != nil {
+		t.Fatal(err)
+	}
+	a, b := &fakeEmitter{}, &fakeEmitter{}
+	ta, tb := NewTicker(s, a, time.Second), NewTicker(s, b, time.Second)
+	ta.prime(ctx, now)
+	tb.prime(ctx, now)
+
+	count := func(typ string) int {
+		n := 0
+		for _, e := range append(a.snapshot(), b.snapshot()...) {
+			if e.Type == typ {
+				n++
+			}
+		}
+		return n
+	}
+
+	ta.poll(ctx, now.Add(2*time.Minute))
+	tb.poll(ctx, now.Add(2*time.Minute+3*time.Second))
+	if n := count("maintenance.started"); n != 1 {
+		t.Fatalf("started emitted %d times across replicas, want 1", n)
+	}
+
+	tb.poll(ctx, now.Add(2*time.Hour))
+	ta.poll(ctx, now.Add(2*time.Hour+time.Second))
+	if n := count("maintenance.ended"); n != 1 {
+		t.Fatalf("ended emitted %d times across replicas, want 1", n)
+	}
+
+	// A brand new active window seen by both replicas, then deleted.
+	live := &domain.MaintenanceWindow{
+		ID: uuid.New().String(), OrgID: org.ID, Name: "live",
+		StartAt: now.Add(-time.Minute), EndAt: now.Add(3 * time.Hour),
+		RecurrenceType: "none", DaysOfWeek: "[]", CreatedAt: now,
+	}
+	if err := s.MaintenanceWindows().Create(ctx, live); err != nil {
+		t.Fatal(err)
+	}
+	a.reset()
+	b.reset()
+	ta.poll(ctx, now.Add(2*time.Hour+time.Minute))
+	tb.poll(ctx, now.Add(2*time.Hour+time.Minute))
+	if n := count("maintenance.started"); n != 1 {
+		t.Fatalf("new window started emitted %d times, want 1", n)
+	}
+	if err := s.MaintenanceWindows().Delete(ctx, live.ID); err != nil {
+		t.Fatal(err)
+	}
+	tb.poll(ctx, now.Add(2*time.Hour+2*time.Minute))
+	ta.poll(ctx, now.Add(2*time.Hour+2*time.Minute))
+	if n := count("maintenance.ended"); n != 1 {
+		t.Fatalf("deleted window ended emitted %d times, want 1", n)
 	}
 }

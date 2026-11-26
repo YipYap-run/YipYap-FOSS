@@ -1,6 +1,6 @@
 // Package maintenance contains runtime machinery for maintenance-window
 // lifecycle events. The Ticker polls the store at a fixed cadence and emits
-// CloudEvents when windows transition between active and inactive, including
+// domain events when windows transition between active and inactive, including
 // scheduled starts, scheduled ends, recurring-window edges, and deletions
 // that happened out-of-band (for example, via tooling or an API path that
 // wasn't wired with its own emitter).
@@ -13,12 +13,10 @@ package maintenance
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store"
 )
 
@@ -28,30 +26,23 @@ import (
 const DefaultInterval = 30 * time.Second
 
 // Ticker polls maintenance windows, computes active-set diffs, and emits
-// CloudEvents on transitions. It handles scheduled starts, scheduled ends,
+// events on transitions. It handles scheduled starts, scheduled ends,
 // and recurring-window edges (daily/weekly/monthly) without requiring a
 // human API action.
+//
+// Every web replica runs a Ticker. The last emitted state of each window
+// lives in the store (maintenance_lifecycle_state), and a replica emits only
+// after it wins a conditional write for that transition, so each event fires
+// once across replicas.
 type Ticker struct {
 	store    store.Store
-	emitter  cloudevents.Emitter
+	emitter  events.Emitter
 	interval time.Duration
-
-	mu     sync.Mutex
-	active map[string]windowState // window_id → last observed state
-}
-
-// windowState caches the fields we need when a window later vanishes (for
-// example, because it was deleted out-of-band). We keep org_id and monitor
-// info so we can emit a proper ended-early event even after the row is gone.
-type windowState struct {
-	active    bool
-	orgID     string
-	monitorID string
 }
 
 // NewTicker returns a Ticker wired to s and e. Pass interval <= 0 to use
 // DefaultInterval.
-func NewTicker(s store.Store, e cloudevents.Emitter, interval time.Duration) *Ticker {
+func NewTicker(s store.Store, e events.Emitter, interval time.Duration) *Ticker {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
@@ -59,7 +50,6 @@ func NewTicker(s store.Store, e cloudevents.Emitter, interval time.Duration) *Ti
 		store:    s,
 		emitter:  e,
 		interval: interval,
-		active:   make(map[string]windowState),
 	}
 }
 
@@ -72,7 +62,8 @@ func (t *Ticker) Run(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Prime the state on startup so we don't emit an avalanche of "started"
-	// events for every currently-active window the moment we boot.
+	// events for every currently-active window the first time the shared
+	// state is populated.
 	t.prime(ctx, time.Now().UTC())
 
 	for {
@@ -85,78 +76,109 @@ func (t *Ticker) Run(ctx context.Context) {
 	}
 }
 
+// prime starts tracking every untracked window at its current state without
+// emitting. Windows another replica already tracks are left alone, so a
+// transition that happened while this replica was down is still emitted by
+// the next poll.
 func (t *Ticker) prime(ctx context.Context, now time.Time) {
-	windows, err := t.store.MaintenanceWindows().ListAll(ctx)
+	mws := t.store.MaintenanceWindows()
+	windows, err := mws.ListAll(ctx)
 	if err != nil {
 		slog.Error("maintenance ticker: list all failed", "error", err)
 		return
 	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	for _, mw := range windows {
-		t.active[mw.ID] = windowState{
-			active:    mw.IsActiveAt(now),
-			orgID:     mw.OrgID,
-			monitorID: mw.MonitorID,
+		if _, err := mws.SeedLifecycleState(ctx, stateOf(mw, now), now); err != nil {
+			slog.Error("maintenance ticker: seed state failed", "window_id", mw.ID, "error", err)
 		}
 	}
 }
 
+func stateOf(mw *domain.MaintenanceWindow, now time.Time) store.MaintenanceLifecycleState {
+	return store.MaintenanceLifecycleState{
+		WindowID: mw.ID, OrgID: mw.OrgID, MonitorID: mw.MonitorID, Active: mw.IsActiveAt(now),
+	}
+}
+
 // poll performs one pass: list every window, compute IsActiveAt(now), diff
-// against the remembered state, and emit CloudEvents for transitions.
+// against the shared state, and emit events for transitions this
+// replica claims.
 func (t *Ticker) poll(ctx context.Context, now time.Time) {
-	windows, err := t.store.MaintenanceWindows().ListAll(ctx)
+	mws := t.store.MaintenanceWindows()
+	// Read the tracked states before the windows: a window created between
+	// the two reads then shows up as new, never as deleted.
+	states, err := mws.ListLifecycleStates(ctx)
+	if err != nil {
+		slog.Error("maintenance ticker: list states failed", "error", err)
+		return
+	}
+	windows, err := mws.ListAll(ctx)
 	if err != nil {
 		slog.Error("maintenance ticker: list all failed", "error", err)
 		return
 	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	known := make(map[string]store.MaintenanceLifecycleState, len(states))
+	for _, st := range states {
+		known[st.WindowID] = st
+	}
 
 	seen := make(map[string]struct{}, len(windows))
 	for _, mw := range windows {
 		seen[mw.ID] = struct{}{}
 		isActive := mw.IsActiveAt(now)
-		prev, known := t.active[mw.ID]
+		prev, ok := known[mw.ID]
 
-		if !known {
-			// First time we're observing this window. Record state but only
-			// emit if it's becoming active right now (i.e. we just noticed
-			// a transition from "did not exist" to "exists and is active").
-			// Future-dated windows stay silent until StartAt is crossed.
-			if isActive {
+		if !ok {
+			// First time any replica observes this window. Emit only if it
+			// is active right now; future-dated windows stay silent until
+			// StartAt is crossed.
+			won, err := mws.SeedLifecycleState(ctx, stateOf(mw, now), now)
+			if err != nil {
+				slog.Error("maintenance ticker: seed state failed", "window_id", mw.ID, "error", err)
+				continue
+			}
+			if won && isActive {
 				t.emitStarted(ctx, mw, now)
 			}
-			t.active[mw.ID] = windowState{active: isActive, orgID: mw.OrgID, monitorID: mw.MonitorID}
 			continue
 		}
-
-		switch {
-		case !prev.active && isActive:
+		if prev.Active == isActive {
+			continue
+		}
+		won, err := mws.ClaimLifecycleTransition(ctx, mw.ID, prev.Active, now)
+		if err != nil {
+			slog.Error("maintenance ticker: claim transition failed", "window_id", mw.ID, "error", err)
+			continue
+		}
+		if !won {
+			continue // another replica emitted this transition
+		}
+		if isActive {
 			t.emitStarted(ctx, mw, now)
-		case prev.active && !isActive:
+		} else {
 			t.emitEnded(ctx, mw.OrgID, mw.ID, now, false)
 		}
-		t.active[mw.ID] = windowState{active: isActive, orgID: mw.OrgID, monitorID: mw.MonitorID}
 	}
 
-	// Anything we remembered that no longer exists in the store was deleted
+	// Anything tracked that no longer exists in the store was deleted
 	// out-of-band. If it was active, emit an ended-early event so downstream
 	// subscribers aren't left thinking it's still ongoing.
-	for id, prev := range t.active {
+	for id, prev := range known {
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		if prev.active {
-			t.emitEnded(ctx, prev.orgID, id, now, true)
+		won, err := mws.ClaimLifecycleDeletion(ctx, id)
+		if err != nil {
+			slog.Error("maintenance ticker: claim deletion failed", "window_id", id, "error", err)
+			continue
 		}
-		delete(t.active, id)
+		if won && prev.Active {
+			t.emitEnded(ctx, prev.OrgID, id, now, true)
+		}
 	}
 }
 
-// emitStarted publishes a maintenance.started.v1 CloudEvent for the given
+// emitStarted publishes a maintenance.started.v1 event for the given
 // window using the Started-payload convention (empty Monitors means org-wide).
 func (t *Ticker) emitStarted(ctx context.Context, mw *domain.MaintenanceWindow, now time.Time) {
 	monitors := []string{}
@@ -167,7 +189,7 @@ func (t *Ticker) emitStarted(ctx context.Context, mw *domain.MaintenanceWindow, 
 	if mw.RecurrenceType == "" || mw.RecurrenceType == "none" {
 		scheduledEnd = mw.EndAt
 	}
-	if err := cloudevents.EmitMaintenanceStarted(ctx, t.emitter, mw.OrgID, types.MaintenanceStartedV1Data{
+	if err := events.EmitMaintenanceStarted(ctx, t.emitter, mw.OrgID, events.MaintenanceStarted{
 		WindowID:     mw.ID,
 		Monitors:     monitors,
 		StartedAt:    now,
@@ -177,11 +199,11 @@ func (t *Ticker) emitStarted(ctx context.Context, mw *domain.MaintenanceWindow, 
 	}
 }
 
-// emitEnded publishes a maintenance.ended.v1 CloudEvent. endedEarly is true
+// emitEnded publishes a maintenance.ended.v1 event. endedEarly is true
 // when the window was cut short (deleted while active); false when it hit
 // its scheduled EndAt naturally.
 func (t *Ticker) emitEnded(ctx context.Context, orgID, windowID string, now time.Time, endedEarly bool) {
-	if err := cloudevents.EmitMaintenanceEnded(ctx, t.emitter, orgID, types.MaintenanceEndedV1Data{
+	if err := events.EmitMaintenanceEnded(ctx, t.emitter, orgID, events.MaintenanceEnded{
 		WindowID:   windowID,
 		EndedAt:    now,
 		EndedEarly: endedEarly,

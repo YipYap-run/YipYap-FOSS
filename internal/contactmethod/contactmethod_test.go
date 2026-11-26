@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/notify/providers"
 )
 
 func TestNormalizeEmail(t *testing.T) {
@@ -242,5 +243,29 @@ func TestSealConfigLeavesPlaintextAlone(t *testing.T) {
 	got, err = OpenConfig(domain.ContactPushover, `{"user_key":"u","api_token":"plain"}`, nil)
 	if err != nil || got != `{"user_key":"u","api_token":"plain"}` {
 		t.Fatalf("plaintext config = %s, %v", got, err)
+	}
+}
+
+// TestWebhookTargetIsSigned decodes the target config the way the webhook
+// provider does and checks the owner's secret becomes the signing secret.
+func TestWebhookTargetIsSigned(t *testing.T) {
+	m := domain.ContactMethod{
+		ID: "cm", UserID: "u1", OrgID: "o1", Type: domain.ContactWebhook,
+		Config: `{"url":"https://example.com/h","secret":"0123456789abcdef"}`,
+	}
+	job := domain.NotificationJob{AlertID: "a1"}
+	if err := FillJob(context.Background(), nil, &m, &job, Cipher{}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(job.TargetConfig)
+	var cfg providers.WebhookConfig
+	if err := json.Unmarshal(raw[1:], &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SigningSecret != "0123456789abcdef" {
+		t.Fatalf("signing secret = %q, want the contact method secret (target %s)", cfg.SigningSecret, raw[1:])
+	}
+	if providers.SignWebhook(cfg.SigningSecret, 1, []byte("{}")) == "" {
+		t.Fatal("empty signature")
 	}
 }

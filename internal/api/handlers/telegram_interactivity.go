@@ -292,7 +292,7 @@ func (h *TelegramInteractivityHandler) handleCallback(ctx context.Context, cbq *
 			return
 		}
 		data, _ := json.Marshal(domain.AckEvent{AlertID: alert.ID, UserID: actor, Channel: "telegram"})
-		// CloudEvent emission for acknowledged.v1 happens in escalation.Engine.handleAck
+		// event emission for acknowledged.v1 happens in escalation.Engine.handleAck
 		// when it consumes this alert.ack message.
 		if err := h.bus.PublishAlert(context.WithoutCancel(ctx), "alert.ack", data, ""); err != nil {
 			slog.Error("telegram interactivity: publish ack", "error", err)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/handlers"
@@ -13,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func registerProRoutes(r chi.Router, s store.Store, _ *auth.JWTIssuer, authMW func(http.Handler) http.Handler, _ bus.Bus, _ interface{}, _ string, _ string, _ interface{}, _ *crypto.Envelope, _ string, _ chi.Router, hasher *auth.APIKeyHasher, _ *mailer.Mailer, _ handlers.TestSender) {
+func registerProRoutes(r chi.Router, s store.Store, _ *auth.JWTIssuer, authMW func(http.Handler) http.Handler, _ bus.Bus, _ interface{}, _ string, _ string, _ interface{}, _ *crypto.Envelope, _ opsAuth, _ chi.Router, hasher *auth.APIKeyHasher, _ *mailer.Mailer, _ handlers.TestSender, _ func(context.Context, string) error) {
 	// FOSS: teams, schedules, OIDC, and billing are not available.
 	// API keys are shared across all editions.
 	orgH := handlers.NewOrgHandlerWithHasher(s, hasher)

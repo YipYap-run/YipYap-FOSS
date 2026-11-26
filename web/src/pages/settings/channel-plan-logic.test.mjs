@@ -34,7 +34,6 @@ test('downgraded org inside the grace keeps delivering and says until when', () 
 test('after the grace, or with none on record, the channel is paused', () => {
   const past = { plan: 'free', paid_grace_until: new Date(NOW - DAY).toISOString() };
   assert.equal(paidChannelStatus('telegram', past, opts).status, 'paused');
-  assert.equal(paidChannelStatus('cloudevent_http', { plan: 'free' }, opts).status, 'paused');
   assert.equal(paidChannelStatus('telegram', past, opts).badge, 'Requires Pro');
 });
 
@@ -135,7 +134,6 @@ test('server plan_status wins over the local rules', () => {
 test('paidKinds matches the owner email wording', () => {
   assert.equal(paidKinds([{ type: 'twilio_voice' }, { type: 'telnyx_sms' }]), 'SMS and voice');
   assert.equal(paidKinds([{ type: 'telegram' }, { type: 'twilio_sms' }, { type: 'telnyx_voice' }]), 'SMS, voice and Telegram');
-  assert.equal(paidKinds([{ type: 'cloudevent_http' }]), 'CloudEvents');
   assert.equal(paidKinds([{ type: 'webhook' }]), 'Paid');
 });
 

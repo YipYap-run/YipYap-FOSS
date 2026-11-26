@@ -23,8 +23,8 @@ func strictPrivateTargets(t *testing.T) {
 
 func TestChannelURLs_RejectPrivateTargets(t *testing.T) {
 	strictPrivateTargets(t)
-	srv, _, _ := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, srv, "SSRFOrg", "ssrf@test.com", "supersecret123")
+	srv, _, _ := setupChannelTestServer(t)
+	token := signupAndGetToken(t, srv, "SSRFOrg", "ssrf@test.com", "supersecret123")
 
 	create := func(typ string, cfg map[string]interface{}) (int, string) {
 		resp := doJSONReq(t, http.MethodPost, srv.URL+"/api/v1/notification-channels", token, map[string]interface{}{
@@ -81,8 +81,8 @@ func TestChannelURLs_RejectPrivateTargets(t *testing.T) {
 }
 
 func TestChannelTest_ReturnsGenericError(t *testing.T) {
-	srv, _, sender := setupCloudEventTestServer(t)
-	token := ceRegisterAndGetToken(t, srv, "TestErrOrg", "testerr@test.com", "supersecret123")
+	srv, _, sender := setupChannelTestServer(t)
+	token := signupAndGetToken(t, srv, "TestErrOrg", "testerr@test.com", "supersecret123")
 
 	resp := doJSONReq(t, http.MethodPost, srv.URL+"/api/v1/notification-channels", token, map[string]interface{}{
 		"name": "hook", "type": "webhook", "enabled": true, "config": map[string]interface{}{"url": "https://example.com/x"},

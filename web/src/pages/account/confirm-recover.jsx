@@ -49,7 +49,7 @@ export function ConfirmRecoverPage() {
         )}
         {status === 'loading' && <div class="spinner" role="status" aria-label="Restoring" />}
         {status === 'success' && (
-          <p role="status" style="color: var(--color-up); font-size: 0.875rem">{message}</p>
+          <p role="status" style="color: var(--color-up-text); font-size: 0.875rem">{message}</p>
         )}
         {status === 'error' && (
           <div class="form-error" role="alert">{message}</div>

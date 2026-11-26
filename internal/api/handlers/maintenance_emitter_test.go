@@ -14,8 +14,8 @@ import (
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/handlers"
 	"github.com/YipYap-run/YipYap-FOSS/internal/api/middleware"
 	"github.com/YipYap-run/YipYap-FOSS/internal/auth"
-	"github.com/YipYap-run/YipYap-FOSS/internal/cloudevents/types"
 	"github.com/YipYap-run/YipYap-FOSS/internal/domain"
+	"github.com/YipYap-run/YipYap-FOSS/internal/events"
 	"github.com/YipYap-run/YipYap-FOSS/internal/store/sqlite"
 )
 
@@ -100,10 +100,10 @@ func TestMaintenanceHandler_Create_EmitsStartedIfActiveNow(t *testing.T) {
 	if len(captured) != 1 {
 		t.Fatalf("expected 1 emit, got %d: %+v", len(captured), captured)
 	}
-	if captured[0].Type != types.TypeMaintenanceStartedV1 {
+	if captured[0].Type != "maintenance.started" {
 		t.Errorf("type: %q", captured[0].Type)
 	}
-	d, ok := captured[0].Data.(types.MaintenanceStartedV1Data)
+	d, ok := captured[0].Data.(events.MaintenanceStarted)
 	if !ok {
 		t.Fatalf("bad data type %T", captured[0].Data)
 	}
@@ -186,7 +186,7 @@ func TestMaintenanceHandler_Create_SingleMonitorIncludesMonitorID(t *testing.T) 
 	if len(captured) != 1 {
 		t.Fatalf("expected 1 emit, got %d", len(captured))
 	}
-	d := captured[0].Data.(types.MaintenanceStartedV1Data)
+	d := captured[0].Data.(events.MaintenanceStarted)
 	if len(d.Monitors) != 1 || d.Monitors[0] != mon.ID {
 		t.Errorf("expected monitors=[%s], got %v", mon.ID, d.Monitors)
 	}
@@ -242,7 +242,7 @@ func TestMaintenanceHandler_Update_EmitsOnTransition(t *testing.T) {
 	if len(captured) != 1 {
 		t.Fatalf("expected 1 emit, got %d: %+v", len(captured), captured)
 	}
-	if captured[0].Type != types.TypeMaintenanceStartedV1 {
+	if captured[0].Type != "maintenance.started" {
 		t.Errorf("type: %q", captured[0].Type)
 	}
 }
@@ -330,10 +330,10 @@ func TestMaintenanceHandler_Delete_EmitsEndedIfActive(t *testing.T) {
 	if len(captured) != 1 {
 		t.Fatalf("expected 1 emit, got %d", len(captured))
 	}
-	if captured[0].Type != types.TypeMaintenanceEndedV1 {
+	if captured[0].Type != "maintenance.ended" {
 		t.Errorf("type: %q", captured[0].Type)
 	}
-	d := captured[0].Data.(types.MaintenanceEndedV1Data)
+	d := captured[0].Data.(events.MaintenanceEnded)
 	if d.WindowID != mw.ID {
 		t.Errorf("window_id: %q want %q", d.WindowID, mw.ID)
 	}
